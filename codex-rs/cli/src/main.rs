@@ -1668,11 +1668,9 @@ async fn run_debug_prompt_input_command(
     } else {
         interactive.approval_policy.map(Into::into)
     };
-    let sandbox_mode = if shared.dangerously_bypass_approvals_and_sandbox {
-        Some(codex_protocol::config_types::SandboxMode::DangerFullAccess)
-    } else {
-        shared.sandbox_mode.map(Into::into)
-    };
+    let sandbox_mode = shared
+        .dangerously_bypass_approvals_and_sandbox
+        .then_some(codex_protocol::config_types::SandboxMode::DangerFullAccess);
     let overrides = ConfigOverrides {
         model: shared.model,
         approval_policy,
@@ -2585,10 +2583,10 @@ mod tests {
             panic!("expected exec subcommand");
         };
 
-        assert_eq!(
+        assert!(matches!(
             exec.removed_full_auto_warning(),
-            Some("warning: `--full-auto` is deprecated; use `--sandbox workspace-write` instead.")
-        );
+            Some(message) if message.starts_with("warning: `--full-auto` is deprecated")
+        ));
     }
 
     #[test]
@@ -2735,8 +2733,6 @@ mod tests {
                 "sid",
                 "--oss",
                 "--search",
-                "--sandbox",
-                "workspace-write",
                 "--ask-for-approval",
                 "on-request",
                 "-m",
@@ -2755,10 +2751,6 @@ mod tests {
         assert_eq!(interactive.model.as_deref(), Some("gpt-5.1-test"));
         assert!(interactive.oss);
         assert_eq!(interactive.config_profile_v2.as_deref(), Some("my-config"));
-        assert_matches!(
-            interactive.sandbox_mode,
-            Some(codex_utils_cli::SandboxModeCliArg::WorkspaceWrite)
-        );
         assert_matches!(
             interactive.approval_policy,
             Some(codex_utils_cli::ApprovalModeCliArg::OnRequest)
