@@ -538,6 +538,13 @@ explicitly non-overlapping:
   failures are largely stale producer/mapper references for permissions,
   sandbox, MCP, plan/file-change, guardian, and schema/codegen leftovers. Do
   not patch those by reintroducing protocol types.
+- A first `execpolicy-approval-runtime` Wave B worker was launched after Wave A
+  but stalled waiting for provider stdin before making edits. Its useful
+  discovery: current main already lacks `codex-rs/core/src/exec_policy.rs`, so
+  remaining work is in config requirements/state, core session/tool runtime,
+  app-server routing/mapping, CLI commands/tests, and stale
+  app-server-protocol references. Restart this slice from current main; do not
+  merge `.worktrees/execpolicy-approval-runtime-wave-b` as worker output.
 
 ### Daemex sandbox CLI copy follow-up
 
