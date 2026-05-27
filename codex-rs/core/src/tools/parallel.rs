@@ -204,7 +204,6 @@ impl ToolCallRuntime {
             result: Box::new(AbortedToolOutput {
                 message: Self::abort_message(call, secs),
             }),
-            post_tool_use_payload: None,
         }
     }
 

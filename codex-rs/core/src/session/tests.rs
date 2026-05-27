@@ -19,7 +19,6 @@ use codex_config::NetworkDomainPermissionToml;
 use codex_config::NetworkDomainPermissionsToml;
 use codex_config::RequirementSource;
 use codex_config::Sourced;
-use codex_config::loader::project_trust_key;
 use codex_config::types::ToolSuggestDisabledTool;
 
 use codex_features::Feature;
@@ -489,77 +488,6 @@ fn user_input_texts(items: &[ResponseItem]) -> Vec<&str> {
             _ => None,
         })
         .collect()
-}
-
-fn write_project_hooks(dot_codex: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dot_codex)?;
-    std::fs::write(
-        dot_codex.join("hooks.json"),
-        r#"{
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo hello from hook"
-          }
-        ]
-      }
-    ]
-  }
-}"#,
-    )
-}
-
-async fn write_project_trust_config(
-    codex_home: &Path,
-    trusted_projects: &[(&Path, TrustLevel)],
-) -> std::io::Result<()> {
-    tokio::fs::write(
-        codex_home.join(codex_config::CONFIG_TOML_FILE),
-        toml::to_string(&ConfigToml {
-            projects: Some(
-                trusted_projects
-                    .iter()
-                    .map(|(project, trust_level)| {
-                        (
-                            project_trust_key(project),
-                            ProjectConfig {
-                                trust_level: Some(*trust_level),
-                            },
-                        )
-                    })
-                    .collect::<std::collections::HashMap<_, _>>(),
-            ),
-            ..Default::default()
-        })
-        .expect("serialize config"),
-    )
-    .await
-}
-
-async fn preview_session_start_hooks(
-    config: &crate::config::Config,
-) -> std::io::Result<Vec<codex_protocol::protocol::HookRunSummary>> {
-    let hooks = Hooks::new(HooksConfig {
-        feature_enabled: true,
-        config_layer_stack: Some(config.config_layer_stack.clone()),
-        ..HooksConfig::default()
-    });
-
-    Ok(
-        hooks.preview_session_start(&codex_hooks::SessionStartRequest {
-            session_id: ThreadId::new(),
-            cwd: config.cwd.clone(),
-            transcript_path: None,
-            model: "gpt-5.2".to_string(),
-            permission_mode: "default".to_string(),
-            target: codex_hooks::StartHookTarget::SessionStart {
-                source: codex_hooks::SessionStartSource::Startup,
-            },
-        }),
-    )
 }
 
 fn test_tool_runtime(session: Arc<Session>, turn_context: Arc<TurnContext>) -> ToolCallRuntime {
@@ -1295,155 +1223,6 @@ async fn reload_user_config_layer_updates_base_and_selected_profile_layers() {
             .and_then(toml::Value::as_str),
         Some("never")
     );
-}
-
-#[tokio::test]
-async fn reload_user_config_layer_refreshes_hooks() -> anyhow::Result<()> {
-    let session = make_session_with_config(|config| {
-        config
-            .features
-            .enable(Feature::CodexHooks)
-            .expect("enable Codex hooks");
-    })
-    .await?;
-    let codex_home = session.codex_home().await;
-    std::fs::create_dir_all(&codex_home)?;
-    let config_toml_path = codex_home.join(CONFIG_TOML_FILE);
-    let user_config: codex_config::TomlValue = serde_json::from_value(serde_json::json!({
-        "hooks": {
-            "SessionStart": [{
-                "hooks": [{
-                    "type": "command",
-                    "command": "python3 /tmp/user.py",
-                }],
-            }],
-        },
-    }))?;
-
-    let request = codex_hooks::SessionStartRequest {
-        session_id: session.conversation_id,
-        cwd: session.get_config().await.cwd.clone(),
-        transcript_path: None,
-        model: "gpt-5.2".to_string(),
-        permission_mode: "default".to_string(),
-        target: codex_hooks::StartHookTarget::SessionStart {
-            source: codex_hooks::SessionStartSource::Startup,
-        },
-    };
-    assert!(session.hooks().preview_session_start(&request).is_empty());
-
-    let config = session.get_config().await;
-    let hook_list = codex_hooks::list_hooks(codex_hooks::HooksConfig {
-        feature_enabled: true,
-        config_layer_stack: Some(
-            config
-                .config_layer_stack
-                .with_user_config(&config_toml_path, user_config.clone()),
-        ),
-        ..codex_hooks::HooksConfig::default()
-    });
-    assert_eq!(hook_list.hooks.len(), 1);
-    assert_eq!(
-        hook_list.hooks[0].trust_status,
-        codex_protocol::protocol::HookTrustStatus::Untrusted
-    );
-
-    let trusted_user_config: codex_config::TomlValue = serde_json::from_value(serde_json::json!({
-        "hooks": {
-            "SessionStart": [{
-                "hooks": [{
-                    "type": "command",
-                    "command": "python3 /tmp/user.py",
-                }],
-            }],
-            "state": {
-                hook_list.hooks[0].key.clone(): {
-                    "trusted_hash": hook_list.hooks[0].current_hash.clone(),
-                },
-            },
-        },
-    }))?;
-    std::fs::write(&config_toml_path, toml::to_string(&trusted_user_config)?)?;
-
-    session.reload_user_config_layer().await;
-
-    assert_eq!(session.hooks().preview_session_start(&request).len(), 1);
-    Ok(())
-}
-
-#[tokio::test]
-async fn refresh_runtime_config_refreshes_hooks() -> anyhow::Result<()> {
-    let (session, _turn_context) = make_session_and_context().await;
-    {
-        let mut state = session.state.lock().await;
-        let mut config = (*state.session_configuration.original_config_do_not_use).clone();
-        config
-            .features
-            .enable(Feature::CodexHooks)
-            .expect("enable Codex hooks");
-        state.session_configuration.original_config_do_not_use = Arc::new(config);
-    }
-    let codex_home = session.codex_home().await;
-    std::fs::create_dir_all(&codex_home)?;
-    let config_toml_path = codex_home.join(CONFIG_TOML_FILE);
-    #[derive(serde::Serialize)]
-    struct NormalizedHookIdentity {
-        event_name: &'static str,
-        #[serde(flatten)]
-        group: codex_config::MatcherGroup,
-    }
-    let trusted_hash = {
-        let identity = NormalizedHookIdentity {
-            event_name: "session_start",
-            group: codex_config::MatcherGroup {
-                matcher: None,
-                hooks: vec![codex_config::HookHandlerConfig::Command {
-                    command: "python3 /tmp/user.py".to_string(),
-                    command_windows: None,
-                    timeout_sec: Some(600),
-                    r#async: false,
-                    status_message: None,
-                }],
-            },
-        };
-        let identity = codex_config::TomlValue::try_from(identity)?;
-        codex_config::version_for_toml(&identity)
-    };
-    let hook_key = format!("{}:session_start:0:0", config_toml_path.display());
-    let trusted_user_config: codex_config::TomlValue = serde_json::from_value(serde_json::json!({
-        "hooks": {
-            "SessionStart": [{
-                "hooks": [{
-                    "type": "command",
-                    "command": "python3 /tmp/user.py",
-                }],
-            }],
-            "state": {
-                hook_key: {
-                    "trusted_hash": trusted_hash,
-                },
-            },
-        },
-    }))?;
-    std::fs::write(&config_toml_path, toml::to_string(&trusted_user_config)?)?;
-
-    let request = codex_hooks::SessionStartRequest {
-        session_id: session.conversation_id,
-        cwd: session.get_config().await.cwd.clone(),
-        transcript_path: None,
-        model: "gpt-5.2".to_string(),
-        permission_mode: "default".to_string(),
-        target: codex_hooks::StartHookTarget::SessionStart {
-            source: codex_hooks::SessionStartSource::Startup,
-        },
-    };
-    assert!(session.hooks().preview_session_start(&request).is_empty());
-
-    let next_config = load_latest_config_for_session(&session).await;
-    session.refresh_runtime_config(next_config).await;
-
-    assert_eq!(session.hooks().preview_session_start(&request).len(), 1);
-    Ok(())
 }
 
 #[tokio::test]
@@ -4526,10 +4305,6 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         ),
         shell_zsh_path: None,
         main_execve_wrapper_exe: config.main_execve_wrapper_exe.clone(),
-        hooks: arc_swap::ArcSwap::from_pointee(Hooks::new(HooksConfig {
-            legacy_notify_argv: config.notify.clone(),
-            ..HooksConfig::default()
-        })),
         rollout_thread_trace: codex_rollout_trace::ThreadTraceContext::disabled(),
         user_shell: Arc::new(default_user_shell()),
         shell_snapshot_tx: watch::channel(None).0,
@@ -6348,10 +6123,6 @@ where
         ),
         shell_zsh_path: None,
         main_execve_wrapper_exe: config.main_execve_wrapper_exe.clone(),
-        hooks: arc_swap::ArcSwap::from_pointee(Hooks::new(HooksConfig {
-            legacy_notify_argv: config.notify.clone(),
-            ..HooksConfig::default()
-        })),
         rollout_thread_trace: codex_rollout_trace::ThreadTraceContext::disabled(),
         user_shell: Arc::new(default_user_shell()),
         shell_snapshot_tx: watch::channel(None).0,
@@ -10138,108 +9909,4 @@ async fn unified_exec_rejects_escalated_permissions_when_policy_not_on_request()
     );
 
     pretty_assertions::assert_eq!(output, expected);
-}
-
-#[tokio::test]
-async fn session_start_hooks_only_load_from_trusted_project_layers() -> std::io::Result<()> {
-    let temp = tempfile::tempdir()?;
-    let codex_home = temp.path().join("home");
-    let project_root = temp.path().join("project");
-    let nested = project_root.join("nested");
-    let root_dot_codex = project_root.join(".codex");
-    let nested_dot_codex = nested.join(".codex");
-
-    std::fs::create_dir_all(&codex_home)?;
-    std::fs::create_dir_all(&nested_dot_codex)?;
-    std::fs::write(project_root.join(".git"), "gitdir: here")?;
-    write_project_hooks(&root_dot_codex)?;
-    write_project_hooks(&nested_dot_codex)?;
-    write_project_trust_config(&codex_home, &[(&nested, TrustLevel::Trusted)]).await?;
-
-    let config = ConfigBuilder::default()
-        .codex_home(codex_home)
-        .fallback_cwd(Some(nested))
-        .build()
-        .await?;
-
-    let hook_list = codex_hooks::list_hooks(codex_hooks::HooksConfig {
-        feature_enabled: true,
-        config_layer_stack: Some(config.config_layer_stack.clone()),
-        ..codex_hooks::HooksConfig::default()
-    });
-    let expected_source_path = codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(
-        nested_dot_codex.join("hooks.json"),
-    )?;
-    assert_eq!(
-        hook_list
-            .hooks
-            .iter()
-            .map(|hook| &hook.source_path)
-            .collect::<Vec<_>>(),
-        vec![&expected_source_path],
-    );
-    assert_eq!(
-        hook_list.hooks[0].trust_status,
-        codex_protocol::protocol::HookTrustStatus::Untrusted
-    );
-    assert!(preview_session_start_hooks(&config).await?.is_empty());
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn session_start_hooks_require_project_trust_without_config_toml() -> std::io::Result<()> {
-    let temp = tempfile::tempdir()?;
-    let project_root = temp.path().join("project");
-    let nested = project_root.join("nested");
-    let dot_codex = project_root.join(".codex");
-    std::fs::create_dir_all(&nested)?;
-    std::fs::write(project_root.join(".git"), "gitdir: here")?;
-    write_project_hooks(&dot_codex)?;
-
-    let cases = [
-        ("unknown", Vec::<(&Path, TrustLevel)>::new(), 0_usize),
-        (
-            "untrusted",
-            vec![(&project_root as &Path, TrustLevel::Untrusted)],
-            0_usize,
-        ),
-        (
-            "trusted",
-            vec![(&project_root as &Path, TrustLevel::Trusted)],
-            1_usize,
-        ),
-    ];
-
-    for (name, trust_entries, expected_hooks) in cases {
-        let codex_home = temp.path().join(format!("home_{name}"));
-        std::fs::create_dir_all(&codex_home)?;
-        write_project_trust_config(&codex_home, &trust_entries).await?;
-
-        let config = ConfigBuilder::default()
-            .codex_home(codex_home)
-            .fallback_cwd(Some(nested.clone()))
-            .build()
-            .await?;
-
-        let hook_list = codex_hooks::list_hooks(codex_hooks::HooksConfig {
-            feature_enabled: true,
-            config_layer_stack: Some(config.config_layer_stack.clone()),
-            ..codex_hooks::HooksConfig::default()
-        });
-        assert_eq!(
-            hook_list.hooks.len(),
-            expected_hooks,
-            "unexpected discovered hook count for {name}",
-        );
-        assert!(preview_session_start_hooks(&config).await?.is_empty());
-        if expected_hooks == 1 {
-            assert_eq!(
-                hook_list.hooks[0].trust_status,
-                codex_protocol::protocol::HookTrustStatus::Untrusted
-            );
-        }
-    }
-
-    Ok(())
 }

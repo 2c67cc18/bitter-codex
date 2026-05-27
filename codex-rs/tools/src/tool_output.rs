@@ -20,23 +20,23 @@ pub trait ToolOutput: Send {
 
     fn to_response_item(&self, call_id: &str, payload: &ToolPayload) -> ResponseInputItem;
 
-    /// Returns the tool call id exposed to `PostToolUse` hooks for this output.
+    /// Returns the tool call id used by post-use follow-up flows for this output.
     fn post_tool_use_id(&self, call_id: &str) -> String {
         call_id.to_string()
     }
 
-    /// Returns the tool input exposed to `PostToolUse` hooks for this output.
+    /// Returns the tool input used by post-use follow-up flows for this output.
     fn post_tool_use_input(&self, _payload: &ToolPayload) -> Option<JsonValue> {
         None
     }
 
-    /// Returns the stable value exposed to `PostToolUse` hooks for this tool output.
+    /// Returns the stable value exposed by this method for this tool output.
     ///
-    /// Tool handlers decide whether a tool participates in `PostToolUse`, but
-    /// this method lets the output type own any conversion from model-facing
-    /// response content to hook-facing data. Returning `None` means the output
-    /// should not produce a post-use hook payload, not merely that the tool had
-    /// empty output.
+    /// Tool handlers decide whether a tool participates in the post-use flow,
+    /// but this method lets the output type own any conversion from
+    /// model-facing response content to follow-up data. Returning `None`
+    /// means the output should not produce follow-up data, not merely that the
+    /// tool had empty output.
     fn post_tool_use_response(&self, _call_id: &str, _payload: &ToolPayload) -> Option<JsonValue> {
         None
     }

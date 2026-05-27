@@ -24,9 +24,6 @@ use tracing::warn;
 use crate::config::Config;
 use crate::context::ContextualUserFragment;
 use crate::goals::GoalRuntimeEvent;
-use crate::hook_runtime::inspect_pending_input;
-use crate::hook_runtime::record_additional_contexts;
-use crate::hook_runtime::record_pending_input;
 use crate::session::TurnInput;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
@@ -628,23 +625,20 @@ impl Session {
         }
         if !pending_input.is_empty() {
             for pending_input_item in pending_input {
-                let hook_outcome =
-                    inspect_pending_input(self, &turn_context, &pending_input_item).await;
-                if hook_outcome.should_stop {
-                    record_additional_contexts(
-                        self,
-                        &turn_context,
-                        hook_outcome.additional_contexts,
-                    )
-                    .await;
-                } else {
-                    record_pending_input(
-                        self,
-                        &turn_context,
-                        pending_input_item,
-                        hook_outcome.additional_contexts,
-                    )
-                    .await;
+                match pending_input_item {
+                    TurnInput::UserInput(user_input) => {
+                        self.session
+                            .record_user_prompt_and_emit_turn_item(&turn_context, &user_input)
+                            .await;
+                    }
+                    TurnInput::ResponseInputItem(response_input_item) => {
+                        self.session
+                            .record_response_item_and_emit_turn_item(
+                                &turn_context,
+                                ResponseItem::from(response_input_item),
+                            )
+                            .await;
+                    }
                 }
             }
         }

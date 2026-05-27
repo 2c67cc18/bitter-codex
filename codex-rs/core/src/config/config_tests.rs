@@ -8091,11 +8091,9 @@ async fn test_requirements_web_search_mode_allowlist_does_not_warn_when_unset() 
         allowed_permissions: None,
         remote_sandbox_config: None,
         allowed_web_search_modes: Some(vec![codex_config::WebSearchModeRequirement::Cached]),
-        allow_managed_hooks_only: None,
         allow_appshots: None,
         computer_use: None,
         feature_requirements: None,
-        hooks: None,
         mcp_servers: None,
         plugins: None,
         apps: None,
@@ -8814,11 +8812,9 @@ async fn explicit_sandbox_mode_falls_back_when_disallowed_by_requirements() -> s
         allowed_permissions: None,
         remote_sandbox_config: None,
         allowed_web_search_modes: None,
-        allow_managed_hooks_only: None,
         allow_appshots: None,
         computer_use: None,
         feature_requirements: None,
-        hooks: None,
         mcp_servers: None,
         plugins: None,
         apps: None,
@@ -8971,29 +8967,6 @@ async fn active_profile_is_cleared_when_requirements_force_fallback() -> std::io
     assert!(
         config.startup_warnings.iter().any(|warning| warning
             .contains("Configured value for `permission_profile` is disallowed by requirements")),
-        "{:?}",
-        config.startup_warnings
-    );
-    Ok(())
-}
-
-#[tokio::test]
-async fn bypass_hook_trust_adds_startup_warning() -> std::io::Result<()> {
-    let codex_home = TempDir::new()?;
-
-    let config = ConfigBuilder::without_managed_config_for_tests()
-        .codex_home(codex_home.path().to_path_buf())
-        .fallback_cwd(Some(codex_home.path().to_path_buf()))
-        .harness_overrides(ConfigOverrides {
-            bypass_hook_trust: Some(true),
-            ..Default::default()
-        })
-        .build()
-        .await?;
-
-    assert!(
-        config.startup_warnings.iter().any(|warning| warning
-            == "`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation."),
         "{:?}",
         config.startup_warnings
     );

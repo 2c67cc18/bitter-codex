@@ -30,8 +30,6 @@ use codex_app_server_protocol::FileChangeRequestApprovalParams;
 use codex_app_server_protocol::FileChangeRequestApprovalResponse;
 use codex_app_server_protocol::GrantedPermissionProfile as V2GrantedPermissionProfile;
 use codex_app_server_protocol::GuardianWarningNotification;
-use codex_app_server_protocol::HookCompletedNotification;
-use codex_app_server_protocol::HookStartedNotification;
 use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ItemStartedNotification;
 use codex_app_server_protocol::McpServerElicitationAction;
@@ -88,7 +86,6 @@ use codex_core::ThreadManager;
 use codex_core::review_format::format_review_findings_block;
 use codex_core::review_prompts;
 use codex_protocol::ThreadId;
-use codex_protocol::items::parse_hook_prompt_message;
 use codex_protocol::models::AdditionalPermissionProfile as CoreAdditionalPermissionProfile;
 use codex_protocol::plan_tool::UpdatePlanArgs;
 use codex_protocol::protocol::CodexErrorInfo as CoreCodexErrorInfo;
@@ -981,26 +978,6 @@ pub(crate) async fn apply_bespoke_event_handling(
             );
             outgoing.send_server_notification(notification).await;
         }
-        EventMsg::HookStarted(event) => {
-            let notification = HookStartedNotification {
-                thread_id: conversation_id.to_string(),
-                turn_id: event.turn_id,
-                run: event.run.into(),
-            };
-            outgoing
-                .send_server_notification(ServerNotification::HookStarted(notification))
-                .await;
-        }
-        EventMsg::HookCompleted(event) => {
-            let notification = HookCompletedNotification {
-                thread_id: conversation_id.to_string(),
-                turn_id: event.turn_id,
-                run: event.run.into(),
-            };
-            outgoing
-                .send_server_notification(ServerNotification::HookCompleted(notification))
-                .await;
-        }
         EventMsg::ExitedReviewMode(review_event) => {
             let review = match review_event.review_output {
                 Some(output) => render_review_output_text(&output),
@@ -1030,13 +1007,6 @@ pub(crate) async fn apply_bespoke_event_handling(
                 .await;
         }
         EventMsg::RawResponseItem(raw_response_item_event) => {
-            maybe_emit_hook_prompt_item_completed(
-                conversation_id,
-                &event_turn_id,
-                &raw_response_item_event.item,
-                &outgoing,
-            )
-            .await;
             maybe_emit_raw_response_item_completed(
                 conversation_id,
                 &event_turn_id,
@@ -1403,7 +1373,7 @@ async fn complete_command_execution_item(
         .await;
 }
 
-async fn maybe_emit_raw_response_item_completed(
+pub(crate) async fn maybe_emit_raw_response_item_completed(
     conversation_id: ThreadId,
     turn_id: &str,
     item: codex_protocol::models::ResponseItem,
@@ -1416,45 +1386,6 @@ async fn maybe_emit_raw_response_item_completed(
     };
     outgoing
         .send_server_notification(ServerNotification::RawResponseItemCompleted(notification))
-        .await;
-}
-
-pub(crate) async fn maybe_emit_hook_prompt_item_completed(
-    conversation_id: ThreadId,
-    turn_id: &str,
-    item: &codex_protocol::models::ResponseItem,
-    outgoing: &ThreadScopedOutgoingMessageSender,
-) {
-    let codex_protocol::models::ResponseItem::Message {
-        role, content, id, ..
-    } = item
-    else {
-        return;
-    };
-
-    if role != "user" {
-        return;
-    }
-
-    let Some(hook_prompt) = parse_hook_prompt_message(id.as_ref(), content) else {
-        return;
-    };
-
-    let notification = ItemCompletedNotification {
-        thread_id: conversation_id.to_string(),
-        turn_id: turn_id.to_string(),
-        completed_at_ms: now_unix_timestamp_ms(),
-        item: ThreadItem::HookPrompt {
-            id: hook_prompt.id,
-            fragments: hook_prompt
-                .fragments
-                .into_iter()
-                .map(codex_app_server_protocol::HookPromptFragment::from)
-                .collect(),
-        },
-    };
-    outgoing
-        .send_server_notification(ServerNotification::ItemCompleted(notification))
         .await;
 }
 
@@ -2091,8 +2022,6 @@ mod tests {
     use codex_app_server_protocol::JSONRPCErrorError;
     use codex_app_server_protocol::TurnPlanStepStatus;
     use codex_login::CodexAuth;
-    use codex_protocol::items::HookPromptFragment;
-    use codex_protocol::items::build_hook_prompt_message;
     use codex_protocol::models::FileSystemPermissions as CoreFileSystemPermissions;
     use codex_protocol::models::NetworkPermissions as CoreNetworkPermissions;
     use codex_protocol::permissions::FileSystemAccessMode;
@@ -3748,51 +3677,4 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn test_hook_prompt_raw_response_emits_item_completed() -> Result<()> {
-        let (tx, mut rx) = mpsc::channel(CHANNEL_CAPACITY);
-        let outgoing = Arc::new(OutgoingMessageSender::new(tx));
-        let conversation_id = ThreadId::new();
-        let outgoing = ThreadScopedOutgoingMessageSender::new(
-            outgoing,
-            vec![ConnectionId(1)],
-            conversation_id,
-        );
-        let item = build_hook_prompt_message(&[
-            HookPromptFragment::from_single_hook("Retry with tests.", "hook-run-1"),
-            HookPromptFragment::from_single_hook("Then summarize cleanly.", "hook-run-2"),
-        ])
-        .expect("hook prompt message");
-
-        maybe_emit_hook_prompt_item_completed(conversation_id, "turn-1", &item, &outgoing).await;
-
-        let msg = recv_broadcast_message(&mut rx).await?;
-        match msg {
-            OutgoingMessage::AppServerNotification(ServerNotification::ItemCompleted(
-                notification,
-            )) => {
-                assert_eq!(notification.thread_id, conversation_id.to_string());
-                assert_eq!(notification.turn_id, "turn-1");
-                assert_eq!(
-                    notification.item,
-                    ThreadItem::HookPrompt {
-                        id: notification.item.id().to_string(),
-                        fragments: vec![
-                            codex_app_server_protocol::HookPromptFragment {
-                                text: "Retry with tests.".into(),
-                                hook_run_id: "hook-run-1".into(),
-                            },
-                            codex_app_server_protocol::HookPromptFragment {
-                                text: "Then summarize cleanly.".into(),
-                                hook_run_id: "hook-run-2".into(),
-                            },
-                        ],
-                    }
-                );
-            }
-            other => bail!("unexpected message: {other:?}"),
-        }
-        assert!(rx.try_recv().is_err(), "no extra messages expected");
-        Ok(())
-    }
 }

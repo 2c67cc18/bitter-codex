@@ -929,17 +929,6 @@ impl Session {
                     (None, None)
                 };
 
-            let hooks =
-                build_hooks_for_config(&config, plugins_manager.as_ref(), &default_shell).await;
-            for warning in hooks.startup_warnings() {
-                post_session_configured_events.push(Event {
-                    id: INITIAL_SUBMIT_ID.to_owned(),
-                    msg: EventMsg::Warning(WarningEvent {
-                        message: warning.clone(),
-                    }),
-                });
-            }
-
             let session_id = if session_configuration.session_source.is_non_root_agent() {
                 agent_control.session_id()
             } else {
@@ -978,7 +967,6 @@ impl Session {
                 ),
                 shell_zsh_path: config.zsh_path.clone(),
                 main_execve_wrapper_exe: config.main_execve_wrapper_exe.clone(),
-                hooks: arc_swap::ArcSwap::from_pointee(hooks),
                 rollout_thread_trace,
                 user_shell: Arc::new(default_shell),
                 shell_snapshot_tx,
@@ -1194,20 +1182,8 @@ impl Session {
             }
             sess.schedule_startup_prewarm(session_configuration.base_instructions.clone())
                 .await;
-            let session_start_source = match &initial_history {
-                InitialHistory::Resumed(_) => codex_hooks::SessionStartSource::Resume,
-                InitialHistory::New | InitialHistory::Forked(_) => {
-                    codex_hooks::SessionStartSource::Startup
-                }
-                InitialHistory::Cleared => codex_hooks::SessionStartSource::Clear,
-            };
-
             // record_initial_history can emit events. We record only after the SessionConfiguredEvent is emitted.
             Box::pin(sess.record_initial_history(initial_history)).await;
-            {
-                let mut state = sess.state.lock().await;
-                state.queue_pending_session_start_source(session_start_source);
-            }
 
             Ok(sess)
         }

@@ -337,7 +337,7 @@ fn project_config_warning(config: &Config) -> Option<ConfigWarningNotification> 
     }
 
     let mut message = concat!(
-        "Project-local config, hooks, and exec policies are disabled in the following folders ",
+        "Project-local config and exec policies are disabled in the following folders ",
         "until the project is trusted, but skills still load.\n",
     )
     .to_string();

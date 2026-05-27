@@ -77,8 +77,6 @@ pub enum Feature {
     // Stable.
     /// Enable the default shell tool.
     ShellTool,
-    /// Enable Claude-style lifecycle hooks loaded from hooks.json files.
-    CodexHooks,
 
     // Experimental
     /// Enable JavaScript code mode backed by the in-process V8 runtime.
@@ -139,8 +137,6 @@ pub enum Feature {
     ToolSuggest,
     /// Enable plugins.
     Plugins,
-    /// Removed compatibility flag for plugin-bundled lifecycle hooks.
-    PluginHooks,
     /// Allow the in-app browser pane in desktop apps.
     ///
     /// Requirements-only gate: this should be set from requirements, not user config.
@@ -431,9 +427,6 @@ impl Features {
                     continue;
                 }
                 "image_detail_original" => {
-                    continue;
-                }
-                "plugin_hooks" => {
                     continue;
                 }
                 "skill_env_var_dependency_prompt" => {
@@ -849,12 +842,6 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
-        id: Feature::CodexHooks,
-        key: "hooks",
-        stage: Stage::Stable,
-        default_enabled: true,
-    },
-    FeatureSpec {
         id: Feature::RequestPermissionsTool,
         key: "request_permissions_tool",
         stage: Stage::UnderDevelopment,
@@ -977,12 +964,6 @@ pub const FEATURES: &[FeatureSpec] = &[
         key: "plugins",
         stage: Stage::Stable,
         default_enabled: true,
-    },
-    FeatureSpec {
-        id: Feature::PluginHooks,
-        key: "plugin_hooks",
-        stage: Stage::Removed,
-        default_enabled: false,
     },
     FeatureSpec {
         id: Feature::InAppBrowser,

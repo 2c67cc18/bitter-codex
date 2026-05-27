@@ -831,11 +831,6 @@ pub struct Config {
     /// When true, session is not persisted on disk. Default to `false`
     pub ephemeral: bool,
 
-    /// Whether enabled hooks should run without requiring persisted hook trust for this session.
-    ///
-    /// This is a runtime-only knob populated from invocation overrides, not from config files.
-    pub bypass_hook_trust: bool,
-
     /// Optional URI-based file opener. If set, citations to files in the model
     /// output will be hyperlinked using the specified URI scheme.
     pub file_opener: UriBasedFileOpener,
@@ -2132,7 +2127,6 @@ pub struct ConfigOverrides {
     pub show_raw_agent_reasoning: Option<bool>,
     pub tools_web_search_request: Option<bool>,
     pub ephemeral: Option<bool>,
-    pub bypass_hook_trust: Option<bool>,
     /// Additional directories that should be treated as writable roots for this session.
     pub additional_writable_roots: Vec<PathBuf>,
     /// Explicit runtime workspace roots for this session. When set, this is
@@ -2435,11 +2429,9 @@ impl Config {
             approvals_reviewer: mut constrained_approvals_reviewer,
             permission_profile: mut constrained_permission_profile,
             web_search_mode: mut constrained_web_search_mode,
-            allow_managed_hooks_only: _,
             allow_appshots: _,
             computer_use: _,
             feature_requirements,
-            managed_hooks: _,
             mcp_servers,
             plugins: _,
             exec_policy: _,
@@ -2484,18 +2476,9 @@ impl Config {
             show_raw_agent_reasoning,
             tools_web_search_request: override_tools_web_search_request,
             ephemeral,
-            bypass_hook_trust,
             additional_writable_roots,
             workspace_roots: workspace_roots_override,
         } = overrides;
-        let bypass_hook_trust = bypass_hook_trust.unwrap_or_default();
-
-        if bypass_hook_trust {
-            startup_warnings.push(
-                "`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation."
-                    .to_string(),
-            );
-        }
 
         if sandbox_mode.is_some() && permission_profile.is_some() {
             return Err(std::io::Error::new(
@@ -3433,7 +3416,6 @@ impl Config {
             config_layer_stack,
             history,
             ephemeral: ephemeral.unwrap_or_default(),
-            bypass_hook_trust,
             file_opener: cfg.file_opener.unwrap_or(UriBasedFileOpener::VsCode),
             codex_self_exe,
             codex_linux_sandbox_exe,

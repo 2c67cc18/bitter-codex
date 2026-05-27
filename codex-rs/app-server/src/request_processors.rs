@@ -1,5 +1,5 @@
 use crate::bespoke_event_handling::apply_bespoke_event_handling;
-use crate::bespoke_event_handling::maybe_emit_hook_prompt_item_completed;
+use crate::bespoke_event_handling::maybe_emit_raw_response_item_completed;
 use crate::command_exec::CommandExecManager;
 use crate::command_exec::StartCommandExecParams;
 use crate::config_manager::ConfigManager;
@@ -64,9 +64,6 @@ use codex_app_server_protocol::GetConversationSummaryResponse;
 use codex_app_server_protocol::GitDiffToRemoteParams;
 use codex_app_server_protocol::GitDiffToRemoteResponse;
 use codex_app_server_protocol::GitInfo as ApiGitInfo;
-use codex_app_server_protocol::HookMetadata;
-use codex_app_server_protocol::HooksListParams;
-use codex_app_server_protocol::HooksListResponse;
 use codex_app_server_protocol::InitializeParams;
 use codex_app_server_protocol::InitializeResponse;
 use codex_app_server_protocol::JSONRPCErrorError;

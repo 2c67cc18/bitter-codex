@@ -11,10 +11,6 @@ use crate::context_manager::ContextManager;
 use crate::context_manager::TotalTokenUsageBreakdown;
 use crate::context_manager::estimate_response_item_model_visible_bytes;
 use crate::context_manager::is_codex_generated_item;
-use crate::hook_runtime::PostCompactHookOutcome;
-use crate::hook_runtime::PreCompactHookOutcome;
-use crate::hook_runtime::run_post_compact_hooks;
-use crate::hook_runtime::run_pre_compact_hooks;
 use crate::session::session::Session;
 use crate::session::turn::built_tools;
 use crate::session::turn_context::TurnContext;
@@ -86,22 +82,8 @@ async fn run_remote_compact_task_inner(
     reason: CompactionReason,
     phase: CompactionPhase,
 ) -> CodexResult<()> {
-    let pre_compact_outcome = run_pre_compact_hooks(sess, turn_context, trigger).await;
-    match pre_compact_outcome {
-        PreCompactHookOutcome::Continue => {}
-        PreCompactHookOutcome::Stopped { reason } => {
-            let _error = reason.unwrap_or_else(|| "PreCompact hook stopped execution".to_string());
-            return Err(CodexErr::TurnAborted);
-        }
-    }
     let result =
         run_remote_compact_task_inner_impl(sess, turn_context, initial_context_injection).await;
-    if result.is_ok() {
-        let post_compact_outcome = run_post_compact_hooks(sess, turn_context, trigger).await;
-        if let PostCompactHookOutcome::Stopped = post_compact_outcome {
-            return Err(CodexErr::TurnAborted);
-        }
-    }
     if let Err(err) = result {
         let event = EventMsg::Error(
             err.to_error_event(Some("Error running remote compact task".to_string())),
@@ -257,7 +239,7 @@ pub(crate) async fn process_compacted_history(
 /// - `developer` messages because remote output can include stale/duplicated
 ///   instruction content.
 /// - non-user-content `user` messages (session prefix/instruction wrappers),
-///   while preserving real user messages and persisted hook prompts.
+///   while preserving real user messages.
 ///
 /// This intentionally keeps:
 /// - `assistant` messages (future remote compaction models may emit them)
@@ -270,7 +252,7 @@ pub(crate) fn should_keep_compacted_history_item(item: &ResponseItem) -> bool {
         ResponseItem::Message { role, .. } if role == "user" => {
             matches!(
                 crate::event_mapping::parse_turn_item(item),
-                Some(TurnItem::UserMessage(_) | TurnItem::HookPrompt(_))
+                Some(TurnItem::UserMessage(_))
             )
         }
         ResponseItem::Message { role, .. } if role == "assistant" => true,

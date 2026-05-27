@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::HooksToml;
 use crate::permissions_toml::PermissionsToml;
 use crate::profile_toml::ConfigProfile;
 use crate::types::ApprovalsReviewer;
@@ -414,9 +413,6 @@ pub struct ConfigToml {
 
     /// User-level skill config entries keyed by SKILL.md path.
     pub skills: Option<SkillsConfig>,
-
-    /// Lifecycle hooks configured inline in TOML plus user-level overrides.
-    pub hooks: Option<HooksToml>,
 
     /// User-level plugin config entries keyed by plugin name.
     #[serde(default)]

@@ -263,7 +263,6 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         config_profile_v2,
         sandbox_mode: sandbox_mode_cli_arg,
         dangerously_bypass_approvals_and_sandbox,
-        bypass_hook_trust,
         cwd,
         add_dir,
     } = shared;
@@ -423,7 +422,6 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         show_raw_agent_reasoning: oss.then_some(true),
         tools_web_search_request: None,
         ephemeral: ephemeral.then_some(true),
-        bypass_hook_trust: bypass_hook_trust.then_some(true),
         additional_writable_roots: add_dir,
     };
 
@@ -1171,20 +1169,6 @@ fn should_process_notification(
         ServerNotification::ConfigWarning(_) | ServerNotification::DeprecationNotice(_) => true,
         ServerNotification::Error(notification) => {
             notification.thread_id == thread_id && notification.turn_id == turn_id
-        }
-        ServerNotification::HookCompleted(notification) => {
-            notification.thread_id == thread_id
-                && notification
-                    .turn_id
-                    .as_deref()
-                    .is_none_or(|candidate| candidate == turn_id)
-        }
-        ServerNotification::HookStarted(notification) => {
-            notification.thread_id == thread_id
-                && notification
-                    .turn_id
-                    .as_deref()
-                    .is_none_or(|candidate| candidate == turn_id)
         }
         ServerNotification::ItemCompleted(notification) => {
             notification.thread_id == thread_id && notification.turn_id == turn_id

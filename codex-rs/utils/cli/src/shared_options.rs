@@ -48,11 +48,6 @@ pub struct SharedCliOptions {
     )]
     pub dangerously_bypass_approvals_and_sandbox: bool,
 
-    /// Run enabled hooks without requiring persisted hook trust for this invocation.
-    /// DANGEROUS. Intended only for automation that already vets hook sources.
-    #[arg(long = "dangerously-bypass-hook-trust", default_value_t = false)]
-    pub bypass_hook_trust: bool,
-
     /// Tell the agent to use the specified directory as its working root.
     #[clap(long = "cd", short = 'C', value_name = "DIR")]
     pub cwd: Option<PathBuf>,
@@ -74,7 +69,6 @@ impl SharedCliOptions {
             config_profile_v2,
             sandbox_mode,
             dangerously_bypass_approvals_and_sandbox,
-            bypass_hook_trust,
             cwd,
             add_dir,
         } = self;
@@ -86,7 +80,6 @@ impl SharedCliOptions {
             config_profile_v2: root_config_profile_v2,
             sandbox_mode: root_sandbox_mode,
             dangerously_bypass_approvals_and_sandbox: root_dangerously_bypass_approvals_and_sandbox,
-            bypass_hook_trust: root_bypass_hook_trust,
             cwd: root_cwd,
             add_dir: root_add_dir,
         } = root;
@@ -109,9 +102,6 @@ impl SharedCliOptions {
         if !self_selected_sandbox_mode {
             *dangerously_bypass_approvals_and_sandbox =
                 *root_dangerously_bypass_approvals_and_sandbox;
-        }
-        if !*bypass_hook_trust {
-            *bypass_hook_trust = *root_bypass_hook_trust;
         }
         if cwd.is_none() {
             cwd.clone_from(root_cwd);
@@ -139,7 +129,6 @@ impl SharedCliOptions {
             config_profile_v2,
             sandbox_mode,
             dangerously_bypass_approvals_and_sandbox,
-            bypass_hook_trust,
             cwd,
             add_dir,
         } = subcommand;
@@ -160,9 +149,6 @@ impl SharedCliOptions {
             self.sandbox_mode = sandbox_mode;
             self.dangerously_bypass_approvals_and_sandbox =
                 dangerously_bypass_approvals_and_sandbox;
-        }
-        if bypass_hook_trust {
-            self.bypass_hook_trust = true;
         }
         if let Some(cwd) = cwd {
             self.cwd = Some(cwd);

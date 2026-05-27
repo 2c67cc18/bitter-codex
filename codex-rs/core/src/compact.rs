@@ -4,10 +4,6 @@ use std::time::Instant;
 use crate::Prompt;
 use crate::client::ModelClientSession;
 use crate::client_common::ResponseEvent;
-use crate::hook_runtime::PostCompactHookOutcome;
-use crate::hook_runtime::PreCompactHookOutcome;
-use crate::hook_runtime::run_post_compact_hooks;
-use crate::hook_runtime::run_pre_compact_hooks;
 #[cfg(test)]
 use crate::session::PreviousTurnSettings;
 use crate::session::session::Session;
@@ -140,14 +136,6 @@ async fn run_compact_task_inner(
     reason: CompactionReason,
     phase: CompactionPhase,
 ) -> CodexResult<()> {
-    let pre_compact_outcome = run_pre_compact_hooks(&sess, &turn_context, trigger).await;
-    match pre_compact_outcome {
-        PreCompactHookOutcome::Continue => {}
-        PreCompactHookOutcome::Stopped { reason } => {
-            let error = reason.unwrap_or_else(|| "PreCompact hook stopped execution".to_string());
-            return Err(CodexErr::TurnAborted);
-        }
-    }
     let result = run_compact_task_inner_impl(
         Arc::clone(&sess),
         Arc::clone(&turn_context),
@@ -155,12 +143,6 @@ async fn run_compact_task_inner(
         initial_context_injection,
     )
     .await;
-    if result.is_ok() {
-        let post_compact_outcome = run_post_compact_hooks(&sess, &turn_context, trigger).await;
-        if let PostCompactHookOutcome::Stopped = post_compact_outcome {
-            return Err(CodexErr::TurnAborted);
-        }
-    }
     result.map(|_| ())
 }
 

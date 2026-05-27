@@ -313,11 +313,9 @@ pub struct ConfigRequirements {
     pub allowed_sandbox_modes: Option<Vec<SandboxMode>>,
     pub allowed_permissions: Option<Vec<String>>,
     pub allowed_web_search_modes: Option<Vec<WebSearchMode>>,
-    pub allow_managed_hooks_only: Option<bool>,
     pub allow_appshots: Option<bool>,
     pub computer_use: Option<ComputerUseRequirements>,
     pub feature_requirements: Option<BTreeMap<String, bool>>,
-    pub hooks: Option<ManagedHooksRequirements>,
     pub enforce_residency: Option<ResidencyRequirement>,
     pub network: Option<NetworkRequirements>,
 }
@@ -326,60 +324,6 @@ pub struct ConfigRequirements {
 #[serde(rename_all = "camelCase")]
 pub struct ComputerUseRequirements {
     pub allow_locked_computer_use: Option<bool>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ManagedHooksRequirements {
-    pub managed_dir: Option<PathBuf>,
-    pub windows_managed_dir: Option<PathBuf>,
-    #[serde(rename = "PreToolUse")]
-    pub pre_tool_use: Vec<ConfiguredHookMatcherGroup>,
-    #[serde(rename = "PermissionRequest")]
-    pub permission_request: Vec<ConfiguredHookMatcherGroup>,
-    #[serde(rename = "PostToolUse")]
-    pub post_tool_use: Vec<ConfiguredHookMatcherGroup>,
-    #[serde(rename = "PreCompact")]
-    pub pre_compact: Vec<ConfiguredHookMatcherGroup>,
-    #[serde(rename = "PostCompact")]
-    pub post_compact: Vec<ConfiguredHookMatcherGroup>,
-    #[serde(rename = "SessionStart")]
-    pub session_start: Vec<ConfiguredHookMatcherGroup>,
-    #[serde(rename = "UserPromptSubmit")]
-    pub user_prompt_submit: Vec<ConfiguredHookMatcherGroup>,
-    #[serde(rename = "SubagentStart")]
-    pub subagent_start: Vec<ConfiguredHookMatcherGroup>,
-    #[serde(rename = "SubagentStop")]
-    pub subagent_stop: Vec<ConfiguredHookMatcherGroup>,
-    #[serde(rename = "Stop")]
-    pub stop: Vec<ConfiguredHookMatcherGroup>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ConfiguredHookMatcherGroup {
-    pub matcher: Option<String>,
-    pub hooks: Vec<ConfiguredHookHandler>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[serde(tag = "type")]
-pub enum ConfiguredHookHandler {
-    #[serde(rename = "command")]
-    Command {
-        command: String,
-        #[serde(rename = "commandWindows")]
-        command_windows: Option<String>,
-        #[serde(rename = "timeoutSec")]
-        timeout_sec: Option<u64>,
-        r#async: bool,
-        #[serde(rename = "statusMessage")]
-        status_message: Option<String>,
-    },
-    #[serde(rename = "prompt")]
-    Prompt {},
-    #[serde(rename = "agent")]
-    Agent {},
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -448,8 +392,6 @@ pub enum ExternalAgentConfigMigrationItemType {
     McpServerConfig,
     #[serde(rename = "SUBAGENTS")]
     Subagents,
-    #[serde(rename = "HOOKS")]
-    Hooks,
     #[serde(rename = "COMMANDS")]
     Commands,
     #[serde(rename = "SESSIONS")]
@@ -481,12 +423,6 @@ pub struct McpServerMigration {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct HookMigration {
-    pub name: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
 pub struct SubagentMigration {
     pub name: String,
 }
@@ -506,8 +442,6 @@ pub struct MigrationDetails {
     pub sessions: Vec<SessionMigration>,
     #[serde(default)]
     pub mcp_servers: Vec<McpServerMigration>,
-    #[serde(default)]
-    pub hooks: Vec<HookMigration>,
     #[serde(default)]
     pub subagents: Vec<SubagentMigration>,
     #[serde(default)]

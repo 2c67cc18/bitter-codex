@@ -59,29 +59,6 @@ fn skills_to_info(
         .collect()
 }
 
-fn hooks_to_info(hooks: &[codex_hooks::HookListEntry]) -> Vec<HookMetadata> {
-    hooks
-        .iter()
-        .map(|hook| HookMetadata {
-            key: hook.key.clone(),
-            event_name: hook.event_name.into(),
-            handler_type: hook.handler_type.into(),
-            matcher: hook.matcher.clone(),
-            command: hook.command.clone(),
-            timeout_sec: hook.timeout_sec,
-            status_message: hook.status_message.clone(),
-            source_path: hook.source_path.clone(),
-            source: hook.source.into(),
-            plugin_id: hook.plugin_id.clone(),
-            display_order: hook.display_order,
-            enabled: hook.enabled,
-            is_managed: hook.is_managed,
-            current_hash: hook.current_hash.clone(),
-            trust_status: hook.trust_status.into(),
-        })
-        .collect()
-}
-
 fn errors_to_info(
     errors: &[codex_core::skills::SkillError],
 ) -> Vec<codex_app_server_protocol::SkillErrorInfo> {
@@ -116,15 +93,6 @@ impl CatalogRequestProcessor {
         params: SkillsListParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         self.skills_list_response(params)
-            .await
-            .map(|response| Some(response.into()))
-    }
-
-    pub(crate) async fn hooks_list(
-        &self,
-        params: HooksListParams,
-    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        self.hooks_list_response(params)
             .await
             .map(|response| Some(response.into()))
     }
@@ -565,77 +533,6 @@ impl CatalogRequestProcessor {
         data.sort_unstable_by_key(|(index, _)| *index);
         let data = data.into_iter().map(|(_, entry)| entry).collect();
         Ok(SkillsListResponse { data })
-    }
-
-    /// Handle `hooks/list` by resolving hooks for each requested cwd.
-    async fn hooks_list_response(
-        &self,
-        params: HooksListParams,
-    ) -> Result<HooksListResponse, JSONRPCErrorError> {
-        let HooksListParams { cwds } = params;
-        let cwds = if cwds.is_empty() {
-            vec![self.config.cwd.to_path_buf()]
-        } else {
-            cwds
-        };
-
-        let auth = self.auth_manager.auth().await;
-        let plugins_manager = self.thread_manager.plugins_manager();
-        let mut data = Vec::new();
-        for cwd in cwds {
-            let config = match self
-                .config_manager
-                .load_for_cwd(
-                    /*request_overrides*/ None,
-                    ConfigOverrides::default(),
-                    Some(cwd.clone()),
-                )
-                .await
-            {
-                Ok(config) => config,
-                Err(err) => {
-                    let error_path = cwd.clone();
-                    data.push(codex_app_server_protocol::HooksListEntry {
-                        cwd,
-                        hooks: Vec::new(),
-                        warnings: Vec::new(),
-                        errors: vec![codex_app_server_protocol::HookErrorInfo {
-                            path: error_path,
-                            message: err.to_string(),
-                        }],
-                    });
-                    continue;
-                }
-            };
-            let workspace_codex_plugins_enabled = self
-                .workspace_codex_plugins_enabled(&config, auth.as_ref())
-                .await;
-            let plugins_enabled =
-                config.features.enabled(Feature::Plugins) && workspace_codex_plugins_enabled;
-            let plugin_outcome = if plugins_enabled {
-                let plugins_input = config.plugins_config_input();
-                plugins_manager
-                    .plugins_for_layer_stack(&config.config_layer_stack, &plugins_input)
-                    .await
-            } else {
-                PluginLoadOutcome::default()
-            };
-            let hooks = codex_hooks::list_hooks(codex_hooks::HooksConfig {
-                feature_enabled: config.features.enabled(Feature::CodexHooks),
-                bypass_hook_trust: config.bypass_hook_trust,
-                config_layer_stack: Some(config.config_layer_stack),
-                plugin_hook_sources: plugin_outcome.effective_plugin_hook_sources(),
-                plugin_hook_load_warnings: plugin_outcome.effective_plugin_hook_warnings(),
-                ..Default::default()
-            });
-            data.push(codex_app_server_protocol::HooksListEntry {
-                cwd,
-                hooks: hooks_to_info(&hooks.hooks),
-                warnings: hooks.warnings,
-                errors: Vec::new(),
-            });
-        }
-        Ok(HooksListResponse { data })
     }
 
     async fn skills_config_write_response_inner(

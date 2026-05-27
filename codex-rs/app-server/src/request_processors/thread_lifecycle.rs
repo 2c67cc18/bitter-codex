@@ -317,10 +317,10 @@ pub(super) async fn ensure_listener_task_running(
                     if let EventMsg::RawResponseItem(raw_response_item_event) = &event.msg
                         && !raw_events_enabled
                     {
-                        maybe_emit_hook_prompt_item_completed(
+                        maybe_emit_raw_response_item_completed(
                             conversation_id,
                             &event.id,
-                            &raw_response_item_event.item,
+                            raw_response_item_event.item.clone(),
                             &thread_outgoing,
                         )
                         .await;

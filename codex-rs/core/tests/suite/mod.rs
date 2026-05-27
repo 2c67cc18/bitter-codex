@@ -50,10 +50,6 @@ mod exec;
 mod exec_policy;
 mod fork_thread;
 mod hierarchical_agents;
-#[cfg(not(target_os = "windows"))]
-mod hooks;
-#[cfg(not(target_os = "windows"))]
-mod hooks_mcp;
 mod image_rollout;
 mod items;
 mod json_result;

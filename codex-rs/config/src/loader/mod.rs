@@ -835,7 +835,7 @@ impl ProjectTrustContext {
             return None;
         }
 
-        let gated_features = "project-local config, hooks, and exec policies";
+        let gated_features = "project-local config and exec policies";
         let trust_key = decision.trust_key.as_str();
         let user_config_file = self.user_config_file.as_path().display();
         match decision.trust_level {
@@ -848,24 +848,12 @@ impl ProjectTrustContext {
         }
     }
 
-    fn root_checkout_hooks_folder_for_dir(&self, dir: &AbsolutePathBuf) -> Option<AbsolutePathBuf> {
-        let checkout_root = self.checkout_root.as_ref()?;
-        let repo_root = self.repo_root.as_ref()?;
-        // Regular checkouts resolve both paths to the same root; linked worktrees do not.
-        if checkout_root == repo_root {
-            return None;
-        }
-
-        let relative_dir = dir.as_path().strip_prefix(checkout_root.as_path()).ok()?;
-        Some(repo_root.join(relative_dir).join(".codex"))
-    }
 }
 
 fn project_layer_entry(
     dot_codex_folder: &AbsolutePathBuf,
     config: TomlValue,
     disabled_reason: Option<String>,
-    hooks_config_folder_override: Option<AbsolutePathBuf>,
 ) -> ConfigLayerEntry {
     let source = ConfigLayerSource::Project {
         dot_codex_folder: dot_codex_folder.clone(),
@@ -876,7 +864,7 @@ fn project_layer_entry(
     } else {
         ConfigLayerEntry::new(source, config)
     };
-    entry.with_hooks_config_folder_override(hooks_config_folder_override)
+    entry
 }
 
 fn sanitize_project_config(config: &mut TomlValue) -> Vec<String> {
@@ -1166,7 +1154,6 @@ async fn load_project_layers(
 
         let decision = trust_context.decision_for_dir(&dir);
         let disabled_reason = trust_context.disabled_reason_for_decision(&decision);
-        let hooks_config_folder_override = trust_context.root_checkout_hooks_folder_for_dir(&dir);
         let dot_codex_normalized =
             normalize_path(dot_codex_abs.as_path()).unwrap_or_else(|_| dot_codex_abs.to_path_buf());
         if dot_codex_abs == codex_home_abs || dot_codex_normalized == codex_home_normalized {
@@ -1191,7 +1178,6 @@ async fn load_project_layers(
                             &dot_codex_abs,
                             TomlValue::Table(toml::map::Map::new()),
                             disabled_reason.clone(),
-                            hooks_config_folder_override.clone(),
                         ));
                         continue;
                     }
@@ -1208,13 +1194,6 @@ async fn load_project_layers(
                 let ignored_project_config_keys = sanitize_project_config(&mut config);
                 let config =
                     resolve_relative_paths_in_config_toml(config, dot_codex_abs.as_path())?;
-                let config = merge_root_checkout_project_hooks(
-                    fs,
-                    config,
-                    hooks_config_folder_override.as_ref(),
-                    decision.is_trusted(),
-                )
-                .await?;
                 if disabled_reason.is_none() && !ignored_project_config_keys.is_empty() {
                     startup_warnings.push(project_ignored_config_keys_warning(
                         &dot_codex_abs,
@@ -1225,7 +1204,6 @@ async fn load_project_layers(
                     &dot_codex_abs,
                     config,
                     disabled_reason.clone(),
-                    hooks_config_folder_override.clone(),
                 );
                 layers.push(entry);
             }
@@ -1234,18 +1212,10 @@ async fn load_project_layers(
                     // If there is no config.toml file, record an empty entry
                     // for this project layer, as this may still have subfolders
                     // that are significant in the overall ConfigLayerStack.
-                    let config = merge_root_checkout_project_hooks(
-                        fs,
-                        TomlValue::Table(toml::map::Map::new()),
-                        hooks_config_folder_override.as_ref(),
-                        decision.is_trusted(),
-                    )
-                    .await?;
                     layers.push(project_layer_entry(
                         &dot_codex_abs,
-                        config,
+                        TomlValue::Table(toml::map::Map::new()),
                         disabled_reason,
-                        hooks_config_folder_override,
                     ));
                 } else {
                     let config_file_display = config_file.as_path().display();
@@ -1264,63 +1234,6 @@ async fn load_project_layers(
     })
 }
 
-/// For linked worktrees, preserve ordinary worktree-local project config while
-/// replacing only hook declarations with the matching root-checkout layer.
-async fn merge_root_checkout_project_hooks(
-    fs: &dyn ExecutorFileSystem,
-    mut config: TomlValue,
-    hooks_config_folder_override: Option<&AbsolutePathBuf>,
-    is_trusted: bool,
-) -> io::Result<TomlValue> {
-    let Some(hooks_config_folder) = hooks_config_folder_override else {
-        return Ok(config);
-    };
-    let hooks_config_file = hooks_config_folder.join(CONFIG_TOML_FILE);
-    let root_config = match fs
-        .read_file_text(&hooks_config_file, /*sandbox*/ None)
-        .await
-    {
-        Ok(contents) => {
-            let parsed: TomlValue = match toml::from_str(&contents) {
-                Ok(parsed) => parsed,
-                Err(err) => {
-                    if is_trusted {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            format!(
-                                "Error parsing project hooks config file {}: {err}",
-                                hooks_config_file.as_path().display()
-                            ),
-                        ));
-                    }
-                    TomlValue::Table(toml::map::Map::new())
-                }
-            };
-            resolve_relative_paths_in_config_toml(parsed, hooks_config_folder.as_path())?
-        }
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            TomlValue::Table(toml::map::Map::new())
-        }
-        Err(err) => {
-            return Err(io::Error::new(
-                err.kind(),
-                format!(
-                    "Failed to read project hooks config file {}: {err}",
-                    hooks_config_file.as_path().display()
-                ),
-            ));
-        }
-    };
-
-    let Some(config_table) = config.as_table_mut() else {
-        return Ok(config);
-    };
-    config_table.remove("hooks");
-    if let Some(hooks) = root_config.get("hooks") {
-        config_table.insert("hooks".to_string(), hooks.clone());
-    }
-    Ok(config)
-}
 /// The legacy mechanism for specifying admin-enforced configuration is to read
 /// from a file like `/etc/codex/managed_config.toml` that has the same
 /// structure as `config.toml` where fields like `approval_policy` can specify

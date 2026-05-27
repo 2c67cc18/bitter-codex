@@ -15,13 +15,11 @@ use crate::tools::code_mode::CodeModeService;
 use crate::tools::network_approval::NetworkApprovalService;
 use crate::tools::sandboxing::ApprovalStore;
 use crate::unified_exec::UnifiedExecProcessManager;
-use arc_swap::ArcSwap;
 use arc_swap::ArcSwapOption;
 use codex_core_plugins::PluginsManager;
 use codex_exec_server::EnvironmentManager;
 use codex_extension_api::ExtensionData;
 use codex_extension_api::ExtensionRegistry;
-use codex_hooks::Hooks;
 use codex_login::AuthManager;
 use codex_mcp::McpConnectionManager;
 use codex_models_manager::manager::SharedModelsManager;
@@ -45,7 +43,6 @@ pub(crate) struct SessionServices {
     pub(crate) shell_zsh_path: Option<PathBuf>,
     #[cfg_attr(not(unix), allow(dead_code))]
     pub(crate) main_execve_wrapper_exe: Option<PathBuf>,
-    pub(crate) hooks: ArcSwap<Hooks>,
     pub(crate) rollout_thread_trace: ThreadTraceContext,
     pub(crate) user_shell: Arc<crate::shell::Shell>,
     pub(crate) shell_snapshot_tx: watch::Sender<Option<Arc<crate::shell_snapshot::ShellSnapshot>>>,
