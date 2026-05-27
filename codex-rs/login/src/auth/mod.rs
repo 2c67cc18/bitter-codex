@@ -3,7 +3,6 @@ pub mod error;
 mod storage;
 mod util;
 
-mod external_bearer;
 mod manager;
 mod revoke;
 
