@@ -27,7 +27,6 @@ use crate::tools::handlers::ViewImageHandler;
 use crate::tools::handlers::WriteStdinHandler;
 use crate::tools::handlers::agent_jobs::ReportAgentJobResultHandler;
 use crate::tools::handlers::agent_jobs::SpawnAgentsOnCsvHandler;
-use crate::tools::handlers::extension_tools::ExtensionToolAdapter;
 use crate::tools::handlers::multi_agents::CloseAgentHandler;
 use crate::tools::handlers::multi_agents::ResumeAgentHandler;
 use crate::tools::handlers::multi_agents::SendInputHandler;
@@ -66,10 +65,9 @@ use codex_tools::DiscoverableTool;
 use codex_tools::ResponsesApiNamespace;
 use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::TOOL_SEARCH_TOOL_NAME;
-use codex_tools::ToolCall as ExtensionToolCall;
 use codex_tools::ToolEnvironmentMode;
-use codex_tools::ToolExecutor;
 use codex_tools::ToolName;
+use codex_tools::ToolExecutor;
 use codex_tools::ToolOutput;
 use codex_tools::ToolSpec;
 use codex_tools::can_request_original_image_detail;
@@ -136,7 +134,6 @@ struct CoreToolPlanContext<'a> {
     mcp_tools: Option<&'a [ToolInfo]>,
     deferred_mcp_tools: Option<&'a [ToolInfo]>,
     discoverable_tools: Option<&'a [DiscoverableTool]>,
-    extension_tool_executors: &'a [Arc<dyn ToolExecutor<ExtensionToolCall>>],
     dynamic_tools: &'a [DynamicToolSpec],
     default_agent_type_description: &'a str,
     wait_agent_timeouts: WaitAgentTimeoutOptions,
@@ -158,7 +155,6 @@ fn build_tool_specs_and_registry(
         mcp_tools,
         deferred_mcp_tools,
         discoverable_tools,
-        extension_tool_executors,
         dynamic_tools,
     } = params;
     let default_agent_type_description =
@@ -168,7 +164,6 @@ fn build_tool_specs_and_registry(
         mcp_tools: mcp_tools.as_deref(),
         deferred_mcp_tools: deferred_mcp_tools.as_deref(),
         discoverable_tools: discoverable_tools.as_deref(),
-        extension_tool_executors: &extension_tool_executors,
         dynamic_tools,
         default_agent_type_description: &default_agent_type_description,
         wait_agent_timeouts: wait_agent_timeout_options(turn_context),
@@ -503,7 +498,6 @@ fn add_tool_sources(context: &CoreToolPlanContext<'_>, planned_tools: &mut Plann
     add_collaboration_tools(context, planned_tools);
     add_mcp_runtime_tools(context, planned_tools);
     add_dynamic_tools(context, planned_tools);
-    add_extension_tools(context, planned_tools);
     for spec in hosted_model_tool_specs(context.turn_context) {
         planned_tools.add_hosted_spec(spec);
     }
@@ -749,16 +743,6 @@ fn add_dynamic_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut Plan
     }
 }
 
-fn add_extension_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {
-    // Extension ToolContributor implementations are resolved into executors
-    // before planning. Core only adapts those executors into its runtime set.
-    append_extension_tool_executors(
-        context.turn_context,
-        context.extension_tool_executors,
-        planned_tools,
-    );
-}
-
 fn append_tool_search_executor(
     context: &CoreToolPlanContext<'_>,
     planned_tools: &mut PlannedTools,
@@ -797,44 +781,6 @@ fn prepend_code_mode_executors(
         deferred_tools_available,
     );
     planned_tools.runtimes.splice(0..0, code_mode_executors);
-}
-
-fn append_extension_tool_executors(
-    turn_context: &TurnContext,
-    executors: &[Arc<dyn ToolExecutor<ExtensionToolCall>>],
-    planned_tools: &mut PlannedTools,
-) {
-    if executors.is_empty() {
-        return;
-    }
-
-    let mut reserved_tool_names = planned_tools
-        .runtimes()
-        .iter()
-        .map(|executor| executor.tool_name())
-        .collect::<HashSet<_>>();
-    if code_mode_enabled(turn_context) {
-        reserved_tool_names.insert(ToolName::plain(codex_code_mode::PUBLIC_TOOL_NAME));
-        reserved_tool_names.insert(ToolName::plain(codex_code_mode::WAIT_TOOL_NAME));
-    }
-    if search_tool_enabled(turn_context)
-        && namespace_tools_enabled(turn_context)
-        && planned_tools
-            .runtimes()
-            .iter()
-            .any(|executor| executor.exposure() == ToolExposure::Deferred)
-    {
-        reserved_tool_names.insert(ToolName::plain(TOOL_SEARCH_TOOL_NAME));
-    }
-
-    for executor in executors.iter().cloned() {
-        let tool_name = executor.tool_name();
-        if !reserved_tool_names.insert(tool_name.clone()) {
-            warn!("Skipping extension tool `{tool_name}`: tool already registered");
-            continue;
-        }
-        planned_tools.add(ExtensionToolAdapter::new(executor));
-    }
 }
 
 fn multi_agent_v2_handler(

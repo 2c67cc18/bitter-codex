@@ -612,14 +612,7 @@ async fn shutdown_session_runtime(sess: &Arc<Session>) {
 }
 
 async fn emit_thread_stop_lifecycle(sess: &Session) {
-    for contributor in sess.services.extensions.thread_lifecycle_contributors() {
-        contributor
-            .on_thread_stop(codex_extension_api::ThreadStopInput {
-                session_store: &sess.services.session_extension_data,
-                thread_store: &sess.services.thread_extension_data,
-            })
-            .await;
-    }
+    let _ = sess;
 }
 
 pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
@@ -836,7 +829,7 @@ pub(super) async fn submission_loop(
                     approve_guardian_denied_action(&sess, event).await;
                     false
                 }
-                _ => false, // Ignore unknown ops; enum is non_exhaustive to allow extensions.
+                _ => false, // Ignore unknown ops; enum is non_exhaustive for future variants.
             }
         }
         .instrument(dispatch_span)

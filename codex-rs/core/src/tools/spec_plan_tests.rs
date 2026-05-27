@@ -176,7 +176,6 @@ async fn probe_with(
             mcp_tools: inputs.mcp_tools,
             deferred_mcp_tools: inputs.deferred_mcp_tools,
             discoverable_tools: inputs.discoverable_tools,
-            extension_tool_executors: Vec::new(),
             dynamic_tools: inputs.dynamic_tools.as_slice(),
         },
     );

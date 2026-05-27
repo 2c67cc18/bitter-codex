@@ -1230,7 +1230,6 @@ dependencies = [
  "codex-app-server-protocol",
  "codex-async-utils",
  "codex-config",
- "codex-extension-api",
  "codex-features",
  "codex-git-utils",
  "codex-hooks",
@@ -1311,7 +1310,6 @@ dependencies = [
  "codex-arg0",
  "codex-config",
  "codex-core",
- "codex-extension-api",
  "codex-features",
  "codex-login",
  "codex-model-provider-info",
@@ -1370,15 +1368,6 @@ dependencies = [
  "uuid",
  "walkdir",
  "wiremock",
-]
-
-[[package]]
-name = "codex-extension-api"
-version = "0.134.0"
-dependencies = [
- "async-trait",
- "codex-protocol",
- "codex-tools",
 ]
 
 [[package]]
@@ -2108,7 +2097,6 @@ dependencies = [
  "codex-arg0",
  "codex-config",
  "codex-core",
- "codex-extension-api",
  "codex-features",
  "codex-hooks",
  "codex-login",

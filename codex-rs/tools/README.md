@@ -45,12 +45,11 @@ The corresponding non-goals are just as important:
 
 The expected migration shape is:
 
-1. Keep extension-owned executable-tool authoring in `codex-extension-api`.
-2. Move host-side planning/adaptation helpers here when they no longer need to
+1. Move host-side planning/adaptation helpers here when they no longer need to
    stay coupled to `codex-core`.
-3. Leave compatibility-sensitive adapters in `codex-core` while downstream
+2. Leave compatibility-sensitive adapters in `codex-core` while downstream
    call sites are updated.
-4. Only extract higher-level host infrastructure after the crate boundaries are
+3. Only extract higher-level host infrastructure after the crate boundaries are
    clear and independently testable.
 
 ## Crate conventions

@@ -18,7 +18,6 @@ use crate::session::turn_context::TurnContext;
 use crate::tools::context::AbortedToolOutput;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::context::ToolPayload;
-use crate::tools::lifecycle::notify_tool_aborted;
 use crate::tools::registry::AnyToolResult;
 use crate::tools::registry::ToolArgumentDiffConsumer;
 use crate::tools::router::ToolCall;
@@ -93,9 +92,6 @@ impl ToolCallRuntime {
         let lock = Arc::clone(&self.parallel_execution);
         let invocation_cancellation_token = cancellation_token.clone();
         let started = Instant::now();
-        let abort_session = Arc::clone(&session);
-        let abort_source = source.clone();
-        let abort_turn = Arc::clone(&turn);
         let terminal_outcome_reached = Arc::new(AtomicBool::new(false));
         let dispatch_terminal_outcome_reached = Arc::clone(&terminal_outcome_reached);
         let dispatch_call = call.clone();
@@ -145,14 +141,6 @@ impl ToolCallRuntime {
                             Ok(result) => result,
                             Err(err) if err.is_cancelled() => {
                                 let response = Self::aborted_response(&call, secs);
-                                notify_tool_aborted(
-                                    abort_session.as_ref(),
-                                    abort_turn.as_ref(),
-                                    call.call_id.as_str(),
-                                    &call.tool_name,
-                                    abort_source,
-                                )
-                                .await;
                                 Ok(response)
                             }
                             Err(err) => Err(Self::tool_task_join_error(err)),
@@ -233,12 +221,9 @@ mod tests {
     use crate::tools::registry::ToolExecutor;
     use crate::tools::registry::ToolRegistry;
     use crate::turn_diff_tracker::TurnDiffTracker;
-    use codex_extension_api::ToolCallOutcome;
     use codex_protocol::models::FunctionCallOutputBody;
     use codex_protocol::models::FunctionCallOutputPayload;
     use pretty_assertions::assert_eq;
-    use tokio::sync::Notify;
-    use tokio::sync::oneshot;
 
     struct ImmediateHandler {
         tool_name: codex_tools::ToolName,
@@ -274,54 +259,10 @@ mod tests {
 
     impl CoreToolRuntime for ImmediateHandler {}
 
-    struct BlockingFinishContributor {
-        records: Arc<std::sync::Mutex<Vec<ToolCallOutcome>>>,
-        finish_started: std::sync::Mutex<Option<oneshot::Sender<()>>>,
-        allow_finish: Arc<Notify>,
-    }
-
-    impl codex_extension_api::ToolLifecycleContributor for BlockingFinishContributor {
-        fn on_tool_finish<'a>(
-            &'a self,
-            input: codex_extension_api::ToolFinishInput<'a>,
-        ) -> codex_extension_api::ToolLifecycleFuture<'a> {
-            let records = Arc::clone(&self.records);
-            let allow_finish = Arc::clone(&self.allow_finish);
-            let finish_started = self
-                .finish_started
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .take();
-            let outcome = input.outcome;
-            Box::pin(async move {
-                if let Some(finish_started) = finish_started {
-                    let _ = finish_started.send(());
-                }
-                allow_finish.notified().await;
-                records
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .push(outcome);
-            })
-        }
-    }
-
     #[tokio::test]
-    async fn cancellation_after_handler_finishes_preserves_completed_lifecycle()
+    async fn cancellation_after_handler_finishes_preserves_completed_result()
     -> anyhow::Result<()> {
         let (mut session, turn_context) = crate::session::tests::make_session_and_context().await;
-        let records = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let (finish_started_tx, finish_started_rx) = oneshot::channel();
-        let allow_finish = Arc::new(Notify::new());
-        let mut builder =
-            codex_extension_api::ExtensionRegistryBuilder::<crate::config::Config>::new();
-        builder.tool_lifecycle_contributor(Arc::new(BlockingFinishContributor {
-            records: Arc::clone(&records),
-            finish_started: std::sync::Mutex::new(Some(finish_started_tx)),
-            allow_finish: Arc::clone(&allow_finish),
-        }));
-        session.services.extensions = Arc::new(builder.build());
-
         let session = Arc::new(session);
         let turn_context = Arc::new(turn_context);
         let tool_name = codex_tools::ToolName::plain("test_tool");
@@ -345,13 +286,7 @@ mod tests {
 
         let response_task =
             tokio::spawn(runtime.handle_tool_call(call, cancellation_token.clone()));
-        tokio::time::timeout(Duration::from_secs(1), finish_started_rx)
-            .await
-            .expect("timed out waiting for lifecycle notification to start")
-            .expect("lifecycle notification should start");
         cancellation_token.cancel();
-        tokio::time::sleep(Duration::from_millis(10)).await;
-        allow_finish.notify_waiters();
 
         let response = tokio::time::timeout(Duration::from_secs(1), response_task)
             .await
@@ -365,13 +300,6 @@ mod tests {
             },
         };
         assert_eq!(expected_response, response);
-
-        let actual = records
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .drain(..)
-            .collect::<Vec<_>>();
-        assert_eq!(vec![ToolCallOutcome::Completed { success: true }], actual);
 
         Ok(())
     }

@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use codex_extension_api::ExtensionData;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::items::TurnItem;
 use codex_utils_stream_parser::strip_citations;
@@ -254,30 +253,8 @@ pub(crate) struct OutputItemResult {
 pub(crate) struct HandleOutputCtx {
     pub sess: Arc<Session>,
     pub turn_context: Arc<TurnContext>,
-    pub turn_store: Arc<ExtensionData>,
     pub tool_runtime: ToolCallRuntime,
     pub cancellation_token: CancellationToken,
-}
-
-async fn apply_turn_item_contributors(
-    sess: &Session,
-    turn_store: &ExtensionData,
-    item: &mut TurnItem,
-) {
-    let contributors = sess.services.extensions.turn_item_contributors().to_vec();
-    for contributor in contributors {
-        if let Err(err) = contributor
-            .contribute(&sess.services.thread_extension_data, turn_store, item)
-            .await
-        {
-            warn!("turn item contributor failed: {err}");
-        }
-    }
-}
-
-pub(crate) enum TurnItemContributorPolicy<'a> {
-    Skip,
-    Run(&'a ExtensionData),
 }
 
 pub(crate) struct FinalizedTurnItem {
@@ -295,13 +272,10 @@ pub(crate) struct FinalizedTurnItemFacts {
 pub(crate) async fn finalize_non_tool_response_item(
     sess: &Session,
     turn_context: &TurnContext,
-    contributor_policy: TurnItemContributorPolicy<'_>,
     item: &ResponseItem,
     plan_mode: bool,
 ) -> Option<FinalizedTurnItem> {
-    let turn_item =
-        handle_non_tool_response_item(sess, turn_context, contributor_policy, item, plan_mode)
-            .await?;
+    let turn_item = handle_non_tool_response_item(sess, turn_context, item, plan_mode).await?;
     let (memory_citation, last_agent_message, defers_mailbox_delivery_to_next_turn) =
         match &turn_item {
             TurnItem::AgentMessage(agent_message) => {
@@ -385,7 +359,6 @@ pub(crate) async fn handle_output_item_done(
             let finalized_turn_item = finalize_non_tool_response_item(
                 ctx.sess.as_ref(),
                 ctx.turn_context.as_ref(),
-                TurnItemContributorPolicy::Run(ctx.turn_store.as_ref()),
                 &item,
                 plan_mode,
             )
@@ -455,7 +428,6 @@ pub(crate) async fn handle_output_item_done(
 pub(crate) async fn handle_non_tool_response_item(
     sess: &Session,
     turn_context: &TurnContext,
-    contributor_policy: TurnItemContributorPolicy<'_>,
     item: &ResponseItem,
     plan_mode: bool,
 ) -> Option<TurnItem> {
@@ -467,9 +439,6 @@ pub(crate) async fn handle_non_tool_response_item(
         | ResponseItem::WebSearchCall { .. }
         | ResponseItem::ImageGenerationCall { .. } => {
             let mut turn_item = parse_turn_item(item)?;
-            if let TurnItemContributorPolicy::Run(turn_store) = contributor_policy {
-                apply_turn_item_contributors(sess, turn_store, &mut turn_item).await;
-            }
             if let TurnItem::AgentMessage(agent_message) = &mut turn_item {
                 let combined = agent_message
                     .content

@@ -84,7 +84,6 @@ mod config_manager_service;
 mod connection_rpc_gate;
 mod dynamic_tools;
 mod error_code;
-mod extensions;
 mod filters;
 mod fs_watch;
 mod fuzzy_file_search;
