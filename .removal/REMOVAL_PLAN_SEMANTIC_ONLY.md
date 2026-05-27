@@ -14,6 +14,11 @@ done as blind deletion or line-range cleanup.
 - 2026-05-28 `codex-arg0` stale dispatch references to removed apply-patch,
   sandboxing, exec-server, shell-escalation, and Linux sandbox crates were
   removed. Focused `cargo-modal` check/test for `codex-arg0` passed.
+- 2026-05-28 final workspace check now reaches broader remaining cleanup:
+  `codex-tools` has malformed schema/tool model code from prior removal work,
+  `codex-config` still references removed `codex_execpolicy`,
+  `codex_network_proxy`, and `codex_file_system` crates, and retained config
+  surfaces still mention removed sandbox/permission concepts.
 
 ## Analytics removal follow-through
 
@@ -91,6 +96,8 @@ done as blind deletion or line-range cleanup.
   model construction on 2026-05-28.
 - Keep hosted web/image capability metadata, but expose tools only when session
   settings enable them.
+- AWS/Bedrock no longer appears in app-server protocol account mapping as of
+  2026-05-28 after merging provider-auth removal.
 
 ## App-server protocol trim
 
@@ -111,9 +118,6 @@ done as blind deletion or line-range cleanup.
   `codex_shell_command`, `CommandExecParams`, removed guardian review
   notifications, removed request-permissions actions, removed plan/patch update
   notifications, and stale MCP wrapper imports.
-- Transitional caveat: app-server protocol still maps the core
-  `ProviderAccount::AmazonBedrock` variant because core still exposes it. Remove
-  this protocol exposure with the AWS/Bedrock provider cleanup.
 - Transitional caveat: removed `PlanDelta` and patch update core events are
   currently projected as warnings because the app-server notification enum has no
   no-op notification variant. Prefer removing the upstream event producers and
@@ -278,6 +282,8 @@ done as blind deletion or line-range cleanup.
 - Delete or rewrite tests for removed analytics, approvals, sandboxing, MCP,
   plugins, apps, feedback, realtime, memory, TUI, schema/codegen, Bazel/npm/SDK,
   and other removed surfaces.
+- 2026-05-28 app-server-protocol test fixture for MCP result was adjusted to
+  the surviving core result type while upstream MCP protocol cleanup remains.
 
 ## Final compile/build check
 
@@ -287,9 +293,11 @@ done as blind deletion or line-range cleanup.
   `codex-login`, `codex-model-provider`, and `codex-core` were blocked before
   the target crates by existing `codex-app-server-protocol` compile failures
   listed above.
-- 2026-05-28 final `cargo-modal` phase before the arg0/protocol follow-up:
-  workspace check failed in `codex-arg0`; workspace clippy and test failed in
-  `codex-app-server-protocol`. Rerun the final phase after the follow-up merge.
+- 2026-05-28 final `cargo-modal` phase after arg0/protocol follow-up:
+  workspace check advanced to `codex-tools` malformed schema/tool code,
+  `codex-config` removed-crate references, and remaining app-server-protocol
+  test fixture drift. Clippy/test should be rerun after those blockers are
+  resolved.
 - After semantic cleanup only, run the equivalent of:
 
 ```bash

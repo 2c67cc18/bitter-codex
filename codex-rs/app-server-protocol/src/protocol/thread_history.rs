@@ -22,6 +22,7 @@ use crate::protocol::v2::WebSearchAction;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::MessagePhase;
 use codex_protocol::items::McpToolCallError;
+use codex_protocol::mcp::CallToolResult as McpToolCallResult;
 use codex_protocol::protocol::AgentReasoningEvent;
 use codex_protocol::protocol::AgentReasoningRawContentEvent;
 use codex_protocol::protocol::AgentStatus;
@@ -2040,6 +2041,7 @@ mod tests {
                         "type": "text",
                         "text": "result"
                     })],
+                    is_error: Some(false),
                     structured_content: Some(serde_json::json!({"id":"123"})),
                     meta: Some(serde_json::json!({
                         "ui/resourceUri": "ui://widget/lookup.html"

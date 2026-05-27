@@ -1587,7 +1587,6 @@ impl std::fmt::Display for FunctionCallOutputPayload {
 mod tests {
     use super::*;
     use anyhow::Result;
-    use codex_execpolicy::Policy;
     use pretty_assertions::assert_eq;
     use std::path::PathBuf;
     use tempfile::tempdir;
@@ -2108,18 +2107,11 @@ mod tests {
 
     #[test]
     fn format_allow_prefixes_limits_output() {
-        let mut exec_policy = Policy::empty();
-        for i in 0..200 {
-            exec_policy
-                .add_prefix_rule(
-                    &[format!("tool-{i:03}"), "x".repeat(500)],
-                    codex_execpolicy::Decision::Allow,
-                )
-                .expect("add rule");
-        }
+        let prefixes = (0..200)
+            .map(|i| vec![format!("tool-{i:03}"), "x".repeat(500)])
+            .collect::<Vec<_>>();
 
-        let output =
-            format_allow_prefixes(exec_policy.get_allowed_prefixes()).expect("formatted prefixes");
+        let output = format_allow_prefixes(prefixes).expect("formatted prefixes");
         assert!(
             output.len() <= MAX_ALLOW_PREFIX_TEXT_BYTES + TRUNCATED_MARKER.len(),
             "output length exceeds expected limit: {output}",
