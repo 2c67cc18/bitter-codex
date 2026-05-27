@@ -768,9 +768,7 @@ impl AccountRequestProcessor {
                         self.auth_manager.refresh_failure_for_auth(&auth).is_some();
                     let auth_mode = auth.api_auth_mode();
                     let (reported_auth_method, token_opt) =
-                        if matches!(auth, CodexAuth::AgentIdentity(_))
-                            || include_token && permanent_refresh_failure
-                        {
+                        if include_token && permanent_refresh_failure {
                             (Some(auth_mode), None)
                         } else {
                             match auth.get_token() {

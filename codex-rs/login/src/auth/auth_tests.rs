@@ -153,7 +153,6 @@ async fn pro_account_with_no_api_key_uses_chatgpt_auth() {
                 account_id: None,
             }),
             last_refresh: Some(last_refresh),
-            agent_identity: None,
         },
         auth_dot_json
     );
@@ -193,7 +192,6 @@ fn logout_removes_auth_file() -> Result<(), std::io::Error> {
         openai_api_key: Some("sk-test-key".to_string()),
         tokens: None,
         last_refresh: None,
-        agent_identity: None,
     };
     super::save_auth(dir.path(), &auth_dot_json, AuthCredentialsStoreMode::File)?;
     let auth_file = get_auth_file(dir.path());
@@ -733,65 +731,6 @@ async fn enforce_login_restrictions_allows_any_matching_workspace_in_list() {
 }
 
 #[tokio::test]
-#[serial(codex_auth_env)]
-async fn enforce_login_restrictions_logs_out_for_agent_identity_workspace_mismatch() {
-    let codex_home = tempdir().unwrap();
-    let record = agent_identity_record(WORKSPACE_ID_DISALLOWED);
-    let agent_identity =
-        signed_agent_identity_jwt(&record, json!(record.plan_type)).expect("signed agent identity");
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/backend-api/wham/agent-identities/jwks"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(test_jwks_body()))
-        .expect(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/backend-api/v1/agent/agent-runtime-id/task/register"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "task_id": "task-123",
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-    let chatgpt_base_url = format!("{}/backend-api", server.uri());
-    let _authapi_guard =
-        EnvVarGuard::set("CODEX_AGENT_IDENTITY_AUTHAPI_BASE_URL", &chatgpt_base_url);
-    save_auth(
-        codex_home.path(),
-        &AuthDotJson {
-            auth_mode: Some(ApiAuthMode::AgentIdentity),
-            openai_api_key: None,
-            tokens: None,
-            last_refresh: None,
-            agent_identity: Some(agent_identity),
-        },
-        AuthCredentialsStoreMode::File,
-    )
-    .expect("seed agent identity auth");
-
-    let config = AuthConfig {
-        codex_home: codex_home.path().to_path_buf(),
-        auth_credentials_store_mode: AuthCredentialsStoreMode::File,
-        forced_login_method: None,
-        forced_chatgpt_workspace_id: Some(vec![WORKSPACE_ID_ALLOWED.to_string()]),
-        chatgpt_base_url: Some(chatgpt_base_url),
-    };
-
-    let err = super::enforce_login_restrictions(&config)
-        .await
-        .expect_err("expected workspace mismatch to error");
-    assert!(err.to_string().contains(&format!(
-        "current credentials belong to {WORKSPACE_ID_DISALLOWED}"
-    )));
-    assert!(
-        !codex_home.path().join("auth.json").exists(),
-        "auth.json should be removed on mismatch"
-    );
-    server.verify().await;
-}
-
-#[tokio::test]
 async fn enforce_login_restrictions_allows_api_key_if_login_method_not_set_but_forced_chatgpt_workspace_id_is_set()
  {
     let codex_home = tempdir().unwrap();
@@ -834,159 +773,6 @@ async fn enforce_login_restrictions_blocks_env_api_key_when_chatgpt_required() {
         err.to_string()
             .contains("ChatGPT login is required, but an API key is currently being used.")
     );
-}
-
-fn agent_identity_record(account_id: &str) -> AgentIdentityAuthRecord {
-    let key_material =
-        codex_agent_identity::generate_agent_key_material().expect("generate agent key material");
-    AgentIdentityAuthRecord {
-        agent_runtime_id: "agent-runtime-id".to_string(),
-        agent_private_key: key_material.private_key_pkcs8_base64,
-        account_id: account_id.to_string(),
-        chatgpt_user_id: "user-id".to_string(),
-        email: "user@example.com".to_string(),
-        plan_type: AccountPlanType::Pro,
-        chatgpt_account_is_fedramp: false,
-    }
-}
-
-fn fake_agent_identity_jwt(record: &AgentIdentityAuthRecord) -> std::io::Result<String> {
-    fake_agent_identity_jwt_with_plan_type(record, serde_json::to_value(record.plan_type)?)
-}
-
-fn fake_agent_identity_jwt_with_plan_type(
-    record: &AgentIdentityAuthRecord,
-    plan_type: serde_json::Value,
-) -> std::io::Result<String> {
-    let encode = |bytes: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
-    let header_b64 = encode(br#"{"alg":"EdDSA","typ":"JWT"}"#);
-    let payload = json!({
-        "iss": "https://chatgpt.com/codex-backend/agent-identity",
-        "aud": "codex-app-server",
-        "iat": 1_700_000_000usize,
-        "exp": 4_000_000_000usize,
-        "agent_runtime_id": record.agent_runtime_id,
-        "agent_private_key": record.agent_private_key,
-        "account_id": record.account_id,
-        "chatgpt_user_id": record.chatgpt_user_id,
-        "email": record.email,
-        "plan_type": plan_type,
-        "chatgpt_account_is_fedramp": record.chatgpt_account_is_fedramp,
-    });
-    let payload_b64 = encode(&serde_json::to_vec(&payload)?);
-    let signature_b64 = encode(b"sig");
-    Ok(format!("{header_b64}.{payload_b64}.{signature_b64}"))
-}
-
-fn signed_agent_identity_jwt(
-    record: &AgentIdentityAuthRecord,
-    plan_type: serde_json::Value,
-) -> jsonwebtoken::errors::Result<String> {
-    let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256);
-    header.kid = Some("test-key".to_string());
-    jsonwebtoken::encode(
-        &header,
-        &json!({
-            "iss": "https://chatgpt.com/codex-backend/agent-identity",
-            "aud": "codex-app-server",
-            "iat": 1_700_000_000usize,
-            "exp": 4_000_000_000usize,
-            "agent_runtime_id": record.agent_runtime_id,
-            "agent_private_key": record.agent_private_key,
-            "account_id": record.account_id,
-            "chatgpt_user_id": record.chatgpt_user_id,
-            "email": record.email,
-            "plan_type": plan_type,
-            "chatgpt_account_is_fedramp": record.chatgpt_account_is_fedramp,
-        }),
-        &jsonwebtoken::EncodingKey::from_rsa_pem(TEST_AGENT_IDENTITY_RSA_PRIVATE_KEY_PEM)?,
-    )
-}
-
-fn test_jwks_body() -> serde_json::Value {
-    json!({
-        "keys": [{
-            "kty": "RSA",
-            "kid": "test-key",
-            "use": "sig",
-            "alg": "RS256",
-            "n": "1qQF2MqTrGAMDm7wXbjJP5sWqGA83tAGUs2ksy7iJXLJdhCg4AtwGm4SFl4f6kxhCSzlN1QdXuZjvRT2wZZiGUi9xUE28rf4WLrTxSnwqLuTy5knMP08yC0t_0YU_FGPZMcWb14hG05IvZr8UbmRaVagxSR8H4rSIymRoVwwmFSrqz068XrWGSYNIfLEASyo5GdAaqmk1JALINHgYGQJVxMxtwcvDxoVKmC7eltUNymMNBZhsv4E8sx9YNLpBoEibznfEpDU_DGzrM5eZCsQzaqbhBOlGd427ifud_Nnd9cPqzgCUc23-0FXSPfpbgksCXAwAmD0OFjQWrgqVdKL6Q",
-            "e": "AQAB",
-        }]
-    })
-}
-
-const TEST_AGENT_IDENTITY_RSA_PRIVATE_KEY_PEM: &[u8] = br#"-----BEGIN PRIVATE KEY-----
-MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDWpAXYypOsYAwO
-bvBduMk/mxaoYDze0AZSzaSzLuIlcsl2EKDgC3AabhIWXh/qTGEJLOU3VB1e5mO9
-FPbBlmIZSL3FQTbyt/hYutPFKfCou5PLmScw/TzILS3/RhT8UY9kxxZvXiEbTki9
-mvxRuZFpVqDFJHwfitIjKZGhXDCYVKurPTrxetYZJg0h8sQBLKjkZ0BqqaTUkAsg
-0eBgZAlXEzG3By8PGhUqYLt6W1Q3KYw0FmGy/gTyzH1g0ukGgSJvOd8SkNT8MbOs
-zl5kKxDNqpuEE6UZ3jbuJ+5382d31w+rOAJRzbf7QVdI9+luCSwJcDACYPQ4WNBa
-uCpV0ovpAgMBAAECggEAVu84LwZdqYN9XpswX8VoPYrjMm9IODapWQBRpQFoNyK2
-1ksF3bjEPvA2Azk8U/l7k+vLKw22l6lY3EyRZPcz5GnB8xLm3ogE3mtNOp4yCyVu
-RxhQ91aaN7mU17/a4BdorLi2LYVCg3zBmYociD1Q2AluNGsCmwPu+K7tfR2J0Sg8
-NjqiTbDG1XDpR/icwgC9t6vh8lZpCHDhF4tbQfLLVLeA/OdcuzXDyMCXbmdVIdBQ
-rm4aIFmr2e1/2ctTbCg85S6AGFTH+pSLjrwTzyvf+F6NW5uNjLQAQLFj+EznBDxj
-Xdx90cySrjsKK6PVWQF4RiTvkSW8eWL7R6B2FZbGwQKBgQDuVQRj72hWloR7mbEL
-aUEEv3pIXTMXWEsoMBNczos/1L1RnAN1AI44TurznasPZAWvQj+kVbLDR+TAeZrL
-iA8HIWswQUI18hFmgKzSkwIXGtubcKVrgsKeS4lMDKCM/Ef6WAYdeq6ronoY5lCN
-YrJFmGp81W5zcV7lyiycgbSiGwKBgQDmjWYf6pZjrK7Z+OJ3X1AZfi2vss15SCvL
-3fPgzIDbViztpGyQhc3DQZIsBNIu0xZp/veGce9TEeTds2ro9NfdJFeou8+fC7Pq
-sOsM3amGFFi+ZW/9BWyjZEM88bgWWAjqLHbpfHDxjAf5CSxddqxgHlbP0Ytyb1Vg
-gmPDn9YKSwKBgQDbTi3hC35WFuDHn0/zcSHcDZmnFuOZeqyFyV83yfMGhGrEuqvP
-sPgtRikajJ3IZsB4WZyYSidZXEFY/0z6NjOl2xF38MTNQPbT/FmK1q1Yt2UWrlv5
-BvSwlk87RG9D7C0LZo4R+D7cPoDdgqjiwMvMEIkEX5zn641oI1ZTmWKuuwKBgQCD
-KF+3unnRvHRAVoFnTZbA2fJdqMeRvogD04GhGlYX8V9f1hFY6nXTJaNlXVzA/J8c
-r8ra9kgjJuPfZ+ljG58OFFW2DRohLcQtuHYPfK6rMzoFHqnl9EcIcMp7ijuionR3
-29HOJFgQYgxLFXfit9d6WugiE+BTupiEbckZif13HwKBgE/lAlkVHP6YahOO2Ljc
-J1bwkqKZTB5dHolX9A58e/xXnfZ5P8f3Z83+Izap3FwqQulk7b1WO1MQcHuVg2NN
-5da0D4h2rYOXnbYIg0BVu4spQbaM6ewsp66b8+MzLOBvj8SzWdt1Oyw0q/MRyQAR
-8U4M2TSWCKUY/A6sT4W8+mT9
------END PRIVATE KEY-----"#;
-
-#[tokio::test]
-#[serial(codex_auth_env)]
-async fn agent_identity_plan_type_maps_raw_enterprise_alias() {
-    assert_agent_identity_plan_alias(json!("hc"), AccountPlanType::Enterprise).await;
-}
-
-#[tokio::test]
-#[serial(codex_auth_env)]
-async fn agent_identity_plan_type_maps_raw_education_alias() {
-    assert_agent_identity_plan_alias(json!("education"), AccountPlanType::Edu).await;
-}
-
-async fn assert_agent_identity_plan_alias(
-    plan_type: serde_json::Value,
-    expected_plan_type: AccountPlanType,
-) {
-    let record = agent_identity_record("account-id");
-    let jwt = signed_agent_identity_jwt(&record, plan_type).expect("agent identity jwt");
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/backend-api/wham/agent-identities/jwks"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(test_jwks_body()))
-        .expect(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/backend-api/v1/agent/agent-runtime-id/task/register"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "task_id": "task-123",
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-    let chatgpt_base_url = format!("{}/backend-api", server.uri());
-    let _authapi_guard =
-        EnvVarGuard::set("CODEX_AGENT_IDENTITY_AUTHAPI_BASE_URL", &chatgpt_base_url);
-    let auth = CodexAuth::from_agent_identity_jwt(&jwt, Some(&chatgpt_base_url))
-        .await
-        .expect("agent identity auth");
-
-    pretty_assertions::assert_eq!(auth.account_plan_type(), Some(expected_plan_type));
-    server.verify().await;
 }
 
 #[tokio::test]
