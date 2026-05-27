@@ -691,7 +691,7 @@ async fn review_history_surfaces_in_parent_session() {
     let _complete = wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     // Inspect the second request (parent turn) input contents.
-    // Parent turns include session initial messages (user_instructions, environment_context).
+    // Parent turns include session initial messages such as environment_context.
     // Critically, no messages from the review thread should appear.
     let requests = request_log.requests();
     assert_eq!(requests.len(), 2);

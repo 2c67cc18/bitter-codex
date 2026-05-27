@@ -62,22 +62,12 @@ const RESERVED_MODEL_PROVIDER_IDS: [&str; 4] = [
     LMSTUDIO_OSS_PROVIDER_ID,
 ];
 
-pub const DEFAULT_PROJECT_DOC_MAX_BYTES: usize = 32 * 1024;
-
 const fn default_allow_login_shell() -> Option<bool> {
     Some(true)
 }
 
 fn default_history() -> Option<History> {
     Some(History::default())
-}
-
-const fn default_project_doc_max_bytes() -> Option<usize> {
-    Some(DEFAULT_PROJECT_DOC_MAX_BYTES)
-}
-
-fn default_project_doc_fallback_filenames() -> Option<Vec<String>> {
-    Some(Vec::new())
 }
 
 const fn default_hide_agent_reasoning() -> Option<bool> {
@@ -262,14 +252,6 @@ pub struct ConfigToml {
     /// IDs cannot be overridden.
     #[serde(default, deserialize_with = "deserialize_model_providers")]
     pub model_providers: HashMap<String, ModelProviderInfo>,
-
-    /// Maximum number of bytes to include from an AGENTS.md project doc file.
-    #[serde(default = "default_project_doc_max_bytes")]
-    pub project_doc_max_bytes: Option<usize>,
-
-    /// Ordered list of fallback filenames to look for when AGENTS.md is missing.
-    #[serde(default = "default_project_doc_fallback_filenames")]
-    pub project_doc_fallback_filenames: Option<Vec<String>>,
 
     /// Token budget applied when storing tool/function outputs in the context manager.
     pub tool_output_token_limit: Option<usize>,

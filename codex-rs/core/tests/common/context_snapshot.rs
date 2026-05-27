@@ -24,7 +24,6 @@ pub enum ContextSnapshotRenderMode {
 pub struct ContextSnapshotOptions {
     render_mode: ContextSnapshotRenderMode,
     strip_capability_instructions: bool,
-    strip_agents_md_user_context: bool,
 }
 
 impl Default for ContextSnapshotOptions {
@@ -32,7 +31,6 @@ impl Default for ContextSnapshotOptions {
         Self {
             render_mode: ContextSnapshotRenderMode::RedactedText,
             strip_capability_instructions: false,
-            strip_agents_md_user_context: false,
         }
     }
 }
@@ -48,10 +46,6 @@ impl ContextSnapshotOptions {
         self
     }
 
-    pub fn strip_agents_md_user_context(mut self) -> Self {
-        self.strip_agents_md_user_context = true;
-        self
-    }
 }
 
 pub fn format_request_input_snapshot(
@@ -94,12 +88,6 @@ pub fn format_response_items_snapshot(items: &[Value], options: &ContextSnapshot
                                         if options.strip_capability_instructions
                                             && role == "developer"
                                             && is_capability_instruction_text(text)
-                                        {
-                                            return None;
-                                        }
-                                        if options.strip_agents_md_user_context
-                                            && role == "user"
-                                            && text.starts_with("# AGENTS.md instructions for ")
                                         {
                                             return None;
                                         }
@@ -379,9 +367,6 @@ fn canonicalize_snapshot_text(text: &str) -> String {
     if text.starts_with(PLUGINS_INSTRUCTIONS_OPEN_TAG) {
         return "<PLUGINS_INSTRUCTIONS>".to_string();
     }
-    if text.starts_with("# AGENTS.md instructions for ") {
-        return "<AGENTS_MD>".to_string();
-    }
     if text.starts_with("<environment_context>") {
         let subagent_count = text
             .split_once("<subagents>")
@@ -466,7 +451,7 @@ mod tests {
             "role": "user",
             "content": [{
                 "type": "input_text",
-                "text": "# AGENTS.md instructions for /tmp/example\n\n<INSTRUCTIONS>\nbody\n</INSTRUCTIONS>"
+                "text": "plain user text"
             }]
         })];
 
@@ -477,7 +462,7 @@ mod tests {
 
         assert_eq!(
             rendered,
-            r"00:message/user:# AGENTS.md instructions for /tmp/example\n\n<INSTRUCTIONS>\nbody\n</INSTRUCTIONS>"
+            "00:message/user:plain user text"
         );
     }
 
@@ -501,13 +486,13 @@ mod tests {
     }
 
     #[test]
-    fn redacted_text_mode_keeps_canonical_placeholders() {
+    fn redacted_text_mode_keeps_plain_user_text() {
         let items = vec![json!({
             "type": "message",
             "role": "user",
             "content": [{
                 "type": "input_text",
-                "text": "# AGENTS.md instructions for /tmp/example\n\n<INSTRUCTIONS>\nbody\n</INSTRUCTIONS>"
+                "text": "plain user text"
             }]
         })];
 
@@ -516,7 +501,7 @@ mod tests {
             &ContextSnapshotOptions::default().render_mode(ContextSnapshotRenderMode::RedactedText),
         );
 
-        assert_eq!(rendered, "00:message/user:<AGENTS_MD>");
+        assert_eq!(rendered, "00:message/user:plain user text");
     }
 
     #[test]
@@ -571,33 +556,6 @@ mod tests {
         );
 
         assert_eq!(rendered, "00:message/developer:<PERMISSIONS_INSTRUCTIONS>");
-    }
-
-    #[test]
-    fn strip_agents_md_user_context_omits_agents_fragment_from_user_messages() {
-        let items = vec![json!({
-            "type": "message",
-            "role": "user",
-            "content": [
-                {
-                    "type": "input_text",
-                    "text": "# AGENTS.md instructions for /tmp/example\n\n<INSTRUCTIONS>\n- test\n</INSTRUCTIONS>"
-                },
-                {
-                    "type": "input_text",
-                    "text": "<environment_context>\n  <cwd>/tmp/example</cwd>\n</environment_context>"
-                }
-            ]
-        })];
-
-        let rendered = format_response_items_snapshot(
-            &items,
-            &ContextSnapshotOptions::default()
-                .render_mode(ContextSnapshotRenderMode::RedactedText)
-                .strip_agents_md_user_context(),
-        );
-
-        assert_eq!(rendered, "00:message/user:<ENVIRONMENT_CONTEXT:cwd=<CWD>>");
     }
 
     #[test]

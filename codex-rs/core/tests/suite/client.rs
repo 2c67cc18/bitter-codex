@@ -359,12 +359,7 @@ async fn resume_includes_initial_messages_and_sends_prior_items() {
 
     // Configure Codex to resume from our file
     let codex_home = Arc::new(TempDir::new().unwrap());
-    let mut builder = test_codex()
-        .with_home(codex_home.clone())
-        .with_config(|config| {
-            // Ensure user instructions are NOT delivered on resume.
-            config.user_instructions = Some("be nice".to_string());
-        });
+    let mut builder = test_codex().with_home(codex_home.clone());
     let test = builder
         .resume(&server, codex_home, session_path.clone())
         .await
@@ -440,14 +435,6 @@ async fn resume_includes_initial_messages_and_sends_prior_items() {
         .iter()
         .position(|(role, text)| role == "developer" && text.contains("<permissions instructions>"))
         .expect("permissions message");
-    let pos_user_instructions = messages
-        .iter()
-        .position(|(role, text)| {
-            role == "user"
-                && text.contains("be nice")
-                && (text.starts_with("# AGENTS.md instructions for "))
-        })
-        .expect("user instructions");
     let pos_environment = messages
         .iter()
         .position(|(role, text)| role == "user" && text.contains("<environment_context>"))
@@ -459,8 +446,7 @@ async fn resume_includes_initial_messages_and_sends_prior_items() {
 
     assert!(pos_prior_user < pos_prior_assistant);
     assert!(pos_prior_assistant < pos_permissions);
-    assert!(pos_permissions < pos_user_instructions);
-    assert!(pos_user_instructions < pos_environment);
+    assert!(pos_permissions < pos_environment);
     assert!(pos_environment < pos_new_user);
 }
 
@@ -1153,86 +1139,6 @@ async fn prefers_apikey_when_config_prefers_apikey_even_with_chatgpt_tokens() {
         .unwrap();
 
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn includes_user_instructions_message_in_request() {
-    skip_if_no_network!();
-    let server = MockServer::start().await;
-
-    let resp_mock = mount_sse_once(
-        &server,
-        sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
-    )
-    .await;
-
-    let mut builder = test_codex()
-        .with_auth(CodexAuth::from_api_key("Test API Key"))
-        .with_config(|config| {
-            config.user_instructions = Some("be nice".to_string());
-        });
-    let codex = builder
-        .build(&server)
-        .await
-        .expect("create new conversation")
-        .codex;
-
-    codex
-        .submit(Op::UserInput {
-            environments: None,
-            items: vec![UserInput::Text {
-                text: "hello".into(),
-                text_elements: Vec::new(),
-            }],
-            final_output_json_schema: None,
-            responsesapi_client_metadata: None,
-            thread_settings: Default::default(),
-        })
-        .await
-        .unwrap();
-
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
-
-    let request = resp_mock.single_request();
-    let request_body = request.body_json();
-
-    assert!(
-        !request_body["instructions"]
-            .as_str()
-            .unwrap()
-            .contains("be nice")
-    );
-    assert_message_role(&request_body["input"][0], "developer");
-    let permissions_text = request_body["input"][0]["content"][0]["text"]
-        .as_str()
-        .expect("invalid permissions message content");
-    assert!(
-        permissions_text.contains("`sandbox_mode`"),
-        "expected permissions message to mention sandbox_mode, got {permissions_text:?}"
-    );
-
-    assert_message_role(&request_body["input"][1], "user");
-    let user_context_texts = message_input_texts(&request_body["input"][1]);
-    assert!(
-        user_context_texts
-            .iter()
-            .any(|text| text.starts_with("# AGENTS.md instructions for ")),
-        "expected AGENTS text in contextual user message, got {user_context_texts:?}"
-    );
-    let ui_text = user_context_texts
-        .iter()
-        .copied()
-        .find(|text| text.contains("<INSTRUCTIONS>"))
-        .expect("invalid message content");
-    assert!(ui_text.contains("<INSTRUCTIONS>"));
-    assert!(ui_text.contains("be nice"));
-    assert!(
-        user_context_texts
-            .iter()
-            .any(|text| text.starts_with("<environment_context>")
-                && text.ends_with("</environment_context>")),
-        "expected environment context in contextual user message, got {user_context_texts:?}"
-    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2183,7 +2089,6 @@ async fn includes_developer_instructions_message_in_request() {
     let mut builder = test_codex()
         .with_auth(CodexAuth::from_api_key("Test API Key"))
         .with_config(|config| {
-            config.user_instructions = Some("be nice".to_string());
             config.developer_instructions = Some("be useful".to_string());
         });
     let codex = builder
@@ -2215,12 +2120,6 @@ async fn includes_developer_instructions_message_in_request() {
         .as_str()
         .expect("invalid permissions message content");
 
-    assert!(
-        !request_body["instructions"]
-            .as_str()
-            .unwrap()
-            .contains("be nice")
-    );
     assert_message_role(&request_body["input"][0], "developer");
     assert!(
         permissions_text.contains("`sandbox_mode`"),
@@ -2243,19 +2142,6 @@ async fn includes_developer_instructions_message_in_request() {
 
     assert_message_role(&request_body["input"][1], "user");
     let user_context_texts = message_input_texts(&request_body["input"][1]);
-    assert!(
-        user_context_texts
-            .iter()
-            .any(|text| text.starts_with("# AGENTS.md instructions for ")),
-        "expected AGENTS text in contextual user message, got {user_context_texts:?}"
-    );
-    let ui_text = user_context_texts
-        .iter()
-        .copied()
-        .find(|text| text.contains("<INSTRUCTIONS>"))
-        .expect("invalid message content");
-    assert!(ui_text.contains("<INSTRUCTIONS>"));
-    assert!(ui_text.contains("be nice"));
     assert!(
         user_context_texts
             .iter()

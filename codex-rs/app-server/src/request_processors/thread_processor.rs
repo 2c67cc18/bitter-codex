@@ -664,9 +664,8 @@ impl ThreadRequestProcessor {
     }
 
     async fn instruction_sources_from_config(config: &Config) -> Vec<AbsolutePathBuf> {
-        codex_core::AgentsMdManager::new(config)
-            .instruction_sources(LOCAL_FS.as_ref())
-            .await
+        let _ = config;
+        Vec::new()
     }
 
     async fn load_thread(

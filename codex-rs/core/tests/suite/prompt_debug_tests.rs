@@ -21,7 +21,6 @@ async fn build_prompt_input_includes_context_and_user_message() -> Result<()> {
         })
         .build()
         .await?;
-    config.user_instructions = Some("Project-specific test instructions".to_string());
 
     let input = build_prompt_input(
         config,

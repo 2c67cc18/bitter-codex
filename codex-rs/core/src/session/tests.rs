@@ -1784,8 +1784,7 @@ async fn fork_startup_context_then_first_turn_diff_snapshot() -> anyhow::Result<
         &[("First Forked Turn Request", &request)],
         &ContextSnapshotOptions::default()
             .render_mode(ContextSnapshotRenderMode::KindWithTextPrefix { max_chars: 96 })
-            .strip_capability_instructions()
-            .strip_agents_md_user_context(),
+            .strip_capability_instructions(),
     );
 
     let mut settings = insta::Settings::clone_current();
@@ -2413,7 +2412,6 @@ async fn set_rate_limits_retains_previous_credits() {
         collaboration_mode,
         model_reasoning_summary: config.model_reasoning_summary,
         developer_instructions: config.developer_instructions.clone(),
-        user_instructions: config.user_instructions.clone(),
         service_tier: None,
         personality: config.personality,
         base_instructions: config
@@ -2517,7 +2515,6 @@ async fn set_rate_limits_updates_plan_type_when_present() {
         collaboration_mode,
         model_reasoning_summary: config.model_reasoning_summary,
         developer_instructions: config.developer_instructions.clone(),
-        user_instructions: config.user_instructions.clone(),
         service_tier: None,
         personality: config.personality,
         base_instructions: config
@@ -3044,7 +3041,6 @@ pub(crate) async fn make_session_configuration_for_tests() -> SessionConfigurati
         collaboration_mode,
         model_reasoning_summary: config.model_reasoning_summary,
         developer_instructions: config.developer_instructions.clone(),
-        user_instructions: config.user_instructions.clone(),
         service_tier: None,
         personality: config.personality,
         base_instructions: config
@@ -3787,7 +3783,6 @@ async fn session_new_fails_when_zsh_fork_enabled_without_zsh_path() {
         collaboration_mode,
         model_reasoning_summary: config.model_reasoning_summary,
         developer_instructions: config.developer_instructions.clone(),
-        user_instructions: config.user_instructions.clone(),
         service_tier: None,
         personality: config.personality,
         base_instructions: config
@@ -3894,7 +3889,6 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         collaboration_mode,
         model_reasoning_summary: config.model_reasoning_summary,
         developer_instructions: config.developer_instructions.clone(),
-        user_instructions: config.user_instructions.clone(),
         service_tier: None,
         personality: config.personality,
         base_instructions: config
@@ -4113,7 +4107,6 @@ async fn make_session_with_config_and_rx(
         collaboration_mode,
         model_reasoning_summary: config.model_reasoning_summary,
         developer_instructions: config.developer_instructions.clone(),
-        user_instructions: config.user_instructions.clone(),
         service_tier: None,
         personality: config.personality,
         base_instructions: config
@@ -4214,7 +4207,6 @@ async fn make_session_with_history_source_and_agent_control_and_rx(
         collaboration_mode,
         model_reasoning_summary: config.model_reasoning_summary,
         developer_instructions: config.developer_instructions.clone(),
-        user_instructions: config.user_instructions.clone(),
         service_tier: None,
         personality: config.personality,
         base_instructions: config
@@ -5583,7 +5575,6 @@ where
         collaboration_mode,
         model_reasoning_summary: config.model_reasoning_summary,
         developer_instructions: config.developer_instructions.clone(),
-        user_instructions: config.user_instructions.clone(),
         service_tier: None,
         personality: config.personality,
         base_instructions: config
