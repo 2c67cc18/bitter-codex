@@ -12,14 +12,6 @@ fn detects_environment_context_fragment() {
 }
 
 #[test]
-fn detects_agents_instructions_fragment() {
-    assert!(is_contextual_user_fragment(&ContentItem::InputText {
-        text: "# AGENTS.md instructions for /tmp\n\n<INSTRUCTIONS>\nbody\n</INSTRUCTIONS>"
-            .to_string(),
-    }));
-}
-
-#[test]
 fn detects_subagent_notification_fragment_case_insensitively() {
     assert!(SubagentNotification::matches_text(
         "<SUBAGENT_NOTIFICATION>{}</subagent_notification>"

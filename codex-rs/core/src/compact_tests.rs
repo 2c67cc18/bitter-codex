@@ -99,11 +99,9 @@ fn collect_user_messages_filters_session_prefix_entries() {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
-                text: r#"# AGENTS.md instructions for project
-
-<INSTRUCTIONS>
+                text: r#"<goal_context>
 do things
-</INSTRUCTIONS>"#
+</goal_context>"#
                     .to_string(),
             }],
             phase: None,
@@ -316,11 +314,9 @@ async fn process_compacted_history_drops_non_user_content_messages() {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
-                text: r#"# AGENTS.md instructions for /repo
-
-<INSTRUCTIONS>
+                text: r#"<goal_context>
 keep me updated
-</INSTRUCTIONS>"#
+</goal_context>"#
                     .to_string(),
             }],
             phase: None,

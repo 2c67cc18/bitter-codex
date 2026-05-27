@@ -1,5 +1,3 @@
-use crate::agents_md::DEFAULT_AGENTS_MD_FILENAME;
-use crate::agents_md::LOCAL_AGENTS_MD_FILENAME;
 use crate::config::edit::ConfigEdit;
 use crate::config::edit::ConfigEditsBuilder;
 use crate::config::edit::apply_blocking;
@@ -202,53 +200,6 @@ async fn load_config_normalizes_relative_cwd_override() -> std::io::Result<()> {
     .await?;
 
     assert_eq!(config.cwd, expected_cwd);
-    Ok(())
-}
-
-#[tokio::test]
-async fn load_config_loads_global_agents_instructions() -> std::io::Result<()> {
-    let codex_home = tempdir()?;
-    std::fs::write(
-        codex_home.path().join(DEFAULT_AGENTS_MD_FILENAME),
-        "\n  global instructions  \n",
-    )?;
-
-    let mut config = Config::load_from_base_config_with_overrides(
-        ConfigToml::default(),
-        ConfigOverrides::default(),
-        codex_home.abs(),
-    )
-    .await?;
-    let _ = config.features.enable(Feature::MemoryTool);
-
-    assert_eq!(
-        config.user_instructions.as_deref(),
-        Some("global instructions")
-    );
-    Ok(())
-}
-
-#[tokio::test]
-async fn load_config_prefers_global_agents_override_instructions() -> std::io::Result<()> {
-    let codex_home = tempdir()?;
-    std::fs::write(
-        codex_home.path().join(DEFAULT_AGENTS_MD_FILENAME),
-        "global instructions",
-    )?;
-    let global_agents_override_path = codex_home.path().join(LOCAL_AGENTS_MD_FILENAME);
-    std::fs::write(&global_agents_override_path, "local override instructions")?;
-
-    let config = Config::load_from_base_config_with_overrides(
-        ConfigToml::default(),
-        ConfigOverrides::default(),
-        codex_home.abs(),
-    )
-    .await?;
-
-    assert_eq!(
-        config.user_instructions.as_deref(),
-        Some("local override instructions")
-    );
     Ok(())
 }
 
@@ -7710,12 +7661,9 @@ model_verbosity = "high"
 
     let cfg: ConfigToml = toml::from_str(toml).expect("TOML deserialization should succeed");
 
-    // Use a temporary directory for the cwd so it does not contain an
-    // AGENTS.md file.
+    // Use a temporary directory for the cwd.
     let cwd_temp_dir = TempDir::new().unwrap();
     let cwd = cwd_temp_dir.path().to_path_buf();
-    // Make it look like a Git repo so it does not search for AGENTS.md in
-    // a parent folder, either.
     std::fs::write(cwd.join(".git"), "gitdir: nowhere")?;
 
     let codex_home_temp_dir = TempDir::new().unwrap();

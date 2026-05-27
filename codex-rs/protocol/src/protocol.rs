@@ -86,8 +86,6 @@ pub use crate::request_user_input::RequestUserInputEvent;
 
 /// Open/close tags for special user-input blocks. Used across crates to avoid
 /// duplicated hardcoded strings.
-pub const USER_INSTRUCTIONS_OPEN_TAG: &str = "<user_instructions>";
-pub const USER_INSTRUCTIONS_CLOSE_TAG: &str = "</user_instructions>";
 pub const ENVIRONMENT_CONTEXT_OPEN_TAG: &str = "<environment_context>";
 pub const ENVIRONMENT_CONTEXT_CLOSE_TAG: &str = "</environment_context>";
 pub const APPS_INSTRUCTIONS_OPEN_TAG: &str = "<apps_instructions>";
@@ -2464,9 +2462,8 @@ impl fmt::Display for InternalSessionSource {
 
 /// SessionMeta contains session-level data that doesn't correspond to a specific turn.
 ///
-/// NOTE: There used to be an `instructions` field here, which stored user_instructions, but we
-/// now save that on TurnContext. base_instructions stores the base instructions for the session,
-/// and should be used when there is no config override.
+/// NOTE: There used to be an `instructions` field here. base_instructions stores the base
+/// instructions for the session, and should be used when there is no config override.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SessionMeta {
     pub id: ThreadId,

@@ -188,29 +188,13 @@ fn skips_unnamed_image_label_text() {
 }
 
 #[test]
-fn skips_user_instructions_and_env() {
+fn skips_contextual_user_fragments_and_env() {
     let items = vec![
             ResponseItem::Message {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
-                    text: "# AGENTS.md instructions for test_directory\n\n<INSTRUCTIONS>\ntest_text\n</INSTRUCTIONS>".to_string(),
-                }],
-            phase: None,
-            },
-            ResponseItem::Message {
-                id: None,
-                role: "user".to_string(),
-                content: vec![ContentItem::InputText {
                     text: "<environment_context>test_text</environment_context>".to_string(),
-                }],
-            phase: None,
-            },
-            ResponseItem::Message {
-                id: None,
-                role: "user".to_string(),
-                content: vec![ContentItem::InputText {
-                    text: "# AGENTS.md instructions for test_directory\n\n<INSTRUCTIONS>\ntest_text\n</INSTRUCTIONS>".to_string(),
                 }],
             phase: None,
             },
@@ -239,9 +223,7 @@ fn skips_user_instructions_and_env() {
                         text: "<environment_context>ctx</environment_context>".to_string(),
                     },
                     ContentItem::InputText {
-                        text:
-                            "# AGENTS.md instructions for dir\n\n<INSTRUCTIONS>\nbody\n</INSTRUCTIONS>"
-                                .to_string(),
+                        text: "<user_shell_command>echo 42</user_shell_command>".to_string(),
                     },
                 ],
                 phase: None,

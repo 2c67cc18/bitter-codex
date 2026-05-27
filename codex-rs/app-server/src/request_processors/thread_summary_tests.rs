@@ -25,7 +25,7 @@ fn extract_conversation_summary_prefers_plain_user_messages() -> Result<()> {
             "role": "user",
             "content": [{
                 "type": "input_text",
-                "text": "# AGENTS.md instructions for project\n\n<INSTRUCTIONS>\n<AGENTS.md contents>\n</INSTRUCTIONS>".to_string(),
+                "text": "<environment_context>\n<cwd>/tmp/project</cwd>\n</environment_context>".to_string(),
             }],
         }),
         json!({

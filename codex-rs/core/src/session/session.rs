@@ -51,9 +51,6 @@ pub(crate) struct SessionConfiguration {
     /// Developer instructions that supplement the base instructions.
     pub(super) developer_instructions: Option<String>,
 
-    /// Model instructions that are appended to the base instructions.
-    pub(super) user_instructions: Option<String>,
-
     /// Personality preference for the model.
     pub(super) personality: Option<Personality>,
 
