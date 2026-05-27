@@ -32,6 +32,8 @@ use codex_protocol::protocol::GuardianAssessmentAction;
 use codex_protocol::protocol::GuardianAssessmentEvent;
 use codex_protocol::protocol::PatchApplyBeginEvent;
 use codex_protocol::protocol::PatchApplyEndEvent;
+use codex_shell_command::parse_command::parse_command;
+use codex_shell_command::parse_command::shlex_join;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -170,9 +172,17 @@ pub fn build_item_from_guardian_event(
                     .collect::<Vec<_>>()
             };
             let command = shlex_join(&argv);
-            let command_actions = vec![CommandAction::Unknown {
-                command: command.clone(),
-            }];
+            let parsed_cmd = parse_command(&argv);
+            let command_actions = if parsed_cmd.is_empty() {
+                vec![CommandAction::Unknown {
+                    command: command.clone(),
+                }]
+            } else {
+                parsed_cmd
+                    .into_iter()
+                    .map(|parsed| CommandAction::from_core_with_cwd(parsed, cwd))
+                    .collect()
+            };
             Some(ThreadItem::CommandExecution {
                 id: id.clone(),
                 command,
@@ -188,25 +198,9 @@ pub fn build_item_from_guardian_event(
         }
         GuardianAssessmentAction::ApplyPatch { .. }
         | GuardianAssessmentAction::NetworkAccess { .. }
-        | GuardianAssessmentAction::McpToolCall { .. } => None,
+        | GuardianAssessmentAction::McpToolCall { .. }
+        | GuardianAssessmentAction::RequestPermissions { .. } => None,
     }
-}
-
-fn shlex_join(argv: &[String]) -> String {
-    argv.iter()
-        .map(|arg| {
-            if arg.is_empty()
-                || arg
-                    .chars()
-                    .any(|ch| ch.is_whitespace() || matches!(ch, '\'' | '"' | '\\' | '$' | '`'))
-            {
-                format!("'{}'", arg.replace('\'', "'\\''"))
-            } else {
-                arg.clone()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 pub fn guardian_auto_approval_review_notification(

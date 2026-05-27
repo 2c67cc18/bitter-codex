@@ -723,12 +723,8 @@ server_notification_definitions! {
     /// This event is internal-only. Used by Codex Cloud.
     RawResponseItemCompleted => "rawResponseItem/completed" (v2::RawResponseItemCompletedNotification),
     AgentMessageDelta => "item/agentMessage/delta" (v2::AgentMessageDeltaNotification),
-    PlanDelta => "item/plan/delta" (v2::PlanDeltaNotification),
-    FileChangePatchUpdated => "item/fileChange/patchUpdated" (v2::FileChangePatchUpdatedNotification),
     CommandExecutionOutputDelta => "item/commandExecution/outputDelta" (v2::CommandExecutionOutputDeltaNotification),
     TerminalInteraction => "item/commandExecution/terminalInteraction" (v2::TerminalInteractionNotification),
-    ItemGuardianApprovalReviewStarted => "item/guardianApprovalReview/started" (v2::ItemGuardianApprovalReviewStartedNotification),
-    ItemGuardianApprovalReviewCompleted => "item/guardianApprovalReview/completed" (v2::ItemGuardianApprovalReviewCompletedNotification),
     ServerRequestResolved => "serverRequest/resolved" (v2::ServerRequestResolvedNotification),
     AccountUpdated => "account/updated" (v2::AccountUpdatedNotification),
     AccountRateLimitsUpdated => "account/rateLimits/updated" (v2::AccountRateLimitsUpdatedNotification),

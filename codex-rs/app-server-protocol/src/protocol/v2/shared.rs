@@ -214,6 +214,25 @@ pub enum ApprovalsReviewer {
     AutoReview,
 }
 
+
+fn string_enum_schema_with_description(values: &[&str], description: &str) -> Schema {
+    let mut schema = SchemaObject {
+        instance_type: Some(InstanceType::String.into()),
+        metadata: Some(Box::new(Metadata {
+            description: Some(description.to_string()),
+            ..Default::default()
+        })),
+        ..Default::default()
+    };
+    schema.enum_values = Some(
+        values
+            .iter()
+            .map(|value| JsonValue::String((*value).to_string()))
+            .collect(),
+    );
+    Schema::Object(schema)
+}
+
 impl ApprovalsReviewer {
     pub fn to_core(self) -> CoreApprovalsReviewer {
         match self {
