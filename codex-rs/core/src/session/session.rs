@@ -989,7 +989,6 @@ impl Session {
                     Self::build_model_client_beta_features_header(config.as_ref()),
                     attestation_provider,
                 ),
-                code_mode_service: crate::tools::code_mode::CodeModeService::new(),
                 environment_manager,
             };
             services

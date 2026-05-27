@@ -595,6 +595,13 @@ explicitly non-overlapping:
   plan/file-change notifications, guardian request/review variants, and
   schema/codegen helper types. Those must be deleted in the later protocol/app
   trim; do not restore `tool_search` or code-mode wrappers to satisfy them.
+- A restarted `mcp-code-mode-config-session-wave-b2` worker stalled after a
+  small coherent diff. Root stopped the worker and reviewed/adopted only that
+  diff: the per-turn code-mode service worker, session service field,
+  construction sites, `tools::code_mode` module registration, and stale
+  code-mode trace tests were removed. This still leaves broader MCP config and
+  session refresh producers for a later MCP slice; dynamic tools remain outside
+  the removed code-mode service path.
 
 ### Daemex sandbox CLI copy follow-up
 

@@ -1,4 +1,3 @@
-pub(crate) mod code_mode;
 pub(crate) mod context;
 pub(crate) mod events;
 pub(crate) mod handlers;

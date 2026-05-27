@@ -15,8 +15,6 @@ use crate::function_tool::FunctionCallError;
 use crate::session::session::Session;
 use crate::session::tests::make_session_and_context;
 use crate::session::turn_context::TurnContext;
-use crate::tools::code_mode::CodeModeWaitHandler;
-use crate::tools::code_mode::WAIT_TOOL_NAME;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolCallSource;
 use crate::tools::context::ToolInvocation;
@@ -61,16 +59,10 @@ impl ToolExecutor<ToolInvocation> for TestHandler {
 impl CoreToolRuntime for TestHandler {}
 
 #[tokio::test]
-async fn dispatch_lifecycle_trace_records_direct_and_code_mode_requesters() -> anyhow::Result<()> {
+async fn dispatch_lifecycle_trace_records_direct_requesters() -> anyhow::Result<()> {
     let temp = TempDir::new()?;
     let (mut session, turn) = make_session_and_context().await;
     attach_test_trace(&mut session, &turn, temp.path())?;
-    session.services.rollout_thread_trace.start_code_cell_trace(
-        turn.sub_id.as_str(),
-        "cell-1",
-        "call-code",
-        "await tools.test_tool({})",
-    );
 
     let registry = ToolRegistry::with_handler_for_test(Arc::new(TestHandler {
         tool_name: codex_tools::ToolName::plain("test_tool"),
@@ -85,19 +77,6 @@ async fn dispatch_lifecycle_trace_records_direct_and_code_mode_requesters() -> a
             "direct-call",
             "test_tool",
             ToolCallSource::Direct,
-            "{}",
-        ))
-        .await?;
-    registry
-        .dispatch_any(test_invocation(
-            session,
-            turn,
-            "code-mode-call",
-            "test_tool",
-            ToolCallSource::CodeMode {
-                cell_id: "cell-1".to_string(),
-                runtime_tool_call_id: "tool-1".to_string(),
-            },
             "{}",
         ))
         .await?;
@@ -122,26 +101,6 @@ async fn dispatch_lifecycle_trace_records_direct_and_code_mode_requesters() -> a
             .raw_result_payload_id
             .is_some(),
         "direct calls should keep the model-facing result payload",
-    );
-    assert_eq!(
-        replayed.tool_calls["code-mode-call"].model_visible_call_id,
-        None,
-    );
-    assert_eq!(
-        replayed.tool_calls["code-mode-call"].code_mode_runtime_tool_id,
-        Some("tool-1".to_string()),
-    );
-    assert_eq!(
-        replayed.tool_calls["code-mode-call"].requester,
-        ToolCallRequester::CodeCell {
-            code_cell_id: "code_cell:call-code".to_string(),
-        },
-    );
-    assert!(
-        replayed.tool_calls["code-mode-call"]
-            .raw_result_payload_id
-            .is_some(),
-        "code-mode calls should keep the result returned to JavaScript",
     );
 
     Ok(())
@@ -207,38 +166,6 @@ async fn dispatch_lifecycle_trace_records_incompatible_payload_failures() -> any
     let tool_call = &replayed.tool_calls["incompatible-call"];
     assert_eq!(tool_call.execution.status, ExecutionStatus::Failed);
     assert!(tool_call.raw_result_payload_id.is_some());
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn missing_code_mode_wait_traces_only_the_wait_tool_call() -> anyhow::Result<()> {
-    let temp = TempDir::new()?;
-    let (mut session, turn) = make_session_and_context().await;
-    attach_test_trace(&mut session, &turn, temp.path())?;
-
-    let registry = ToolRegistry::with_handler_for_test(Arc::new(CodeModeWaitHandler));
-    let session = Arc::new(session);
-    let turn = Arc::new(turn);
-
-    registry
-        .dispatch_any(test_invocation(
-            session,
-            turn,
-            "wait-call",
-            WAIT_TOOL_NAME,
-            ToolCallSource::Direct,
-            r#"{"cell_id":"noop","terminate":true}"#,
-        ))
-        .await?;
-
-    let replayed = codex_rollout_trace::replay_bundle(single_bundle_dir(temp.path())?)?;
-    assert_eq!(replayed.code_cells.len(), 0);
-    assert!(
-        replayed.tool_calls["wait-call"]
-            .raw_result_payload_id
-            .is_some()
-    );
 
     Ok(())
 }

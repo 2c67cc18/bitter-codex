@@ -11,7 +11,6 @@ use crate::exec_policy::ExecPolicyManager;
 use crate::guardian::GuardianRejection;
 use crate::guardian::GuardianRejectionCircuitBreaker;
 use crate::mcp::McpManager;
-use crate::tools::code_mode::CodeModeService;
 use crate::tools::network_approval::NetworkApprovalService;
 use crate::tools::sandboxing::ApprovalStore;
 use crate::unified_exec::UnifiedExecProcessManager;
@@ -67,7 +66,6 @@ pub(crate) struct SessionServices {
     pub(crate) attestation_provider: Option<Arc<dyn AttestationProvider>>,
     /// Session-scoped model client shared across turns.
     pub(crate) model_client: ModelClient,
-    pub(crate) code_mode_service: CodeModeService,
     /// Shared process-level environment registry. Sessions carry an `Arc` handle so they can pass
     /// the same manager through child-thread spawn paths without reconstructing it.
     pub(crate) environment_manager: Arc<EnvironmentManager>,
