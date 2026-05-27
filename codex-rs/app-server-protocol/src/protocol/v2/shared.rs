@@ -202,9 +202,6 @@ impl From<CoreAskForApproval> for AskForApproval {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-    type = r#""user" | "auto_review" | "guardian_subagent""#,
-    export_to = "v2/"
-)]
 /// Configures who approval requests are routed to for review. Examples
 /// include sandbox escapes, blocked network access, MCP approval prompts, and
 /// ARC escalations. Defaults to `user`. `auto_review` uses a carefully

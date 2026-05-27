@@ -23,4 +23,3 @@ pub use protocol::v1::InterruptConversationResponse;
 pub use protocol::v1::LoginApiKeyParams;
 pub use protocol::v1::UserSavedConfig;
 pub use protocol::v2::*;
-#[doc(hidden)]

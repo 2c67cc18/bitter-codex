@@ -748,6 +748,3 @@ server_notification_definitions! {
 client_notification_definitions! {
     Initialized,
 }
-
-
-#[cfg(test)]
