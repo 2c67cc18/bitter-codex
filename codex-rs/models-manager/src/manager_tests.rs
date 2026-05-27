@@ -210,7 +210,6 @@ c2ln",
             account_id: Some("account_id".to_string()),
         }),
         last_refresh: Some(Utc::now()),
-        agent_identity: None,
     };
     std::fs::create_dir_all(codex_home).expect("codex home should be created");
     std::fs::write(

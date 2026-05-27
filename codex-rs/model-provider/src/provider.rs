@@ -210,9 +210,7 @@ impl ModelProvider for ConfiguredModelProvider {
                 })
                 .map(|auth| match &auth {
                     CodexAuth::ApiKey(_) => Ok(ProviderAccount::ApiKey),
-                    CodexAuth::Chatgpt(_)
-                    | CodexAuth::ChatgptAuthTokens(_)
-                    | CodexAuth::AgentIdentity(_) => {
+                    CodexAuth::Chatgpt(_) | CodexAuth::ChatgptAuthTokens(_) => {
                         let email = auth.get_account_email();
                         let plan_type = auth.account_plan_type();
 
