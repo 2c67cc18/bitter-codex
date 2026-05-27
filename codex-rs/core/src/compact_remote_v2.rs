@@ -4,9 +4,7 @@ use crate::Prompt;
 use crate::ResponseStream;
 use crate::client::ModelClientSession;
 use crate::client_common::ResponseEvent;
-use crate::compact::CompactionAnalyticsAttempt;
 use crate::compact::InitialContextInjection;
-use crate::compact::compaction_status_from_result;
 use crate::compact_remote::build_compact_request_log_data;
 use crate::compact_remote::log_remote_compact_failure;
 use crate::compact_remote::process_compacted_history;
@@ -20,10 +18,6 @@ use crate::session::session::Session;
 use crate::session::turn::built_tools;
 use crate::session::turn_context::TurnContext;
 use crate::util::backoff;
-use codex_analytics::CompactionImplementation;
-use codex_analytics::CompactionPhase;
-use codex_analytics::CompactionReason;
-use codex_analytics::CompactionTrigger;
 use codex_features::Feature;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
@@ -106,27 +100,11 @@ async fn run_remote_compact_task_inner(
     reason: CompactionReason,
     phase: CompactionPhase,
 ) -> CodexResult<()> {
-    let attempt = CompactionAnalyticsAttempt::begin(
-        sess.as_ref(),
-        turn_context.as_ref(),
-        trigger,
-        reason,
-        CompactionImplementation::ResponsesCompactionV2,
-        phase,
-    )
-    .await;
     let pre_compact_outcome = run_pre_compact_hooks(sess, turn_context, trigger).await;
     match pre_compact_outcome {
         PreCompactHookOutcome::Continue => {}
         PreCompactHookOutcome::Stopped { reason } => {
-            let error = reason.unwrap_or_else(|| "PreCompact hook stopped execution".to_string());
-            attempt
-                .track(
-                    sess.as_ref(),
-                    codex_analytics::CompactionStatus::Interrupted,
-                    Some(error),
-                )
-                .await;
+            let _error = reason.unwrap_or_else(|| "PreCompact hook stopped execution".to_string());
             return Err(CodexErr::TurnAborted);
         }
     }
@@ -137,16 +115,12 @@ async fn run_remote_compact_task_inner(
         initial_context_injection,
     )
     .await;
-    let status = compaction_status_from_result(&result);
-    let error = result.as_ref().err().map(ToString::to_string);
     if result.is_ok() {
         let post_compact_outcome = run_post_compact_hooks(sess, turn_context, trigger).await;
         if let PostCompactHookOutcome::Stopped = post_compact_outcome {
-            attempt.track(sess.as_ref(), status, error).await;
             return Err(CodexErr::TurnAborted);
         }
     }
-    attempt.track(sess.as_ref(), status, error.clone()).await;
     if let Err(err) = result {
         let event = EventMsg::Error(
             err.to_error_event(Some("Error running remote compact task".to_string())),

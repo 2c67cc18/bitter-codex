@@ -1130,7 +1130,6 @@ async fn prefers_apikey_when_config_prefers_apikey_even_with_chatgpt_tokens() {
         SessionSource::Exec,
         Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
         empty_extension_registry(),
-        /*analytics_events_client*/ None,
         thread_store_from_config(&config, /*state_db*/ None),
         /*state_db*/ None,
         installation_id,

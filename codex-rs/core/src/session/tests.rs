@@ -4405,7 +4405,6 @@ async fn session_new_fails_when_zsh_fork_enabled_without_zsh_path() {
         Arc::new(codex_extension_api::ExtensionRegistryBuilder::new().build()),
         AgentControl::default(),
         Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
-        /*analytics_events_client*/ None,
         Arc::new(codex_thread_store::LocalThreadStore::new(
             codex_thread_store::LocalThreadStoreConfig::from_config(config.as_ref()),
             /*state_db*/ None,
@@ -4527,11 +4526,6 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         ),
         shell_zsh_path: None,
         main_execve_wrapper_exe: config.main_execve_wrapper_exe.clone(),
-        analytics_events_client: AnalyticsEventsClient::new(
-            Arc::clone(&auth_manager),
-            config.chatgpt_base_url.trim_end_matches('/').to_string(),
-            config.analytics_enabled,
-        ),
         hooks: arc_swap::ArcSwap::from_pointee(Hooks::new(HooksConfig {
             legacy_notify_argv: config.notify.clone(),
             ..HooksConfig::default()
@@ -4748,7 +4742,6 @@ async fn make_session_with_config_and_rx(
         Arc::new(codex_extension_api::ExtensionRegistryBuilder::new().build()),
         AgentControl::default(),
         Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
-        /*analytics_events_client*/ None,
         Arc::new(codex_thread_store::LocalThreadStore::new(
             codex_thread_store::LocalThreadStoreConfig::from_config(config.as_ref()),
             /*state_db*/ None,
@@ -4851,7 +4844,6 @@ async fn make_session_with_history_source_and_agent_control_and_rx(
         Arc::new(codex_extension_api::ExtensionRegistryBuilder::new().build()),
         agent_control,
         Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
-        /*analytics_events_client*/ None,
         Arc::new(codex_thread_store::LocalThreadStore::new(
             codex_thread_store::LocalThreadStoreConfig::from_config(config.as_ref()),
             Some(
@@ -6356,11 +6348,6 @@ where
         ),
         shell_zsh_path: None,
         main_execve_wrapper_exe: config.main_execve_wrapper_exe.clone(),
-        analytics_events_client: AnalyticsEventsClient::new(
-            Arc::clone(&auth_manager),
-            config.chatgpt_base_url.trim_end_matches('/').to_string(),
-            config.analytics_enabled,
-        ),
         hooks: arc_swap::ArcSwap::from_pointee(Hooks::new(HooksConfig {
             legacy_notify_argv: config.notify.clone(),
             ..HooksConfig::default()

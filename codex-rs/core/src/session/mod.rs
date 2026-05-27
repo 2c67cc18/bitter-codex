@@ -5,8 +5,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 
 use crate::agent::AgentControl;
 use crate::agent::AgentStatus;
@@ -42,8 +40,6 @@ use async_channel::Receiver;
 use async_channel::Sender;
 use chrono::Local;
 use chrono::Utc;
-use codex_analytics::AnalyticsEventsClient;
-use codex_analytics::SubAgentThreadStartedInput;
 use codex_app_server_protocol::McpServerElicitationRequest;
 use codex_app_server_protocol::McpServerElicitationRequestParams;
 use codex_config::types::OAuthCredentialsStoreMode;
@@ -413,7 +409,6 @@ pub(crate) struct CodexSpawnArgs {
     pub(crate) user_shell_override: Option<shell::Shell>,
     pub(crate) parent_trace: Option<W3cTraceContext>,
     pub(crate) environment_selections: ResolvedTurnEnvironments,
-    pub(crate) analytics_events_client: Option<AnalyticsEventsClient>,
     pub(crate) thread_store: Arc<dyn ThreadStore>,
     pub(crate) attestation_provider: Option<Arc<dyn AttestationProvider>>,
 }
@@ -473,7 +468,6 @@ impl Codex {
             parent_rollout_thread_trace,
             parent_trace: _,
             environment_selections,
-            analytics_events_client,
             thread_store,
             attestation_provider,
         } = args;
@@ -645,7 +639,6 @@ impl Codex {
             extensions,
             agent_control,
             environment_manager,
-            analytics_events_client,
             thread_store,
             parent_rollout_thread_trace,
             attestation_provider,
@@ -2179,7 +2172,6 @@ impl Session {
                 review_id,
                 request,
                 /*retry_reason*/ None,
-                codex_analytics::GuardianApprovalRequestSource::MainTurn,
                 cancellation_token.clone(),
             );
             let decision = tokio::select! {
@@ -3275,39 +3267,6 @@ impl Session {
     fn show_raw_agent_reasoning(&self) -> bool {
         self.services.show_raw_agent_reasoning
     }
-}
-
-pub(crate) fn emit_subagent_session_started(
-    analytics_events_client: &AnalyticsEventsClient,
-    client_metadata: AppServerClientMetadata,
-    thread_id: ThreadId,
-    parent_thread_id: Option<ThreadId>,
-    thread_config: ThreadConfigSnapshot,
-    subagent_source: SubAgentSource,
-) {
-    let AppServerClientMetadata {
-        client_name,
-        client_version,
-    } = client_metadata;
-    let (Some(client_name), Some(client_version)) = (client_name, client_version) else {
-        tracing::warn!("skipping subagent thread analytics: missing inherited client metadata");
-        return;
-    };
-    let created_at = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    analytics_events_client.track_subagent_thread_started(SubAgentThreadStartedInput {
-        thread_id: thread_id.to_string(),
-        parent_thread_id: parent_thread_id.map(|thread_id| thread_id.to_string()),
-        product_client_id: client_name.clone(),
-        client_name,
-        client_version,
-        model: thread_config.model,
-        ephemeral: thread_config.ephemeral,
-        subagent_source,
-        created_at,
-    });
 }
 
 /// Builds the hook engine for one config snapshot, including any enabled plugin hooks.

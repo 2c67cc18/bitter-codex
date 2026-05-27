@@ -6,7 +6,6 @@ use crate::error_code::internal_error;
 use crate::error_code::invalid_request;
 use crate::outgoing_message::ConnectionRequestId;
 use crate::outgoing_message::OutgoingMessageSender;
-use codex_analytics::AnalyticsEventsClient;
 use codex_app_server_protocol::AppListUpdatedNotification;
 use codex_app_server_protocol::ClientResponsePayload;
 use codex_app_server_protocol::ComputerUseRequirements;
@@ -64,7 +63,6 @@ pub(crate) struct ConfigRequestProcessor {
     config_manager: ConfigManager,
     auth_manager: Arc<AuthManager>,
     thread_manager: Arc<ThreadManager>,
-    analytics_events_client: AnalyticsEventsClient,
 }
 
 impl ConfigRequestProcessor {
@@ -73,14 +71,12 @@ impl ConfigRequestProcessor {
         config_manager: ConfigManager,
         auth_manager: Arc<AuthManager>,
         thread_manager: Arc<ThreadManager>,
-        analytics_events_client: AnalyticsEventsClient,
     ) -> Self {
         Self {
             outgoing,
             config_manager,
             auth_manager,
             thread_manager,
-            analytics_events_client,
         }
     }
 
@@ -381,21 +377,7 @@ impl ConfigRequestProcessor {
         &self,
         pending_changes: std::collections::BTreeMap<String, bool>,
     ) {
-        for (plugin_id, enabled) in pending_changes {
-            let Ok(plugin_id) = PluginId::parse(&plugin_id) else {
-                continue;
-            };
-            let metadata = codex_core_plugins::loader::installed_plugin_telemetry_metadata(
-                self.config_manager.codex_home(),
-                &plugin_id,
-            )
-            .await;
-            if enabled {
-                self.analytics_events_client.track_plugin_enabled(metadata);
-            } else {
-                self.analytics_events_client.track_plugin_disabled(metadata);
-            }
-        }
+        let _ = pending_changes;
     }
 }
 

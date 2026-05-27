@@ -14,14 +14,6 @@ use crate::session::session::Session;
 use crate::session::turn::get_last_assistant_message_from_turn;
 use crate::session::turn_context::TurnContext;
 use crate::util::backoff;
-use codex_analytics::CodexCompactionEvent;
-use codex_analytics::CompactionImplementation;
-use codex_analytics::CompactionPhase;
-use codex_analytics::CompactionReason;
-use codex_analytics::CompactionStatus;
-use codex_analytics::CompactionStrategy;
-use codex_analytics::CompactionTrigger;
-use codex_analytics::now_unix_seconds;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::items::ContextCompactionItem;
@@ -46,6 +38,26 @@ use codex_model_provider_info::ModelProviderInfo;
 pub const SUMMARIZATION_PROMPT: &str = include_str!("../templates/compact/prompt.md");
 pub const SUMMARY_PREFIX: &str = include_str!("../templates/compact/summary_prefix.md");
 const COMPACT_USER_MESSAGE_MAX_TOKENS: usize = 20_000;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CompactionTrigger {
+    Auto,
+    Manual,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CompactionReason {
+    UserRequested,
+    ContextLimit,
+    ModelDownshift,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CompactionPhase {
+    MidTurn,
+    PreTurn,
+    StandaloneTurn,
+}
 
 /// Controls whether compaction replacement history must include initial context.
 ///
@@ -128,23 +140,11 @@ async fn run_compact_task_inner(
     reason: CompactionReason,
     phase: CompactionPhase,
 ) -> CodexResult<()> {
-    let attempt = CompactionAnalyticsAttempt::begin(
-        sess.as_ref(),
-        turn_context.as_ref(),
-        trigger,
-        reason,
-        CompactionImplementation::Responses,
-        phase,
-    )
-    .await;
     let pre_compact_outcome = run_pre_compact_hooks(&sess, &turn_context, trigger).await;
     match pre_compact_outcome {
         PreCompactHookOutcome::Continue => {}
         PreCompactHookOutcome::Stopped { reason } => {
             let error = reason.unwrap_or_else(|| "PreCompact hook stopped execution".to_string());
-            attempt
-                .track(sess.as_ref(), CompactionStatus::Interrupted, Some(error))
-                .await;
             return Err(CodexErr::TurnAborted);
         }
     }
@@ -155,16 +155,12 @@ async fn run_compact_task_inner(
         initial_context_injection,
     )
     .await;
-    let status = compaction_status_from_result(&result);
-    let error = result.as_ref().err().map(ToString::to_string);
     if result.is_ok() {
         let post_compact_outcome = run_post_compact_hooks(&sess, &turn_context, trigger).await;
         if let PostCompactHookOutcome::Stopped = post_compact_outcome {
-            attempt.track(sess.as_ref(), status, error).await;
             return Err(CodexErr::TurnAborted);
         }
     }
-    attempt.track(sess.as_ref(), status, error).await;
     result.map(|_| ())
 }
 
@@ -292,79 +288,6 @@ async fn run_compact_task_inner_impl(
     });
     sess.send_event(&turn_context, warning).await;
     Ok(summary_suffix)
-}
-
-pub(crate) struct CompactionAnalyticsAttempt {
-    thread_id: String,
-    turn_id: String,
-    trigger: CompactionTrigger,
-    reason: CompactionReason,
-    implementation: CompactionImplementation,
-    phase: CompactionPhase,
-    active_context_tokens_before: i64,
-    started_at: u64,
-    start_instant: Instant,
-}
-
-impl CompactionAnalyticsAttempt {
-    pub(crate) async fn begin(
-        sess: &Session,
-        turn_context: &TurnContext,
-        trigger: CompactionTrigger,
-        reason: CompactionReason,
-        implementation: CompactionImplementation,
-        phase: CompactionPhase,
-    ) -> Self {
-        let active_context_tokens_before = sess.get_total_token_usage().await;
-        Self {
-            thread_id: sess.conversation_id.to_string(),
-            turn_id: turn_context.sub_id.clone(),
-            trigger,
-            reason,
-            implementation,
-            phase,
-            active_context_tokens_before,
-            started_at: now_unix_seconds(),
-            start_instant: Instant::now(),
-        }
-    }
-
-    pub(crate) async fn track(
-        self,
-        sess: &Session,
-        status: CompactionStatus,
-        error: Option<String>,
-    ) {
-        let active_context_tokens_after = sess.get_total_token_usage().await;
-        sess.services
-            .analytics_events_client
-            .track_compaction(CodexCompactionEvent {
-                thread_id: self.thread_id,
-                turn_id: self.turn_id,
-                trigger: self.trigger,
-                reason: self.reason,
-                implementation: self.implementation,
-                phase: self.phase,
-                strategy: CompactionStrategy::Memento,
-                status,
-                error,
-                active_context_tokens_before: self.active_context_tokens_before,
-                active_context_tokens_after,
-                started_at: self.started_at,
-                completed_at: now_unix_seconds(),
-                duration_ms: Some(
-                    u64::try_from(self.start_instant.elapsed().as_millis()).unwrap_or(u64::MAX),
-                ),
-            });
-    }
-}
-
-pub(crate) fn compaction_status_from_result<T>(result: &CodexResult<T>) -> CompactionStatus {
-    match result {
-        Ok(_) => CompactionStatus::Completed,
-        Err(CodexErr::Interrupted | CodexErr::TurnAborted) => CompactionStatus::Interrupted,
-        Err(_) => CompactionStatus::Failed,
-    }
 }
 
 pub fn content_items_to_text(content: &[ContentItem]) -> Option<String> {
