@@ -465,7 +465,6 @@ impl ChatgptAuth {
 
 pub const OPENAI_API_KEY_ENV_VAR: &str = "OPENAI_API_KEY";
 pub const CODEX_API_KEY_ENV_VAR: &str = "CODEX_API_KEY";
-pub const CODEX_ACCESS_TOKEN_ENV_VAR: &str = "CODEX_ACCESS_TOKEN";
 
 pub fn read_openai_api_key_from_env() -> Option<String> {
     env::var(OPENAI_API_KEY_ENV_VAR)
@@ -476,10 +475,6 @@ pub fn read_openai_api_key_from_env() -> Option<String> {
 
 pub fn read_codex_api_key_from_env() -> Option<String> {
     read_non_empty_env_var(CODEX_API_KEY_ENV_VAR)
-}
-
-pub fn read_codex_access_token_from_env() -> Option<String> {
-    read_non_empty_env_var(CODEX_ACCESS_TOKEN_ENV_VAR)
 }
 
 fn read_non_empty_env_var(key: &str) -> Option<String> {
@@ -538,28 +533,6 @@ pub fn login_with_api_key(
         tokens: None,
         last_refresh: None,
         agent_identity: None,
-    };
-    save_auth(codex_home, &auth_dot_json, auth_credentials_store_mode)
-}
-
-/// Writes an `auth.json` that contains only the access token.
-pub async fn login_with_access_token(
-    codex_home: &Path,
-    access_token: &str,
-    auth_credentials_store_mode: AuthCredentialsStoreMode,
-    chatgpt_base_url: Option<&str>,
-) -> std::io::Result<()> {
-    let base_url = chatgpt_base_url
-        .unwrap_or(DEFAULT_CHATGPT_BACKEND_BASE_URL)
-        .trim_end_matches('/')
-        .to_string();
-    verified_agent_identity_record(access_token, &base_url).await?;
-    let auth_dot_json = AuthDotJson {
-        auth_mode: Some(ApiAuthMode::AgentIdentity),
-        openai_api_key: None,
-        tokens: None,
-        last_refresh: None,
-        agent_identity: Some(access_token.to_string()),
     };
     save_auth(codex_home, &auth_dot_json, auth_credentials_store_mode)
 }
@@ -760,12 +733,6 @@ async fn load_auth(
     // If the caller explicitly requested ephemeral auth, there is no persisted fallback.
     if auth_credentials_store_mode == AuthCredentialsStoreMode::Ephemeral {
         return Ok(None);
-    }
-
-    if let Some(agent_identity) = read_codex_access_token_from_env() {
-        return CodexAuth::from_agent_identity_jwt(&agent_identity, chatgpt_base_url)
-            .await
-            .map(Some);
     }
 
     // Fall back to the configured persistent store (file/keyring/auto) for managed auth.

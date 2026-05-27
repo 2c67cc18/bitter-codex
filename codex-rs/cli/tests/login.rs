@@ -49,18 +49,3 @@ fn login_with_api_key_reads_stdin_and_writes_auth_json() -> Result<()> {
 
     Ok(())
 }
-
-#[test]
-fn login_with_access_token_rejects_invalid_jwt() -> Result<()> {
-    let codex_home = TempDir::new()?;
-    write_file_auth_config(codex_home.path())?;
-
-    let mut cmd = codex_command(codex_home.path())?;
-    cmd.args(["login", "--with-access-token"])
-        .write_stdin("not-a-jwt\n")
-        .assert()
-        .failure()
-        .stderr(contains("Error logging in with access token"));
-
-    Ok(())
-}
