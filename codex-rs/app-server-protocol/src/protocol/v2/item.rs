@@ -1,22 +1,21 @@
-use super::AdditionalPermissionProfile;
-use super::ExecPolicyAmendment;
-use super::McpToolCallError;
-use super::McpToolCallResult;
-use super::NetworkApprovalContext;
-use super::NetworkApprovalProtocol;
-use super::NetworkPolicyAmendment;
-use super::RequestPermissionProfile;
 use super::UserInput;
 use super::shared::v2_enum_from_core;
+use codex_protocol::approvals::ExecPolicyAmendment;
 use crate::protocol::item_builders::convert_patch_changes;
 use codex_protocol::approvals::GuardianAssessmentAction as CoreGuardianAssessmentAction;
 use codex_protocol::approvals::GuardianAssessmentDecisionSource as CoreGuardianAssessmentDecisionSource;
 use codex_protocol::approvals::GuardianCommandSource as CoreGuardianCommandSource;
+use codex_protocol::approvals::NetworkApprovalContext;
+use codex_protocol::approvals::NetworkApprovalProtocol;
+use codex_protocol::approvals::NetworkPolicyAmendment;
 use codex_protocol::items::AgentMessageContent as CoreAgentMessageContent;
+use codex_protocol::items::McpToolCallError;
 use codex_protocol::items::McpToolCallStatus as CoreMcpToolCallStatus;
 use codex_protocol::items::TurnItem as CoreTurnItem;
 use codex_protocol::memory_citation::MemoryCitation as CoreMemoryCitation;
 use codex_protocol::memory_citation::MemoryCitationEntry as CoreMemoryCitationEntry;
+use codex_protocol::mcp::CallToolResult as McpToolCallResult;
+use codex_protocol::models::AdditionalPermissionProfile;
 use codex_protocol::models::MessagePhase;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort;
@@ -495,13 +494,6 @@ pub struct GuardianMcpToolCallReviewAction {
     pub tool_title: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct GuardianRequestPermissionsReviewAction {
-    pub reason: Option<String>,
-    pub permissions: RequestPermissionProfile,
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum GuardianApprovalReviewAction {
@@ -537,11 +529,6 @@ pub enum GuardianApprovalReviewAction {
         connector_id: Option<String>,
         connector_name: Option<String>,
         tool_title: Option<String>,
-    },
-    #[serde(rename_all = "camelCase")]
-    RequestPermissions {
-        reason: Option<String>,
-        permissions: RequestPermissionProfile,
     },
 }
 
@@ -595,13 +582,6 @@ impl From<CoreGuardianAssessmentAction> for GuardianApprovalReviewAction {
                 connector_name,
                 tool_title,
             },
-            CoreGuardianAssessmentAction::RequestPermissions {
-                reason,
-                permissions,
-            } => Self::RequestPermissions {
-                reason,
-                permissions: permissions.into(),
-            },
         }
     }
 }
@@ -640,7 +620,7 @@ impl From<GuardianApprovalReviewAction> for CoreGuardianAssessmentAction {
             } => Self::NetworkAccess {
                 target,
                 host,
-                protocol: protocol.to_core(),
+                protocol,
                 port,
             },
             GuardianApprovalReviewAction::McpToolCall {
@@ -655,13 +635,6 @@ impl From<GuardianApprovalReviewAction> for CoreGuardianAssessmentAction {
                 connector_id,
                 connector_name,
                 tool_title,
-            },
-            GuardianApprovalReviewAction::RequestPermissions {
-                reason,
-                permissions,
-            } => Self::RequestPermissions {
-                reason,
-                permissions: permissions.into(),
             },
         }
     }

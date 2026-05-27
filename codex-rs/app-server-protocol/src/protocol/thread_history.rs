@@ -10,8 +10,6 @@ use crate::protocol::v2::CollabAgentToolCallStatus;
 use crate::protocol::v2::CommandExecutionStatus;
 use crate::protocol::v2::DynamicToolCallOutputContentItem;
 use crate::protocol::v2::DynamicToolCallStatus;
-use crate::protocol::v2::McpToolCallError;
-use crate::protocol::v2::McpToolCallResult;
 use crate::protocol::v2::McpToolCallStatus;
 use crate::protocol::v2::ThreadItem;
 use crate::protocol::v2::Turn;
@@ -24,6 +22,8 @@ use crate::protocol::v2::WebSearchAction;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ImageDetail;
 use codex_protocol::models::MessagePhase;
+use codex_protocol::mcp::CallToolResult as McpToolCallResult;
+use codex_protocol::items::McpToolCallError;
 use codex_protocol::protocol::AgentReasoningEvent;
 use codex_protocol::protocol::AgentReasoningRawContentEvent;
 use codex_protocol::protocol::AgentStatus;
@@ -564,6 +564,7 @@ impl ThreadHistoryBuilder {
                 Some(Box::new(McpToolCallResult {
                     content: value.content.clone(),
                     structured_content: value.structured_content.clone(),
+                    is_error: value.is_error,
                     meta: value.meta.clone(),
                 })),
                 None,
