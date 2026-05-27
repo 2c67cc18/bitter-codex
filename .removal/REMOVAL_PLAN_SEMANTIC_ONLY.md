@@ -555,9 +555,8 @@ explicitly non-overlapping:
   `.worktrees/execpolicy-approval-runtime-wave-b2`; they silently discarded
   `[rules]` requirements by binding them to `_` while leaving TOML parsing and
   tests behind. Remaining execpolicy work should handle config requirements,
-  core session/state/context, CLI `execpolicy check`, app-server warning and
-  amendment mapping, and tests as a coherent follow-up rather than ignoring
-  parsed policy data.
+  core session/state/context, app-server warning and amendment mapping, and
+  tests as a coherent follow-up rather than ignoring parsed policy data.
 - The follow-up `execpolicy-config-session-followup` worker was stopped after
   another provider-stdin stall and must not be merged. Its only diff edited
   `codex-rs/config/src/config_requirements.rs` by removing some execpolicy and
@@ -567,6 +566,16 @@ explicitly non-overlapping:
   cleanup as a more deliberate serial root patch or a smaller worker whose
   contract explicitly removes or preserves each managed config field rather
   than dropping parsed data.
+- Root serial follow-up removed the standalone top-level `codex execpolicy
+  check` command, its integration tests, and the `codex exec` warning hook for
+  loading rules. The same patch replaced `codex-utils-cli` resume-command shell
+  quoting with local quoting so that crate no longer depends on the removed
+  `codex_shell_command` helper. `cargo-modal --dirty check -p codex-utils-cli`
+  passed. `cargo-modal --dirty check -p codex-utils-cli -p codex-exec -p
+  codex-cli` remains blocked by pre-existing app-server-protocol stale
+  permission/MCP/guardian/plan/file-change references and `codex-arg0`
+  references to removed apply-patch/sandbox/exec-server helper crates, not by
+  the CLI execpolicy removal itself.
 
 ### Daemex sandbox CLI copy follow-up
 

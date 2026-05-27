@@ -20,7 +20,6 @@ use codex_cloud_tasks::Cli as CloudTasksCli;
 use codex_exec::Cli as ExecCli;
 use codex_exec::Command as ExecCommand;
 use codex_exec::ReviewArgs;
-use codex_execpolicy::ExecPolicyCheckCommand;
 use codex_responses_api_proxy::Args as ResponsesApiProxyArgs;
 use codex_rollout_trace::REDUCED_STATE_FILE_NAME;
 use codex_rollout_trace::replay_bundle;
@@ -158,9 +157,6 @@ enum Subcommand {
     /// Debugging tools.
     Debug(DebugCommand),
 
-    /// Execpolicy tooling.
-    #[clap(hide = true)]
-    Execpolicy(ExecpolicyCommand),
 
     /// Apply the latest diff produced by Codex agent as a `git apply` to your local working tree.
     #[clap(visible_alias = "a")]
@@ -359,19 +355,6 @@ struct UnsupportedSandboxArgs {
     /// Full command args to run under the host sandbox.
     #[arg(trailing_var_arg = true)]
     pub command: Vec<String>,
-}
-
-#[derive(Debug, Parser)]
-struct ExecpolicyCommand {
-    #[command(subcommand)]
-    sub: ExecpolicySubcommand,
-}
-
-#[derive(Debug, clap::Subcommand)]
-enum ExecpolicySubcommand {
-    /// Check execpolicy files against a command.
-    #[clap(name = "check")]
-    Check(ExecPolicyCheckCommand),
 }
 
 #[derive(Debug, Parser)]
@@ -696,10 +679,6 @@ fn run_update_command() -> anyhow::Result<()> {
         };
         run_update_action(action)
     }
-}
-
-fn run_execpolicycheck(cmd: ExecPolicyCheckCommand) -> anyhow::Result<()> {
-    cmd.run()
 }
 
 async fn run_debug_app_server_command(cmd: DebugAppServerCommand) -> anyhow::Result<()> {
@@ -1292,16 +1271,6 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 run_debug_clear_memories_command(&root_config_overrides).await?;
             }
         },
-        Some(Subcommand::Execpolicy(ExecpolicyCommand { sub })) => match sub {
-            ExecpolicySubcommand::Check(cmd) => {
-                reject_remote_mode_for_subcommand(
-                    root_remote.as_deref(),
-                    root_remote_auth_token_env.as_deref(),
-                    "execpolicy check",
-                )?;
-                run_execpolicycheck(cmd)?
-            }
-        },
         Some(Subcommand::Apply(mut apply_cli)) => {
             reject_remote_mode_for_subcommand(
                 root_remote.as_deref(),
@@ -1814,7 +1783,6 @@ fn unsupported_subcommand_name_for_strict_config(
         Some(Subcommand::Cloud(_)) => Some("cloud"),
         Some(Subcommand::Sandbox(_)) => Some("sandbox"),
         Some(Subcommand::Debug(_)) => Some("debug"),
-        Some(Subcommand::Execpolicy(_)) => Some("execpolicy"),
         Some(Subcommand::Apply(_)) => Some("apply"),
         Some(Subcommand::ResponsesApiProxy(_)) => Some("responses-api-proxy"),
         Some(Subcommand::StdioToUds(_)) => Some("stdio-to-uds"),

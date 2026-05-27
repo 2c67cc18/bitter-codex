@@ -1,7 +1,6 @@
 //! Shared formatting for user-facing `codex resume` command hints.
 
 use codex_protocol::ThreadId;
-use codex_shell_command::parse_command::shlex_join;
 
 pub fn resume_command(thread_name: Option<&str>, thread_id: Option<ThreadId>) -> Option<String> {
     let resume_target = thread_name
@@ -10,7 +9,7 @@ pub fn resume_command(thread_name: Option<&str>, thread_id: Option<ThreadId>) ->
         .or_else(|| thread_id.map(|thread_id| thread_id.to_string()));
     resume_target.map(|target| {
         let needs_double_dash = target.starts_with('-');
-        let escaped = shlex_join(&[target]);
+        let escaped = shell_quote(&target);
         if needs_double_dash {
             format!("codex resume -- {escaped}")
         } else {
@@ -26,6 +25,34 @@ pub fn resume_hint(thread_name: Option<&str>, thread_id: Option<ThreadId>) -> Op
             "codex resume, then select {thread_name} ({thread_id})"
         )),
         None => resume_command(/*thread_name*/ None, Some(thread_id)),
+    }
+}
+
+fn shell_quote(value: &str) -> String {
+    if value.bytes().all(|byte| {
+        matches!(
+            byte,
+            b'A'..=b'Z'
+                | b'a'..=b'z'
+                | b'0'..=b'9'
+                | b'_'
+                | b'-'
+                | b'.'
+                | b'/'
+                | b':'
+                | b'@'
+                | b'%'
+        )
+    })
+    {
+        value.to_string()
+    } else if !value.contains('\'') {
+        format!("'{value}'")
+    } else {
+        format!(
+            "\"{}\"",
+            value.replace('"', "\\\"").replace('$', "\\$").replace('`', "\\`")
+        )
     }
 }
 

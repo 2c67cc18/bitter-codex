@@ -57,7 +57,6 @@ use codex_config::ConfigLoadOptions;
 use codex_config::LoaderOverrides;
 use codex_config::format_config_error_with_source;
 use codex_core::StateDbHandle;
-use codex_core::check_execpolicy_for_warnings;
 use codex_core::config::Config;
 use codex_core::config::ConfigBuilder;
 use codex_core::config::ConfigOverrides;
@@ -66,7 +65,6 @@ use codex_core::config::load_config_as_toml_with_cli_and_load_options;
 use codex_core::config::resolve_oss_provider;
 use codex_core::config::resolve_profile_v2_config_path;
 use codex_core::find_thread_meta_by_name_str;
-use codex_core::format_exec_policy_error_with_source;
 use codex_core::path_utils;
 use codex_feedback::CodexFeedback;
 use codex_git_utils::get_git_repo_root;
@@ -245,7 +243,6 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         skip_git_repo_check,
         ephemeral,
         ignore_user_config,
-        ignore_rules,
         removed_full_auto,
         color,
         last_message_file,
@@ -321,7 +318,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         user_config_path,
         user_config_profile: config_profile_v2,
         ignore_user_config,
-        ignore_user_and_project_exec_policy_rules: ignore_rules,
+        ignore_user_and_project_exec_policy_rules: false,
         ..Default::default()
     };
 
@@ -432,18 +429,6 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         .cloud_requirements(cloud_requirements)
         .build()
         .await?;
-
-    #[allow(clippy::print_stderr)]
-    match check_execpolicy_for_warnings(&config.config_layer_stack).await {
-        Ok(None) => {}
-        Ok(Some(err)) | Err(err) => {
-            eprintln!(
-                "Error loading rules:\n{}",
-                format_exec_policy_error_with_source(&err)
-            );
-            std::process::exit(1);
-        }
-    }
 
     set_default_client_residency_requirement(config.enforce_residency.value());
 
