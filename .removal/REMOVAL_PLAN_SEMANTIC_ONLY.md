@@ -558,6 +558,15 @@ explicitly non-overlapping:
   core session/state/context, CLI `execpolicy check`, app-server warning and
   amendment mapping, and tests as a coherent follow-up rather than ignoring
   parsed policy data.
+- The follow-up `execpolicy-config-session-followup` worker was stopped after
+  another provider-stdin stall and must not be merged. Its only diff edited
+  `codex-rs/config/src/config_requirements.rs` by removing some execpolicy and
+  permission-profile fields but then bound `allowed_sandbox_modes` to `_`,
+  silently discarding managed sandbox requirements while leaving adjacent
+  config surfaces and tests unresolved. Restart config/session/CLI execpolicy
+  cleanup as a more deliberate serial root patch or a smaller worker whose
+  contract explicitly removes or preserves each managed config field rather
+  than dropping parsed data.
 
 ### Daemex sandbox CLI copy follow-up
 
