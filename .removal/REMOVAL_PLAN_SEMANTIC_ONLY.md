@@ -576,6 +576,14 @@ explicitly non-overlapping:
   permission/MCP/guardian/plan/file-change references and `codex-arg0`
   references to removed apply-patch/sandbox/exec-server helper crates, not by
   the CLI execpolicy removal itself.
+- `mcp-code-mode-removal-wave-b` was launched from `68a3f2c92` with a fresh
+  worktree and stopped after the provider stalled waiting for stdin during
+  discovery. It created no edits and must not be treated as worker output.
+  Its useful discovery is that MCP/code-mode/tool-search remnants are still
+  broad across core tool planning, config loading/requirements, app-server
+  request/event handling, and tests; the next attempt should be either a
+  root-owned serial patch or a smaller worker contract focused on one producer
+  boundary while explicitly preserving dynamic tools.
 
 ### Daemex sandbox CLI copy follow-up
 
