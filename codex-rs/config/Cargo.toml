@@ -16,12 +16,9 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 base64 = { workspace = true }
 codex-app-server-protocol = { workspace = true }
-codex-execpolicy = { workspace = true }
 codex-features = { workspace = true }
-codex-file-system = { workspace = true }
 codex-git-utils = { workspace = true }
 codex-model-provider-info = { workspace = true }
-codex-network-proxy = { workspace = true }
 codex-protocol = { workspace = true }
 codex-utils-absolute-path = { workspace = true }
 codex-utils-path = { workspace = true }
@@ -31,7 +28,6 @@ gethostname = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 multimap = { workspace = true }
 prost = "0.14.3"
-schemars = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_ignored = { workspace = true }
 serde_json = { workspace = true }

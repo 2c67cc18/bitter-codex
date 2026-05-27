@@ -1,5 +1,4 @@
 use codex_utils_absolute_path::AbsolutePathBuf;
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -19,8 +18,7 @@ use codex_protocol::protocol::AskForApproval;
 
 /// Collection of common configuration options that a user can define as a unit
 /// in `config.toml`.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ConfigProfile {
     pub model: Option<String>,
     /// Optional explicit service tier request id for new turns (for example
@@ -43,10 +41,8 @@ pub struct ConfigProfile {
     /// Optional path to a file containing model instructions.
     pub model_instructions_file: Option<AbsolutePathBuf>,
     /// Deprecated: ignored.
-    #[schemars(skip)]
     pub js_repl_node_path: Option<AbsolutePathBuf>,
     /// Deprecated: ignored.
-    #[schemars(skip)]
     pub js_repl_node_module_dirs: Option<Vec<AbsolutePathBuf>>,
     /// Optional absolute path to patched zsh used by zsh-exec-bridge-backed shell execution.
     pub zsh_path: Option<AbsolutePathBuf>,
@@ -67,15 +63,13 @@ pub struct ConfigProfile {
     /// Optional feature toggles scoped to this profile.
     #[serde(default)]
     // Injects known feature keys into the schema and forbids unknown keys.
-    #[schemars(schema_with = "crate::schema::features_schema")]
     pub features: Option<FeaturesToml>,
     pub oss_provider: Option<String>,
 }
 
 /// TUI settings supported inside a named profile.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[schemars(deny_unknown_fields)]
 pub struct ProfileTui {
     /// Preferred layout for resume/fork session picker results.
     #[serde(default)]

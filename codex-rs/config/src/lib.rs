@@ -18,7 +18,6 @@ mod plugin_edit;
 pub mod profile_toml;
 mod project_root_markers;
 mod requirements_exec_policy;
-pub mod schema;
 mod skills_config;
 mod state;
 mod strict_config;

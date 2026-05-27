@@ -7,13 +7,11 @@ use std::path::PathBuf;
 use codex_file_system::ExecutorFileSystem;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use futures::future::join_all;
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use tokio::process::Command;
 use tokio::time::Duration as TokioDuration;
 use tokio::time::timeout;
-use ts_rs::TS;
 
 use crate::GitSha;
 
@@ -59,7 +57,7 @@ pub async fn get_git_repo_root_with_fs(
 const GIT_COMMAND_TIMEOUT: TokioDuration = TokioDuration::from_secs(5);
 const DISABLED_HOOKS_PATH: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
 
-#[derive(Serialize, Deserialize, Clone, Debug, JsonSchema, TS)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct GitInfo {
     /// Current commit hash (SHA)
     #[serde(skip_serializing_if = "Option::is_none")]

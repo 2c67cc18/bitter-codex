@@ -21,8 +21,7 @@ fn tool_definition_to_responses_api_tool_omits_false_defer_loading() {
             description: "Look up an order".to_string(),
             input_schema: JsonSchema::object(
                 BTreeMap::from([(
-                    "order_id".to_string(),
-                    JsonSchema::string(/*description*/ None),
+                    "order_id".to_string()::string(/*description*/ None),
                 )]),
                 Some(vec!["order_id".to_string()]),
                 Some(false.into())
@@ -37,8 +36,7 @@ fn tool_definition_to_responses_api_tool_omits_false_defer_loading() {
             defer_loading: None,
             parameters: JsonSchema::object(
                 BTreeMap::from([(
-                    "order_id".to_string(),
-                    JsonSchema::string(/*description*/ None),
+                    "order_id".to_string()::string(/*description*/ None),
                 )]),
                 Some(vec!["order_id".to_string()]),
                 Some(false.into())
@@ -74,8 +72,7 @@ fn dynamic_tool_to_responses_api_tool_preserves_defer_loading() {
             defer_loading: Some(true),
             parameters: JsonSchema::object(
                 BTreeMap::from([(
-                    "order_id".to_string(),
-                    JsonSchema::string(/*description*/ None),
+                    "order_id".to_string()::string(/*description*/ None),
                 )]),
                 Some(vec!["order_id".to_string()]),
                 Some(false.into())
@@ -119,8 +116,7 @@ fn mcp_tool_to_deferred_responses_api_tool_sets_defer_loading() {
             defer_loading: Some(true),
             parameters: JsonSchema::object(
                 BTreeMap::from([(
-                    "order_id".to_string(),
-                    JsonSchema::string(/*description*/ None),
+                    "order_id".to_string()::string(/*description*/ None),
                 )]),
                 Some(vec!["order_id".to_string()]),
                 Some(false.into())

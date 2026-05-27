@@ -51,7 +51,6 @@ use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::protocol::AskForApproval;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path::normalize_for_path_comparison;
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
@@ -88,7 +87,7 @@ const fn default_hide_agent_reasoning() -> Option<bool> {
 }
 
 /// Backward-compatible shape for ChatGPT workspace login restrictions in config.toml.
-#[derive(Serialize, Debug, Clone, PartialEq, JsonSchema)]
+#[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum ForcedChatgptWorkspaceIds {
     Single(String),
@@ -130,8 +129,7 @@ of strings; comma-separated strings are not supported. Use \
 }
 
 /// Base config deserialized from ~/.codex/config.toml.
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
 pub struct ConfigToml {
     /// Optional override of model selection.
     pub model: Option<String>,
@@ -242,7 +240,6 @@ pub struct ConfigToml {
     /// Definition for MCP servers that Codex can reach out to for tool calls.
     #[serde(default)]
     // Uses the raw MCP input shape (custom deserialization) rather than `McpServerConfig`.
-    #[schemars(schema_with = "crate::schema::mcp_servers_schema")]
     pub mcp_servers: HashMap<String, McpServerConfig>,
 
     /// Preferred backend for storing MCP OAuth credentials.
@@ -284,11 +281,9 @@ pub struct ConfigToml {
     pub background_terminal_max_timeout: Option<u64>,
 
     /// Deprecated: ignored.
-    #[schemars(skip)]
     pub js_repl_node_path: Option<AbsolutePathBuf>,
 
     /// Deprecated: ignored.
-    #[schemars(skip)]
     pub js_repl_node_module_dirs: Option<Vec<AbsolutePathBuf>>,
 
     /// Optional absolute path to patched zsh used by zsh-exec-bridge-backed shell execution.
@@ -397,7 +392,6 @@ pub struct ConfigToml {
 
     /// Removed. Former remote thread-store endpoint setting kept only so we can
     /// fail fast instead of silently falling back to local persistence.
-    #[schemars(skip)]
     pub experimental_thread_store_endpoint: Option<String>,
 
     /// Experimental / do not use. Selects the thread store implementation.
@@ -436,7 +430,6 @@ pub struct ConfigToml {
     /// Centralized feature flags (new). Prefer this over individual toggles.
     #[serde(default)]
     // Injects known feature keys into the schema and forbids unknown keys.
-    #[schemars(schema_with = "crate::schema::features_schema")]
     pub features: Option<FeaturesToml>,
 
     /// Suppress warnings about unstable (under development) features.
@@ -495,8 +488,7 @@ pub struct ConfigToml {
     pub oss_provider: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ConfigLockfileToml {
     pub version: u32,
     pub codex_version: String,
@@ -505,14 +497,12 @@ pub struct ConfigLockfileToml {
     pub config: ConfigToml,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct DebugToml {
     pub config_lockfile: Option<DebugConfigLockToml>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct DebugConfigLockToml {
     /// Directory where Codex writes effective session config lock files.
     pub export_dir: Option<AbsolutePathBuf>,
@@ -527,24 +517,22 @@ pub struct DebugConfigLockToml {
     pub save_fields_resolved_from_model_catalog: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ThreadStoreToml {
     Local {},
-    #[schemars(skip)]
     InMemory {
         id: String,
     },
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct AutoReviewToml {
     /// Additional policy instructions inserted into the guardian prompt.
     pub policy: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ProjectConfig {
     pub trust_level: Option<TrustLevel>,
 }
@@ -565,7 +553,7 @@ pub struct RealtimeAudioConfig {
     pub speaker: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RealtimeWsMode {
     #[default]
@@ -573,7 +561,7 @@ pub enum RealtimeWsMode {
     Transcription,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RealtimeTransport {
     #[default]
@@ -585,8 +573,7 @@ pub enum RealtimeTransport {
 pub use codex_protocol::protocol::RealtimeConversationVersion as RealtimeWsVersion;
 pub use codex_protocol::protocol::RealtimeVoice;
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct RealtimeConfig {
     pub version: RealtimeWsVersion,
     #[serde(rename = "type")]
@@ -595,8 +582,7 @@ pub struct RealtimeConfig {
     pub voice: Option<RealtimeVoice>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct RealtimeToml {
     pub version: Option<RealtimeWsVersion>,
     #[serde(rename = "type")]
@@ -605,15 +591,13 @@ pub struct RealtimeToml {
     pub voice: Option<RealtimeVoice>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct RealtimeAudioToml {
     pub microphone: Option<String>,
     pub speaker: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
 pub struct ToolsToml {
     #[serde(
         default,
@@ -647,19 +631,15 @@ where
     })
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct AgentsToml {
     /// Maximum number of agent threads that can be open concurrently.
     /// When unset, no limit is enforced.
-    #[schemars(range(min = 1))]
     pub max_threads: Option<usize>,
     /// Maximum nesting depth allowed for spawned agent threads.
     /// Root sessions start at depth 0.
-    #[schemars(range(min = 1))]
     pub max_depth: Option<i32>,
     /// Default maximum runtime in seconds for agent job workers.
-    #[schemars(range(min = 1))]
     pub job_max_runtime_seconds: Option<u64>,
     /// Whether to record a model-visible message when an agent turn is interrupted.
     /// Defaults to true.
@@ -678,8 +658,7 @@ pub struct AgentsToml {
     pub roles: BTreeMap<String, AgentRoleToml>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct AgentRoleToml {
     /// Human-facing role documentation used in spawn tool guidance.
     /// Required unless supplied by the referenced agent role file.
@@ -693,8 +672,7 @@ pub struct AgentRoleToml {
     pub nickname_candidates: Option<Vec<String>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct GhostSnapshotToml {
     /// Legacy no-op setting retained for compatibility.
     #[serde(alias = "ignore_untracked_files_over_bytes")]

@@ -23,8 +23,6 @@ use codex_sandboxing::SandboxType;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use std::collections::HashMap;
 
-pub(crate) mod apply_patch;
-pub(crate) mod shell;
 pub(crate) mod unified_exec;
 
 /// Shared helper to construct sandbox transform inputs from a tokenized command line.

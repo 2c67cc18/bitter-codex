@@ -5,7 +5,6 @@ use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
@@ -16,7 +15,7 @@ use crate::RequirementSource;
 /// Effective MCP environment id when config omits `environment_id`.
 pub const DEFAULT_MCP_SERVER_ENVIRONMENT_ID: &str = "local";
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AppToolApproval {
     #[default]
@@ -51,15 +50,14 @@ impl fmt::Display for McpServerDisabledReason {
 }
 
 /// Per-tool approval settings for a single MCP server tool.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub struct McpServerToolConfig {
     /// Approval mode for this tool.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approval_mode: Option<AppToolApproval>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum McpServerEnvVar {
     Name(String),
@@ -118,8 +116,7 @@ impl AsRef<str> for McpServerEnvVar {
 }
 
 /// OAuth client settings used when Codex launches an MCP OAuth flow.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct McpServerOAuthConfig {
     /// Explicit OAuth client identifier to present during authorization and token exchange.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -212,8 +209,7 @@ impl McpServerConfig {
 /// Keep `TryFrom<RawMcpServerConfig> for McpServerConfig` exhaustively
 /// destructuring this struct so new TOML fields cannot be added here without
 /// updating the validation/mapping logic that produces [`McpServerConfig`].
-#[derive(Deserialize, Clone, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Deserialize, Clone)]
 pub struct RawMcpServerConfig {
     // stdio
     pub command: Option<String>,
@@ -231,7 +227,6 @@ pub struct RawMcpServerConfig {
 
     // streamable_http
     pub url: Option<String>,
-    #[schemars(skip)]
     pub bearer_token: Option<String>,
     pub bearer_token_env_var: Option<String>,
 
@@ -243,7 +238,6 @@ pub struct RawMcpServerConfig {
     #[serde(default)]
     pub startup_timeout_ms: Option<u64>,
     #[serde(default, with = "option_duration_secs")]
-    #[schemars(with = "Option<f64>")]
     pub tool_timeout_sec: Option<Duration>,
     #[serde(default)]
     pub enabled: Option<bool>,
@@ -419,7 +413,7 @@ fn validate_remote_stdio_cwd(
     ))
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(untagged, deny_unknown_fields, rename_all = "snake_case")]
 pub enum McpServerTransportConfig {
     /// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#stdio

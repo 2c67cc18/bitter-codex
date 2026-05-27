@@ -7,8 +7,7 @@ use serde_json::Value as JsonValue;
 pub struct ToolDefinition {
     pub name: String,
     pub description: String,
-    pub input_schema: JsonSchema,
-    pub output_schema: Option<JsonValue>,
+    pub input_schema: pub output_schema: Option<JsonValue>,
     pub defer_loading: bool,
 }
 

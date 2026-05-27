@@ -1,11 +1,9 @@
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
-use ts_rs::TS;
 
-#[derive(Debug, Clone, Serialize, PartialEq, JsonSchema, TS)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DynamicToolSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -17,7 +15,7 @@ pub struct DynamicToolSpec {
     pub defer_loading: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DynamicToolCallRequest {
     pub call_id: String,
@@ -30,16 +28,15 @@ pub struct DynamicToolCallRequest {
     pub arguments: JsonValue,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DynamicToolResponse {
     pub content_items: Vec<DynamicToolCallOutputContentItem>,
     pub success: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
-#[ts(tag = "type")]
 pub enum DynamicToolCallOutputContentItem {
     #[serde(rename_all = "camelCase")]
     InputText { text: String },

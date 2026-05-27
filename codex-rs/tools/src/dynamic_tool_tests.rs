@@ -27,7 +27,7 @@ fn parse_dynamic_tool_sanitizes_input_schema() {
             name: "lookup_ticket".to_string(),
             description: "Fetch a ticket".to_string(),
             input_schema: JsonSchema::object(
-                BTreeMap::from([("id".to_string(), JsonSchema::default(),)]),
+                BTreeMap::from([("id".to_string()::default(),)]),
                 /*required*/ None,
                 /*additional_properties*/ None
             ),

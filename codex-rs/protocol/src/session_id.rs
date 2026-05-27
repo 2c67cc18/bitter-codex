@@ -1,17 +1,12 @@
 use std::fmt::Display;
 
-use schemars::JsonSchema;
-use schemars::r#gen::SchemaGenerator;
-use schemars::schema::Schema;
 use serde::Deserialize;
 use serde::Serialize;
-use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::ThreadId;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, TS, Hash)]
-#[ts(type = "string")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SessionId {
     pub(crate) uuid: Uuid,
 }
@@ -96,15 +91,6 @@ impl<'de> Deserialize<'de> for SessionId {
     }
 }
 
-impl JsonSchema for SessionId {
-    fn schema_name() -> String {
-        "SessionId".to_string()
-    }
-
-    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        <String>::json_schema(generator)
-    }
-}
 
 #[cfg(test)]
 mod tests {

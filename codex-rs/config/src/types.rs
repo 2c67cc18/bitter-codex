@@ -25,7 +25,6 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
 
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -59,7 +58,7 @@ const fn default_enabled() -> bool {
 }
 
 /// Preferred layout for the resume/fork session picker.
-#[derive(Serialize, Deserialize, Debug, Default, Copy, Clone, PartialEq, Eq, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Default, Copy, Clone, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum SessionPickerViewMode {
     Comfortable,
@@ -83,7 +82,7 @@ impl fmt::Display for SessionPickerViewMode {
 }
 
 /// Determine where Codex should store CLI auth credentials.
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AuthCredentialsStoreMode {
     #[default]
@@ -98,7 +97,7 @@ pub enum AuthCredentialsStoreMode {
 }
 
 /// Determine where Codex should store and read MCP credentials.
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OAuthCredentialsStoreMode {
     /// `Keyring` when available; otherwise, `File`.
@@ -112,15 +111,14 @@ pub enum OAuthCredentialsStoreMode {
     Keyring,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum WindowsSandboxModeToml {
     Elevated,
     Unelevated,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct WindowsToml {
     pub sandbox: Option<WindowsSandboxModeToml>,
     /// Defaults to `true`. Set to `false` to launch the final sandboxed child
@@ -128,7 +126,7 @@ pub struct WindowsToml {
     pub sandbox_private_desktop: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq)]
 pub enum UriBasedFileOpener {
     #[serde(rename = "vscode")]
     VsCode,
@@ -160,9 +158,8 @@ impl UriBasedFileOpener {
 }
 
 /// Settings that govern if and what will be written to `~/.codex/history.jsonl`.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 #[serde(default)]
-#[schemars(deny_unknown_fields)]
 pub struct History {
     /// If true, history entries will not be written to disk.
     pub persistence: HistoryPersistence,
@@ -172,7 +169,7 @@ pub struct History {
     pub max_bytes: Option<usize>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Default, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum HistoryPersistence {
     /// Save all history entries to disk.
@@ -185,37 +182,33 @@ pub enum HistoryPersistence {
 // ===== Analytics configuration =====
 
 /// Analytics settings loaded from config.toml. Fields are optional so we can apply defaults.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct AnalyticsConfigToml {
     /// When `false`, disables analytics across Codex product surfaces in this profile.
     pub enabled: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct FeedbackConfigToml {
     /// When `false`, disables the feedback flow across Codex product surfaces.
     pub enabled: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolSuggestDiscoverableType {
     Connector,
     Plugin,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ToolSuggestDiscoverable {
     #[serde(rename = "type")]
     pub kind: ToolSuggestDiscoverableType,
     pub id: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ToolSuggestDisabledTool {
     #[serde(rename = "type")]
     pub kind: ToolSuggestDiscoverableType,
@@ -246,8 +239,7 @@ impl ToolSuggestDisabledTool {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub struct ToolSuggestConfig {
     #[serde(default)]
     pub discoverables: Vec<ToolSuggestDiscoverable>,
@@ -256,8 +248,7 @@ pub struct ToolSuggestConfig {
 }
 
 /// Memories settings loaded from config.toml.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct MemoriesToml {
     /// When `true`, external context sources mark the thread `memory_mode` as `"polluted"`.
     #[serde(alias = "no_memories_if_mcp_or_web_search")]
@@ -267,19 +258,16 @@ pub struct MemoriesToml {
     /// When `false`, skip injecting memory usage instructions into developer prompts.
     pub use_memories: Option<bool>,
     /// Maximum number of recent raw memories retained for global consolidation.
-    #[schemars(range(min = 1, max = 4096))]
     pub max_raw_memories_for_consolidation: Option<usize>,
     /// Maximum number of days since a memory was last used before it becomes ineligible for phase 2 selection.
     pub max_unused_days: Option<i64>,
     /// Maximum age of the threads used for memories.
     pub max_rollout_age_days: Option<i64>,
     /// Maximum number of rollout candidates processed per pass.
-    #[schemars(range(min = 1, max = 128))]
     pub max_rollouts_per_startup: Option<usize>,
     /// Minimum idle time between last thread activity and memory creation (hours). > 12h recommended.
     pub min_rollout_idle_hours: Option<i64>,
     /// Minimum remaining percentage required in Codex rate-limit windows before memory startup runs.
-    #[schemars(range(min = 0, max = 100))]
     pub min_rate_limit_remaining_percent: Option<i64>,
     /// Model used for thread summarisation.
     pub extract_model: Option<String>,
@@ -367,8 +355,7 @@ impl From<MemoriesToml> for MemoriesConfig {
 }
 
 /// Default settings that apply to all apps.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub struct AppsDefaultConfig {
     /// When `false`, apps are disabled unless overridden by per-app settings.
     #[serde(default = "default_enabled")]
@@ -390,8 +377,7 @@ pub struct AppsDefaultConfig {
 }
 
 /// Per-tool settings for a single app tool.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub struct AppToolConfig {
     /// Whether this tool is enabled. `Some(true)` explicitly allows this tool.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -403,8 +389,7 @@ pub struct AppToolConfig {
 }
 
 /// Tool settings for a single app.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub struct AppToolsConfig {
     /// Per-tool overrides keyed by tool name (for example `repos/list`).
     #[serde(default, flatten)]
@@ -412,8 +397,7 @@ pub struct AppToolsConfig {
 }
 
 /// Config values for a single app/connector.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct AppConfig {
     /// When `false`, Codex does not surface this app.
     #[serde(default = "default_enabled")]
@@ -441,8 +425,7 @@ pub struct AppConfig {
 }
 
 /// App/connector settings loaded from `config.toml`.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct AppsConfigToml {
     /// Default settings for all apps.
     #[serde(default, rename = "_default", skip_serializing_if = "Option::is_none")]
@@ -455,7 +438,7 @@ pub struct AppsConfigToml {
 
 // ===== OTEL configuration =====
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum OtelHttpProtocol {
     /// Binary payload
@@ -464,8 +447,7 @@ pub enum OtelHttpProtocol {
     Json,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub struct OtelTlsConfig {
     pub ca_certificate: Option<AbsolutePathBuf>,
@@ -474,8 +456,7 @@ pub struct OtelTlsConfig {
 }
 
 /// Which OTEL exporter to use.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum OtelExporterKind {
     None,
@@ -498,8 +479,7 @@ pub enum OtelExporterKind {
 }
 
 /// OTEL settings loaded from config.toml. Fields are optional so we can apply defaults.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct OtelConfigToml {
     /// Log user prompt in traces
     pub log_user_prompt: Option<bool>,
@@ -549,7 +529,7 @@ impl Default for OtelConfig {
     }
 }
 
-#[derive(Serialize, Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(untagged)]
 pub enum Notifications {
     Enabled(bool),
@@ -562,7 +542,7 @@ impl Default for Notifications {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum NotificationMethod {
     #[default]
@@ -581,7 +561,7 @@ impl fmt::Display for NotificationMethod {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum NotificationCondition {
     /// Emit TUI notifications only while the terminal is unfocused.
@@ -600,7 +580,7 @@ impl fmt::Display for NotificationCondition {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum TuiPetAnchor {
     /// Anchor the pet to the bottom of the current TUI composer viewport.
@@ -610,8 +590,7 @@ pub enum TuiPetAnchor {
     ScreenBottom,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub struct TuiNotificationSettings {
     /// Enable desktop notifications from the TUI.
     /// Defaults to `true`.
@@ -629,8 +608,7 @@ pub struct TuiNotificationSettings {
     pub condition: NotificationCondition,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub struct ModelAvailabilityNuxConfig {
     /// Number of times a startup availability NUX has been shown per model slug.
     #[serde(default, flatten)]
@@ -641,8 +619,7 @@ pub struct ModelAvailabilityNuxConfig {
 pub const DEFAULT_TERMINAL_RESIZE_REFLOW_FALLBACK_MAX_ROWS: usize = 1_000;
 
 /// Collection of settings that are specific to the TUI.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct Tui {
     #[serde(default, flatten)]
     pub notification_settings: TuiNotificationSettings,
@@ -734,7 +711,6 @@ pub struct Tui {
     /// transcript exceeds this cap. Omit to use Codex's terminal-specific default. Set to `0` to
     /// keep all rendered rows.
     #[serde(default)]
-    #[schemars(range(min = 0))]
     pub terminal_resize_reflow_max_rows: Option<usize>,
 }
 
@@ -745,8 +721,7 @@ const fn default_true() -> bool {
 /// Settings for notices we display to users via the tui and app-server clients
 /// (primarily the Codex IDE extension). NOTE: these are different from
 /// notifications - notices are warnings, NUX screens, acknowledgements, etc.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub struct ExternalConfigMigrationPrompts {
     /// Tracks whether home-level external config migration prompts are hidden.
     pub home: Option<bool>,
@@ -760,8 +735,7 @@ pub struct ExternalConfigMigrationPrompts {
     pub project_last_prompted_at: BTreeMap<String, i64>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct Notice {
     /// Tracks whether the user has acknowledged the full access warning prompt.
     pub hide_full_access_warning: Option<bool>,
@@ -788,8 +762,7 @@ pub use crate::skills_config::BundledSkillsConfig;
 pub use crate::skills_config::SkillConfig;
 pub use crate::skills_config::SkillsConfig;
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct PluginConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
@@ -803,8 +776,7 @@ pub struct PluginConfig {
 ///
 /// This intentionally excludes transport settings: plugin manifests own how the
 /// MCP server is launched, while user config owns enablement and tool policy.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct PluginMcpServerConfig {
     /// When `false`, Codex skips initializing this plugin MCP server.
     #[serde(default = "default_enabled")]
@@ -839,8 +811,7 @@ impl Default for PluginMcpServerConfig {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub struct MarketplaceConfig {
     /// Last time Codex successfully added or refreshed this marketplace.
     #[serde(default)]
@@ -862,15 +833,14 @@ pub struct MarketplaceConfig {
     pub sparse_paths: Option<Vec<String>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MarketplaceSourceType {
     Git,
     Local,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct SandboxWorkspaceWrite {
     #[serde(default)]
     pub writable_roots: Vec<AbsolutePathBuf>,
@@ -894,8 +864,7 @@ impl From<SandboxWorkspaceWrite> for codex_app_server_protocol::SandboxSettings 
 }
 
 /// Policy for building the `env` when spawning a process via shell-like tools.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct ShellEnvironmentPolicyToml {
     pub inherit: Option<ShellEnvironmentPolicyInherit>,
 

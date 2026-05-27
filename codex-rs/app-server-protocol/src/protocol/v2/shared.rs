@@ -1,20 +1,12 @@
-use codex_experimental_api_macros::ExperimentalApi;
 use codex_protocol::config_types::ApprovalsReviewer as CoreApprovalsReviewer;
 use codex_protocol::config_types::SandboxMode as CoreSandboxMode;
 use codex_protocol::protocol::AskForApproval as CoreAskForApproval;
 use codex_protocol::protocol::CodexErrorInfo as CoreCodexErrorInfo;
 use codex_protocol::protocol::GranularApprovalConfig as CoreGranularApprovalConfig;
 use codex_protocol::protocol::NonSteerableTurnKind as CoreNonSteerableTurnKind;
-use schemars::JsonSchema;
-use schemars::r#gen::SchemaGenerator;
-use schemars::schema::InstanceType;
-use schemars::schema::Metadata;
-use schemars::schema::Schema;
-use schemars::schema::SchemaObject;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
-use ts_rs::TS;
 
 // Macro to declare a camelCased API v2 enum mirroring a core enum which
 // tends to use either snake_case or kebab-case.
@@ -25,10 +17,9 @@ macro_rules! v2_enum_from_core {
             $( $(#[$variant_meta:meta])* $Variant:ident ),+ $(,)?
         }
     ) => {
-        #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+        #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
         $(#[$enum_meta])*
         #[serde(rename_all = "camelCase")]
-        #[ts(export_to = "v2/")]
         pub enum $Name {
             $( $(#[$variant_meta])* $Variant ),+
         }
@@ -53,9 +44,8 @@ pub(super) const fn default_enabled() -> bool {
     true
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "v2/")]
 pub enum NonSteerableTurnKind {
     Review,
     Compact,
@@ -65,9 +55,8 @@ pub enum NonSteerableTurnKind {
 ///
 /// When an upstream HTTP status is available (for example, from the Responses API or a provider),
 /// it is forwarded in `httpStatusCode` on the relevant `codexErrorInfo` variant.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "v2/")]
 pub enum CodexErrorInfo {
     ContextWindowExceeded,
     UsageLimitExceeded,
@@ -75,13 +64,11 @@ pub enum CodexErrorInfo {
     CyberPolicy,
     HttpConnectionFailed {
         #[serde(rename = "httpStatusCode")]
-        #[ts(rename = "httpStatusCode")]
         http_status_code: Option<u16>,
     },
     /// Failed to connect to the response SSE stream.
     ResponseStreamConnectionFailed {
         #[serde(rename = "httpStatusCode")]
-        #[ts(rename = "httpStatusCode")]
         http_status_code: Option<u16>,
     },
     InternalServerError,
@@ -92,20 +79,17 @@ pub enum CodexErrorInfo {
     /// The response SSE stream disconnected in the middle of a turn before completion.
     ResponseStreamDisconnected {
         #[serde(rename = "httpStatusCode")]
-        #[ts(rename = "httpStatusCode")]
         http_status_code: Option<u16>,
     },
     /// Reached the retry limit for responses.
     ResponseTooManyFailedAttempts {
         #[serde(rename = "httpStatusCode")]
-        #[ts(rename = "httpStatusCode")]
         http_status_code: Option<u16>,
     },
     /// Returned when `turn/start` or `turn/steer` is submitted while the current active turn
     /// cannot accept same-turn steering, for example `/review` or manual `/compact`.
     ActiveTurnNotSteerable {
         #[serde(rename = "turnKind")]
-        #[ts(rename = "turnKind")]
         turn_kind: NonSteerableTurnKind,
     },
     Other,
@@ -155,17 +139,14 @@ impl From<CoreNonSteerableTurnKind> for NonSteerableTurnKind {
 }
 
 #[derive(
-    Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS, ExperimentalApi,
+    Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq,
 )]
 #[serde(rename_all = "kebab-case")]
-#[ts(rename_all = "kebab-case", export_to = "v2/")]
 pub enum AskForApproval {
     #[serde(rename = "untrusted")]
-    #[ts(rename = "untrusted")]
     UnlessTrusted,
     OnFailure,
     OnRequest,
-    #[experimental("askForApproval.granular")]
     Granular {
         sandbox_approval: bool,
         rules: bool,
@@ -220,8 +201,7 @@ impl From<CoreAskForApproval> for AskForApproval {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, TS)]
-#[ts(
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
     type = r#""user" | "auto_review" | "guardian_subagent""#,
     export_to = "v2/"
 )]
@@ -237,18 +217,6 @@ pub enum ApprovalsReviewer {
     AutoReview,
 }
 
-impl JsonSchema for ApprovalsReviewer {
-    fn schema_name() -> String {
-        "ApprovalsReviewer".to_string()
-    }
-
-    fn json_schema(_generator: &mut SchemaGenerator) -> Schema {
-        string_enum_schema_with_description(
-            &["user", "auto_review", "guardian_subagent"],
-            "Configures who approval requests are routed to for review. Examples include sandbox escapes, blocked network access, MCP approval prompts, and ARC escalations. Defaults to `user`. `auto_review` uses a carefully prompted subagent to gather relevant context and apply a risk-based decision framework before approving or denying the request. The legacy value `guardian_subagent` is accepted for compatibility.",
-        )
-    }
-}
 
 fn string_enum_schema_with_description(values: &[&str], description: &str) -> Schema {
     let mut schema = SchemaObject {
@@ -286,9 +254,8 @@ impl From<CoreApprovalsReviewer> for ApprovalsReviewer {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-#[ts(rename_all = "kebab-case", export_to = "v2/")]
 pub enum SandboxMode {
     ReadOnly,
     WorkspaceWrite,

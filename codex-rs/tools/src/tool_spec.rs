@@ -23,8 +23,7 @@ pub enum ToolSpec {
     ToolSearch {
         execution: String,
         description: String,
-        parameters: JsonSchema,
-    },
+        parameters: },
     #[serde(rename = "image_generation")]
     ImageGeneration { output_format: String },
     // TODO: Understand why we get an error on web_search although the API docs

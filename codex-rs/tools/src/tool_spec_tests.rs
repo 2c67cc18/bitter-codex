@@ -127,7 +127,7 @@ fn create_tools_json_for_responses_api_includes_top_level_name() {
             strict: false,
             defer_loading: None,
             parameters: JsonSchema::object(
-                BTreeMap::from([("foo".to_string(), JsonSchema::string(/*description*/ None),)]),
+                BTreeMap::from([("foo".to_string()::string(/*description*/ None),)]),
                 /*required*/ None,
                 /*additional_properties*/ None
             ),
@@ -162,8 +162,7 @@ fn namespace_tool_spec_serializes_expected_wire_shape() {
                 defer_loading: None,
                 parameters: JsonSchema::object(
                     BTreeMap::from([(
-                        "order_id".to_string(),
-                        JsonSchema::string(/*description*/ None),
+                        "order_id".to_string()::string(/*description*/ None),
                     )]),
                     /*required*/ None,
                     /*additional_properties*/ None,
@@ -240,8 +239,7 @@ fn tool_search_tool_spec_serializes_expected_wire_shape() {
             description: "Search app tools".to_string(),
             parameters: JsonSchema::object(
                 BTreeMap::from([(
-                    "query".to_string(),
-                    JsonSchema::string(Some("Tool search query".to_string()),),
+                    "query".to_string()::string(Some("Tool search query".to_string()),),
                 )]),
                 Some(vec!["query".to_string()]),
                 Some(AdditionalProperties::Boolean(false))

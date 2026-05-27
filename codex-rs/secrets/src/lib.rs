@@ -7,7 +7,6 @@ use anyhow::Result;
 use codex_git_utils::get_git_repo_root;
 use codex_keyring_store::DefaultKeyringStore;
 use codex_keyring_store::KeyringStore;
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sha2::Digest;
@@ -79,7 +78,7 @@ pub struct SecretListEntry {
     pub name: SecretName,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum SecretsBackendKind {
     #[default]

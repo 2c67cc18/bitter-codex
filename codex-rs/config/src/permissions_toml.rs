@@ -13,13 +13,12 @@ use codex_network_proxy::NetworkUnixSocketPermission as ProxyNetworkUnixSocketPe
 use codex_network_proxy::normalize_host;
 use codex_protocol::permissions::FileSystemAccessMode;
 use indexmap::IndexMap;
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
 use toml::Value as TomlValue;
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct PermissionsToml {
     #[serde(flatten)]
     pub entries: BTreeMap<String, PermissionProfileToml>,
@@ -104,8 +103,7 @@ impl PermissionsToml {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct PermissionProfileToml {
     pub description: Option<String>,
     pub extends: Option<String>,
@@ -213,7 +211,7 @@ fn normalize_profile_network_domains(profile: &mut PermissionProfileToml) {
         .collect();
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct WorkspaceRootsToml {
     #[serde(flatten)]
     pub entries: BTreeMap<String, bool>,
@@ -227,11 +225,10 @@ impl WorkspaceRootsToml {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct FilesystemPermissionsToml {
     /// Optional maximum depth for expanding unreadable glob patterns on
     /// platforms that snapshot glob matches before sandbox startup.
-    #[schemars(range(min = 1))]
     pub glob_scan_max_depth: Option<usize>,
     #[serde(flatten)]
     pub entries: BTreeMap<String, FilesystemPermissionToml>,
@@ -243,14 +240,14 @@ impl FilesystemPermissionsToml {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum FilesystemPermissionToml {
     Access(FileSystemAccessMode),
     Scoped(BTreeMap<String, FileSystemAccessMode>),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct NetworkDomainPermissionsToml {
     #[serde(flatten)]
     pub entries: BTreeMap<String, NetworkDomainPermissionToml>,
@@ -283,7 +280,7 @@ impl NetworkDomainPermissionsToml {
 }
 
 #[derive(
-    Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, JsonSchema,
+    Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum NetworkDomainPermissionToml {
@@ -301,7 +298,7 @@ impl std::fmt::Display for NetworkDomainPermissionToml {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct NetworkUnixSocketPermissionsToml {
     #[serde(flatten)]
     pub entries: BTreeMap<String, NetworkUnixSocketPermissionToml>,
@@ -322,7 +319,7 @@ impl NetworkUnixSocketPermissionsToml {
 }
 
 #[derive(
-    Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, JsonSchema,
+    Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum NetworkUnixSocketPermissionToml {
@@ -340,8 +337,7 @@ impl std::fmt::Display for NetworkUnixSocketPermissionToml {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct NetworkToml {
     pub enabled: Option<bool>,
     pub proxy_url: Option<String>,
@@ -351,7 +347,6 @@ pub struct NetworkToml {
     pub allow_upstream_proxy: Option<bool>,
     pub dangerously_allow_non_loopback_proxy: Option<bool>,
     pub dangerously_allow_all_unix_sockets: Option<bool>,
-    #[schemars(with = "Option<NetworkModeSchema>")]
     pub mode: Option<NetworkMode>,
     pub domains: Option<NetworkDomainPermissionsToml>,
     pub unix_sockets: Option<NetworkUnixSocketPermissionsToml>,
@@ -359,12 +354,9 @@ pub struct NetworkToml {
     pub mitm: Option<NetworkMitmToml>,
 }
 
-#[derive(Serialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct NetworkMitmToml {
-    #[schemars(with = "Option<BTreeMap<String, NetworkMitmHookToml>>")]
     pub hooks: Option<IndexMap<String, NetworkMitmHookToml>>,
-    #[schemars(with = "Option<BTreeMap<String, NetworkMitmActionToml>>")]
     pub actions: Option<IndexMap<String, NetworkMitmActionToml>>,
 }
 
@@ -375,8 +367,7 @@ struct NetworkMitmTomlUnchecked {
     pub actions: Option<IndexMap<String, NetworkMitmActionToml>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct NetworkMitmHookToml {
     pub host: String,
     pub methods: Vec<String>,
@@ -385,26 +376,25 @@ pub struct NetworkMitmHookToml {
     pub query: BTreeMap<String, Vec<String>>,
     #[serde(default)]
     pub headers: BTreeMap<String, Vec<String>>,
-    #[schemars(with = "Option<MitmHookBodyConfigSchema>")]
     pub body: Option<MitmHookBodyConfig>,
     pub action: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 enum NetworkModeSchema {
     Limited,
     Full,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 #[serde(default)]
 pub struct NetworkMitmActionToml {
     pub strip_request_headers: Vec<String>,
     pub inject_request_headers: Vec<NetworkMitmInjectedHeaderToml>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 #[serde(default)]
 pub struct NetworkMitmInjectedHeaderToml {
     pub name: String,
@@ -413,7 +403,7 @@ pub struct NetworkMitmInjectedHeaderToml {
     pub prefix: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(transparent)]
 struct MitmHookBodyConfigSchema(pub serde_json::Value);
 

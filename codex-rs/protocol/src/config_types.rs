@@ -1,10 +1,4 @@
 use codex_utils_absolute_path::AbsolutePathBuf;
-use schemars::JsonSchema;
-use schemars::r#gen::SchemaGenerator;
-use schemars::schema::InstanceType;
-use schemars::schema::Metadata;
-use schemars::schema::Schema;
-use schemars::schema::SchemaObject;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
@@ -16,7 +10,6 @@ use std::str::FromStr;
 use std::time::Duration;
 use strum_macros::Display;
 use strum_macros::EnumIter;
-use ts_rs::TS;
 use wildmatch::WildMatchPattern;
 
 use crate::openai_models::ReasoningEffort;
@@ -24,7 +17,7 @@ use crate::openai_models::ReasoningEffort;
 /// Selects which part of the active context is charged against
 /// `model_auto_compact_token_limit`.
 #[derive(
-    Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, Display, JsonSchema, TS,
+    Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, Display,
 )]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
@@ -40,7 +33,7 @@ pub enum AutoCompactTokenLimitScope {
 /// debugging and understanding the model's reasoning process.
 /// See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#reasoning-summaries
 #[derive(
-    Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, Display, JsonSchema, TS,
+    Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, Display,
 )]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
@@ -66,8 +59,6 @@ pub enum ReasoningSummary {
     PartialEq,
     Eq,
     Display,
-    JsonSchema,
-    TS,
 )]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
@@ -79,7 +70,7 @@ pub enum Verbosity {
 }
 
 #[derive(
-    Deserialize, Debug, Clone, Copy, PartialEq, Default, Serialize, Display, JsonSchema, TS,
+    Deserialize, Debug, Clone, Copy, PartialEq, Default, Serialize, Display,
 )]
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case")]
@@ -154,9 +145,8 @@ impl fmt::Display for ProfileV2Name {
     }
 }
 
-#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Display, TS)]
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Display)]
 #[strum(serialize_all = "snake_case")]
-#[ts(type = r#""user" | "auto_review" | "guardian_subagent""#)]
 /// Configures who approval requests are routed to for review. Examples
 /// include sandbox escapes, blocked network access, MCP approval prompts, and
 /// ARC escalations. Defaults to `user`. `auto_review` uses a carefully
@@ -171,20 +161,8 @@ pub enum ApprovalsReviewer {
     AutoReview,
 }
 
-impl JsonSchema for ApprovalsReviewer {
-    fn schema_name() -> String {
-        "ApprovalsReviewer".to_string()
-    }
 
-    fn json_schema(_generator: &mut SchemaGenerator) -> Schema {
-        string_enum_schema_with_description(
-            &["user", "auto_review", "guardian_subagent"],
-            "Configures who approval requests are routed to for review. Examples include sandbox escapes, blocked network access, MCP approval prompts, and ARC escalations. Defaults to `user`. `auto_review` uses a carefully prompted subagent to gather relevant context and apply a risk-based decision framework before approving or denying the request. The legacy value `guardian_subagent` is accepted for compatibility.",
-        )
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum ShellEnvironmentPolicyInherit {
     /// "Core" environment variables for the platform. On UNIX, this would
@@ -262,7 +240,7 @@ fn string_enum_schema_with_description(values: &[&str], description: &str) -> Sc
 }
 
 #[derive(
-    Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Display, JsonSchema, TS,
+    Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Display,
 )]
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case")]
@@ -282,8 +260,6 @@ pub enum WindowsSandboxLevel {
     PartialEq,
     Eq,
     Display,
-    JsonSchema,
-    TS,
     PartialOrd,
     Ord,
     EnumIter,
@@ -297,7 +273,7 @@ pub enum Personality {
 }
 
 #[derive(
-    Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Display, JsonSchema, TS, Default,
+    Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Display, Default,
 )]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
@@ -308,7 +284,7 @@ pub enum WebSearchMode {
     Live,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Display, JsonSchema, TS)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum WebSearchContextSize {
@@ -317,8 +293,7 @@ pub enum WebSearchContextSize {
     High,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq, JsonSchema, TS)]
-#[schemars(deny_unknown_fields)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
 pub struct WebSearchLocation {
     pub country: Option<String>,
     pub region: Option<String>,
@@ -337,8 +312,7 @@ impl WebSearchLocation {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq, JsonSchema, TS)]
-#[schemars(deny_unknown_fields)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
 pub struct WebSearchToolConfig {
     pub context_size: Option<WebSearchContextSize>,
     pub allowed_domains: Option<Vec<String>>,
@@ -363,14 +337,13 @@ impl WebSearchToolConfig {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq, JsonSchema, TS)]
-#[schemars(deny_unknown_fields)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
 pub struct WebSearchFilters {
     pub allowed_domains: Option<Vec<String>>,
 }
 
 #[derive(
-    Debug, Serialize, Deserialize, Clone, Copy, Default, PartialEq, Eq, Display, JsonSchema, TS,
+    Debug, Serialize, Deserialize, Clone, Copy, Default, PartialEq, Eq, Display,
 )]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
@@ -379,8 +352,7 @@ pub enum WebSearchUserLocationType {
     Approximate,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq, JsonSchema, TS)]
-#[schemars(deny_unknown_fields)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
 pub struct WebSearchUserLocation {
     #[serde(default)]
     pub r#type: WebSearchUserLocationType,
@@ -390,8 +362,7 @@ pub struct WebSearchUserLocation {
     pub timezone: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq, JsonSchema, TS)]
-#[schemars(deny_unknown_fields)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
 pub struct WebSearchConfig {
     pub filters: Option<WebSearchFilters>,
     pub user_location: Option<WebSearchUserLocation>,
@@ -424,7 +395,7 @@ impl From<WebSearchToolConfig> for WebSearchConfig {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Display, JsonSchema, TS)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum ServiceTier {
@@ -455,7 +426,7 @@ impl ServiceTier {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Display, JsonSchema, TS)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum ForcedLoginMethod {
@@ -467,8 +438,7 @@ const DEFAULT_PROVIDER_AUTH_TIMEOUT_MS: u64 = 5_000;
 const DEFAULT_PROVIDER_AUTH_REFRESH_INTERVAL_MS: u64 = 300_000;
 
 /// Configuration for obtaining a provider bearer token from a command.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ModelProviderAuthInfo {
     /// Command to execute. Bare names are resolved via `PATH`; paths are resolved against `cwd`.
     pub command: String,
@@ -488,7 +458,6 @@ pub struct ModelProviderAuthInfo {
 
     /// Working directory used when running the token command.
     #[serde(default = "default_provider_auth_cwd")]
-    #[schemars(skip_serializing_if = "is_default_provider_auth_cwd")]
     pub cwd: AbsolutePathBuf,
 }
 
@@ -538,7 +507,7 @@ fn is_default_provider_auth_cwd(path: &AbsolutePathBuf) -> bool {
 
 /// Represents the trust level for a project directory.
 /// This determines the approval policy and sandbox mode applied.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Display, JsonSchema, TS)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum TrustLevel {
@@ -554,7 +523,7 @@ pub enum TrustLevel {
 ///
 /// The CLI flag `--no-alt-screen` can override this setting at runtime.
 #[derive(
-    Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, Display, JsonSchema, TS,
+    Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, Display,
 )]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
@@ -570,7 +539,7 @@ pub enum AltScreenMode {
 
 /// Initial collaboration mode to use when the TUI starts.
 #[derive(
-    Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, JsonSchema, TS, Default,
+    Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ModeKind {
@@ -585,13 +554,9 @@ pub enum ModeKind {
     Default,
     #[doc(hidden)]
     #[serde(skip_serializing, skip_deserializing)]
-    #[schemars(skip)]
-    #[ts(skip)]
     PairProgramming,
     #[doc(hidden)]
     #[serde(skip_serializing, skip_deserializing)]
-    #[schemars(skip)]
-    #[ts(skip)]
     Execute,
 }
 
@@ -617,7 +582,7 @@ impl ModeKind {
 }
 
 /// Collaboration mode for a Codex session.
-#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize, JsonSchema, TS)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub struct CollaborationMode {
     pub mode: ModeKind,
@@ -687,7 +652,7 @@ impl CollaborationMode {
 }
 
 /// Settings for a collaboration mode.
-#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize, JsonSchema, TS)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub struct Settings {
     pub model: String,
     pub reasoning_effort: Option<ReasoningEffort>,
@@ -696,7 +661,7 @@ pub struct Settings {
 
 /// A mask for collaboration mode settings, allowing partial updates.
 /// All fields except `name` are optional, enabling selective updates.
-#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize, JsonSchema, TS)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub struct CollaborationModeMask {
     pub name: String,
     pub mode: Option<ModeKind>,

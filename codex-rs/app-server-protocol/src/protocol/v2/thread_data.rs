@@ -6,21 +6,17 @@ use codex_protocol::protocol::SessionSource as CoreSessionSource;
 use codex_protocol::protocol::SubAgentSource as CoreSubAgentSource;
 use codex_protocol::protocol::ThreadSource as CoreThreadSource;
 use codex_utils_absolute_path::AbsolutePathBuf;
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::path::PathBuf;
 use thiserror::Error;
-use ts_rs::TS;
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-#[ts(rename_all = "camelCase", export_to = "v2/")]
 #[derive(Default)]
 pub enum SessionSource {
     Cli,
     #[serde(rename = "vscode")]
-    #[ts(rename = "vscode")]
     #[default]
     VsCode,
     Exec,
@@ -61,9 +57,8 @@ impl From<SessionSource> for CoreSessionSource {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-#[ts(rename_all = "snake_case", export_to = "v2/")]
 pub enum ThreadSource {
     User,
     Subagent,
@@ -90,18 +85,16 @@ impl From<ThreadSource> for CoreThreadSource {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "v2/")]
 pub struct GitInfo {
     pub sha: Option<String>,
     pub branch: Option<String>,
     pub origin_url: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "v2/")]
 pub struct Thread {
     pub id: String,
     /// Session id shared by threads that belong to the same session tree.
@@ -115,10 +108,8 @@ pub struct Thread {
     /// Model provider used for this thread (for example, 'openai').
     pub model_provider: String,
     /// Unix timestamp (in seconds) when the thread was created.
-    #[ts(type = "number")]
     pub created_at: i64,
     /// Unix timestamp (in seconds) when the thread was last updated.
-    #[ts(type = "number")]
     pub updated_at: i64,
     /// Current runtime status for the thread.
     pub status: ThreadStatus,
@@ -147,9 +138,8 @@ pub struct Thread {
     pub turns: Vec<Turn>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "v2/")]
 pub struct Turn {
     pub id: String,
     /// Thread items currently included in this turn payload.
@@ -161,19 +151,15 @@ pub struct Turn {
     /// Only populated when the Turn's status is failed.
     pub error: Option<TurnError>,
     /// Unix timestamp (in seconds) when the turn started.
-    #[ts(type = "number | null")]
     pub started_at: Option<i64>,
     /// Unix timestamp (in seconds) when the turn completed.
-    #[ts(type = "number | null")]
     pub completed_at: Option<i64>,
     /// Duration between turn start and completion in milliseconds, if known.
-    #[ts(type = "number | null")]
     pub duration_ms: Option<i64>,
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "v2/")]
 pub enum TurnItemsView {
     /// `items` was not loaded for this turn. The field is intentionally empty.
     NotLoaded,
@@ -184,9 +170,8 @@ pub enum TurnItemsView {
     Full,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS, Error)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Error)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "v2/")]
 #[error("{message}")]
 pub struct TurnError {
     pub message: String,

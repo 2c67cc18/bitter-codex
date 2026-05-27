@@ -1,7 +1,6 @@
 use clap::Args;
 use clap::FromArgMatches;
 use clap::Parser;
-use clap::ValueEnum;
 use codex_utils_cli::CliConfigOverrides;
 use codex_utils_cli::SharedCliOptions;
 use std::path::PathBuf;
@@ -35,19 +34,7 @@ pub struct Cli {
     #[arg(long = "ignore-user-config", global = true, default_value_t = false)]
     pub ignore_user_config: bool,
 
-    /// Do not load user or project execpolicy `.rules` files.
-    #[arg(long = "ignore-rules", global = true, default_value_t = false)]
-    pub ignore_rules: bool,
 
-    /// Legacy compatibility trap for the removed `--full-auto` flag.
-    #[arg(
-        long = "full-auto",
-        hide = true,
-        global = true,
-        default_value_t = false,
-        conflicts_with = "dangerously_bypass_approvals_and_sandbox"
-    )]
-    pub removed_full_auto: bool,
 
     /// Path to a JSON Schema file describing the model's final response shape.
     #[arg(long = "output-schema", value_name = "FILE", global = true)]
@@ -56,9 +43,6 @@ pub struct Cli {
     #[clap(skip)]
     pub config_overrides: CliConfigOverrides,
 
-    /// Specifies color settings for use in the output.
-    #[arg(long = "color", value_enum, default_value_t = Color::Auto)]
-    pub color: Color,
 
     /// Print events to stdout as JSONL.
     #[arg(
@@ -99,17 +83,6 @@ impl std::ops::DerefMut for Cli {
     }
 }
 
-impl Cli {
-    pub fn removed_full_auto_warning(&self) -> Option<&'static str> {
-        if self.removed_full_auto {
-            return Some(
-                "warning: `--full-auto` is deprecated; use `--sandbox workspace-write` instead.",
-            );
-        }
-
-        None
-    }
-}
 
 #[derive(Debug, Default)]
 pub struct ExecSharedCliOptions(SharedCliOptions);
@@ -168,7 +141,6 @@ pub enum Command {
     Resume(ResumeArgs),
 
     /// Run a code review against the current repository.
-    Review(ReviewArgs),
 }
 
 #[derive(Args, Debug)]
@@ -260,50 +232,6 @@ impl FromArgMatches for ResumeArgs {
         *self = ResumeArgsRaw::from_arg_matches(matches).map(Self::from)?;
         Ok(())
     }
-}
-
-#[derive(Args, Debug)]
-pub struct ReviewArgs {
-    /// Review staged, unstaged, and untracked changes.
-    #[arg(
-        long = "uncommitted",
-        default_value_t = false,
-        conflicts_with_all = ["base", "commit", "prompt"]
-    )]
-    pub uncommitted: bool,
-
-    /// Review changes against the given base branch.
-    #[arg(
-        long = "base",
-        value_name = "BRANCH",
-        conflicts_with_all = ["uncommitted", "commit", "prompt"]
-    )]
-    pub base: Option<String>,
-
-    /// Review the changes introduced by a commit.
-    #[arg(
-        long = "commit",
-        value_name = "SHA",
-        conflicts_with_all = ["uncommitted", "base", "prompt"]
-    )]
-    pub commit: Option<String>,
-
-    /// Optional commit title to display in the review summary.
-    #[arg(long = "title", value_name = "TITLE", requires = "commit")]
-    pub commit_title: Option<String>,
-
-    /// Custom review instructions. If `-` is used, read from stdin.
-    #[arg(value_name = "PROMPT", value_hint = clap::ValueHint::Other)]
-    pub prompt: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
-#[value(rename_all = "kebab-case")]
-pub enum Color {
-    Always,
-    Never,
-    #[default]
-    Auto,
 }
 
 #[cfg(test)]

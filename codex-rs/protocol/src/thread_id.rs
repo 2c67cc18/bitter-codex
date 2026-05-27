@@ -1,15 +1,10 @@
 use std::fmt::Display;
 
-use schemars::JsonSchema;
-use schemars::r#gen::SchemaGenerator;
-use schemars::schema::Schema;
 use serde::Deserialize;
 use serde::Serialize;
-use ts_rs::TS;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, TS, Hash)]
-#[ts(type = "string")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ThreadId {
     pub(crate) uuid: Uuid,
 }
@@ -82,15 +77,6 @@ impl<'de> Deserialize<'de> for ThreadId {
     }
 }
 
-impl JsonSchema for ThreadId {
-    fn schema_name() -> String {
-        "ThreadId".to_string()
-    }
-
-    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        <String>::json_schema(generator)
-    }
-}
 
 #[cfg(test)]
 mod tests {

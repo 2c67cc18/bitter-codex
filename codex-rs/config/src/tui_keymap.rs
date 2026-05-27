@@ -16,7 +16,6 @@
 //! 1. Dispatch precedence and conflict validation.
 //! 2. Input event matching at runtime.
 
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
@@ -31,9 +30,9 @@ use std::collections::BTreeMap;
 /// This deliberately represents one terminal key event, not a sequence of
 /// events. A value like `ctrl-x ctrl-s` is not a chord in this schema; adding
 /// multi-step chords would require a separate runtime state machine.
-#[derive(Serialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 #[serde(transparent)]
-pub struct KeybindingSpec(#[schemars(with = "String")] pub String);
+pub struct KeybindingSpec(pub String);
 
 impl KeybindingSpec {
     /// Returns the canonical key-spec string (for example `ctrl-a`).
@@ -63,7 +62,7 @@ impl<'de> Deserialize<'de> for KeybindingSpec {
 /// An empty list explicitly unbinds the action in that scope. Because an
 /// explicit empty list is still a configured value, runtime resolution must not
 /// fall through to global or built-in defaults for that action.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum KeybindingsSpec {
     One(KeybindingSpec),
@@ -84,9 +83,8 @@ impl KeybindingsSpec {
 }
 
 /// Global keybindings. These are used when a context does not define an override.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 #[serde(deny_unknown_fields)]
-#[schemars(deny_unknown_fields)]
 pub struct TuiGlobalKeymap {
     /// Open the transcript overlay.
     pub open_transcript: Option<KeybindingsSpec>,
@@ -111,9 +109,8 @@ pub struct TuiGlobalKeymap {
 }
 
 /// Chat context keybindings.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 #[serde(deny_unknown_fields)]
-#[schemars(deny_unknown_fields)]
 pub struct TuiChatKeymap {
     /// Decrease the active reasoning effort.
     pub decrease_reasoning_effort: Option<KeybindingsSpec>,
@@ -124,9 +121,8 @@ pub struct TuiChatKeymap {
 }
 
 /// Composer context keybindings. These override corresponding `global` actions.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 #[serde(deny_unknown_fields)]
-#[schemars(deny_unknown_fields)]
 pub struct TuiComposerKeymap {
     /// Submit the current composer draft.
     pub submit: Option<KeybindingsSpec>,
@@ -141,9 +137,8 @@ pub struct TuiComposerKeymap {
 }
 
 /// Editor context keybindings for text editing inside text areas.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 #[serde(deny_unknown_fields)]
-#[schemars(deny_unknown_fields)]
 pub struct TuiEditorKeymap {
     /// Insert a newline in the editor.
     pub insert_newline: Option<KeybindingsSpec>,
@@ -186,8 +181,7 @@ pub struct TuiEditorKeymap {
 /// Actions that use uppercase letters (like `A` for append-line-end) should
 /// be specified as `shift-a` in config; the runtime matcher handles
 /// cross-terminal shift-reporting differences automatically.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub struct TuiVimNormalKeymap {
     /// Enter insert mode at cursor (`i`).
     pub enter_insert: Option<KeybindingsSpec>,
@@ -241,8 +235,7 @@ pub struct TuiVimNormalKeymap {
 /// Repeating the operator key (`dd`, `yy`) targets the entire line. Pressing
 /// `Esc` cancels the pending operator and returns to normal mode without
 /// modifying text.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub struct TuiVimOperatorKeymap {
     /// Repeat delete operator to delete the whole line (`dd`).
     pub delete_line: Option<KeybindingsSpec>,
@@ -271,9 +264,8 @@ pub struct TuiVimOperatorKeymap {
 }
 
 /// Pager context keybindings for transcript and static overlays.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 #[serde(deny_unknown_fields)]
-#[schemars(deny_unknown_fields)]
 pub struct TuiPagerKeymap {
     /// Scroll up by one row.
     pub scroll_up: Option<KeybindingsSpec>,
@@ -298,9 +290,8 @@ pub struct TuiPagerKeymap {
 }
 
 /// List selection context keybindings for popup-style selectable lists.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 #[serde(deny_unknown_fields)]
-#[schemars(deny_unknown_fields)]
 pub struct TuiListKeymap {
     /// Move list selection up.
     pub move_up: Option<KeybindingsSpec>,
@@ -325,9 +316,8 @@ pub struct TuiListKeymap {
 }
 
 /// Approval overlay keybindings.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 #[serde(deny_unknown_fields)]
-#[schemars(deny_unknown_fields)]
 pub struct TuiApprovalKeymap {
     /// Open the full-screen approval details view.
     pub open_fullscreen: Option<KeybindingsSpec>,
@@ -357,9 +347,8 @@ pub struct TuiApprovalKeymap {
 /// input handlers. Runtime consumers should resolve it into
 /// `RuntimeKeymap` first so precedence, empty-list unbinding, and duplicate-key
 /// validation are applied consistently.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 #[serde(deny_unknown_fields)]
-#[schemars(deny_unknown_fields)]
 pub struct TuiKeymap {
     #[serde(default)]
     pub global: TuiGlobalKeymap,

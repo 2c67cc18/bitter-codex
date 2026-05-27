@@ -3,17 +3,16 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use codex_protocol::protocol::HookEventName;
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HooksFile {
     #[serde(default)]
     pub hooks: HookEventsToml,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HooksToml {
     #[serde(flatten)]
     pub events: HookEventsToml,
@@ -21,7 +20,7 @@ pub struct HooksToml {
     pub state: BTreeMap<String, HookStateToml>,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HookStateToml {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
@@ -29,7 +28,7 @@ pub struct HookStateToml {
     pub trusted_hash: Option<String>,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HookEventsToml {
     #[serde(rename = "PreToolUse", default)]
     pub pre_tool_use: Vec<MatcherGroup>,
@@ -126,7 +125,7 @@ impl HookEventsToml {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MatcherGroup {
     #[serde(default)]
     pub matcher: Option<String>,
@@ -134,7 +133,7 @@ pub struct MatcherGroup {
     pub hooks: Vec<HookHandlerConfig>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum HookHandlerConfig {
     #[serde(rename = "command")]

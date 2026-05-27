@@ -69,6 +69,7 @@ coverage/
 
 # personal files
 personal/
+.removal/
 
 # os
 .DS_Store

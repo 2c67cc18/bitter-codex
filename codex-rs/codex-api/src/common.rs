@@ -122,7 +122,6 @@ pub struct Reasoning {
 #[serde(rename_all = "snake_case")]
 pub enum TextFormatType {
     #[default]
-    JsonSchema,
 }
 
 #[derive(Debug, Serialize, Default, Clone, PartialEq)]
@@ -288,8 +287,7 @@ pub fn create_text_param_for_request(
     Some(TextControls {
         verbosity: verbosity.map(std::convert::Into::into),
         format: output_schema.as_ref().map(|schema| TextFormat {
-            r#type: TextFormatType::JsonSchema,
-            strict: output_schema_strict,
+            r#type: TextFormatType::strict: output_schema_strict,
             schema: schema.clone(),
             name: "codex_output_schema".to_string(),
         }),

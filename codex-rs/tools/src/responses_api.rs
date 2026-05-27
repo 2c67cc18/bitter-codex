@@ -32,8 +32,7 @@ pub struct ResponsesApiTool {
     pub strict: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub defer_loading: Option<bool>,
-    pub parameters: JsonSchema,
-    #[serde(skip)]
+    pub parameters: #[serde(skip)]
     pub output_schema: Option<Value>,
 }
 

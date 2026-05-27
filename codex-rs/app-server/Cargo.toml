@@ -30,42 +30,23 @@ axum = { workspace = true, default-features = false, features = [
     "tokio",
     "ws",
 ] }
-codex-analytics = { workspace = true }
 codex-arg0 = { workspace = true }
-codex-cloud-requirements = { workspace = true }
 codex-config = { workspace = true }
 codex-core = { workspace = true }
-codex-core-plugins = { workspace = true }
-codex-exec-server = { workspace = true }
-codex-extension-api = { workspace = true }
-codex-external-agent-migration = { workspace = true }
-codex-external-agent-sessions = { workspace = true }
 codex-features = { workspace = true }
-codex-guardian = { workspace = true }
 codex-git-utils = { workspace = true }
-codex-file-watcher = { workspace = true }
-codex-hooks = { workspace = true }
 codex-otel = { workspace = true }
-codex-plugin = { workspace = true }
-codex-shell-command = { workspace = true }
 codex-utils-cli = { workspace = true }
 codex-utils-pty = { workspace = true }
 codex-backend-client = { workspace = true }
-codex-file-search = { workspace = true }
 codex-chatgpt = { workspace = true }
 codex-login = { workspace = true }
-codex-memories-extension = { workspace = true }
-codex-memories-write = { workspace = true }
-codex-mcp = { workspace = true }
 codex-model-provider = { workspace = true }
 codex-models-manager = { workspace = true }
 codex-protocol = { workspace = true }
 codex-app-server-protocol = { workspace = true }
 codex-app-server-transport = { workspace = true }
-codex-feedback = { workspace = true }
-codex-rmcp-client = { workspace = true }
 codex-rollout = { workspace = true }
-codex-sandboxing = { workspace = true }
 codex-state = { workspace = true }
 codex-thread-store = { workspace = true }
 codex-tools = { workspace = true }
@@ -110,11 +91,6 @@ opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 pretty_assertions = { workspace = true }
 reqwest = { workspace = true, features = ["rustls-tls"] }
-rmcp = { workspace = true, default-features = false, features = [
-    "elicitation",
-    "server",
-    "transport-streamable-http-server",
-] }
 serial_test = { workspace = true }
 sha2 = { workspace = true }
 shlex = { workspace = true }

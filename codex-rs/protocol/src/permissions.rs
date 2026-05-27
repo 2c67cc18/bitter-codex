@@ -8,12 +8,10 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::canonicalize_preserving_symlinks;
 use globset::GlobBuilder;
 use globset::GlobMatcher;
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use strum_macros::Display;
 use tracing::error;
-use ts_rs::TS;
 
 use crate::protocol::NetworkAccess;
 use crate::protocol::SandboxPolicy;
@@ -76,7 +74,7 @@ pub fn forbidden_agent_metadata_write(
 }
 
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, Default, JsonSchema, TS,
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, Default,
 )]
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case")]
@@ -109,8 +107,6 @@ impl NetworkSandboxPolicy {
     Serialize,
     Deserialize,
     Display,
-    JsonSchema,
-    TS,
 )]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
@@ -132,16 +128,14 @@ impl FileSystemAccessMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-#[ts(tag = "kind")]
 pub enum FileSystemSpecialPath {
     Root,
     Minimal,
     #[serde(alias = "current_working_directory")]
     ProjectRoots {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
         subpath: Option<PathBuf>,
     },
     Tmpdir,
@@ -157,7 +151,6 @@ pub enum FileSystemSpecialPath {
     Unknown {
         path: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
         subpath: Option<PathBuf>,
     },
 }
@@ -175,14 +168,14 @@ impl FileSystemSpecialPath {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FileSystemSandboxEntry {
     pub path: FileSystemPath,
     pub access: FileSystemAccessMode,
 }
 
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, Default, JsonSchema, TS,
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, Default,
 )]
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case")]
@@ -193,11 +186,10 @@ pub enum FileSystemSandboxKind {
     ExternalSandbox,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileSystemSandboxPolicy {
     pub kind: FileSystemSandboxKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
     pub glob_scan_max_depth: Option<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub entries: Vec<FileSystemSandboxEntry>,
@@ -335,9 +327,8 @@ enum InvalidDenyReadGlobBehavior {
     ReturnError,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-#[ts(tag = "type")]
 pub enum FileSystemPath {
     Path {
         path: AbsolutePathBuf,
