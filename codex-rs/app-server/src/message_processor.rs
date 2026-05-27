@@ -45,8 +45,6 @@ use crate::thread_state::ThreadStateManager;
 use crate::transport::AppServerTransport;
 use crate::transport::RemoteControlHandle;
 use async_trait::async_trait;
-use codex_analytics::AnalyticsEventsClient;
-use codex_analytics::AppServerRpcTransport;
 use codex_app_server_protocol::AuthMode as LoginAuthMode;
 use codex_app_server_protocol::ChatgptAuthTokensRefreshParams;
 use codex_app_server_protocol::ChatgptAuthTokensRefreshReason;
@@ -256,7 +254,6 @@ impl ConnectionSessionState {
 
 pub(crate) struct MessageProcessorArgs {
     pub(crate) outgoing: Arc<OutgoingMessageSender>,
-    pub(crate) analytics_events_client: AnalyticsEventsClient,
     pub(crate) arg0_paths: Arg0DispatchPaths,
     pub(crate) config: Arc<Config>,
     pub(crate) config_manager: ConfigManager,
@@ -268,7 +265,6 @@ pub(crate) struct MessageProcessorArgs {
     pub(crate) session_source: SessionSource,
     pub(crate) auth_manager: Arc<AuthManager>,
     pub(crate) installation_id: String,
-    pub(crate) rpc_transport: AppServerRpcTransport,
     pub(crate) remote_control_handle: Option<RemoteControlHandle>,
     pub(crate) plugin_startup_tasks: crate::PluginStartupTasks,
 }
@@ -279,7 +275,6 @@ impl MessageProcessor {
     pub(crate) fn new(args: MessageProcessorArgs) -> Self {
         let MessageProcessorArgs {
             outgoing,
-            analytics_events_client,
             arg0_paths,
             config,
             config_manager,
@@ -291,7 +286,6 @@ impl MessageProcessor {
             session_source,
             auth_manager,
             installation_id,
-            rpc_transport,
             remote_control_handle,
             plugin_startup_tasks,
         } = args;
@@ -307,23 +301,19 @@ impl MessageProcessor {
         let thread_manager = Arc::new_cyclic(|thread_manager| {
             ThreadManager::new(
                 config.as_ref(),
-                auth_manager.clone(),
-                session_source,
-                environment_manager,
-                thread_extensions(guardian_agent_spawner(thread_manager.clone())),
-                Some(analytics_events_client.clone()),
-                Arc::clone(&thread_store),
-                state_db.clone(),
-                installation_id,
+            auth_manager.clone(),
+            session_source,
+            environment_manager,
+            thread_extensions(guardian_agent_spawner(thread_manager.clone())),
+            Arc::clone(&thread_store),
+            state_db.clone(),
+            installation_id,
                 Some(app_server_attestation_provider(
                     outgoing.clone(),
                     thread_state_manager.clone(),
                 )),
             )
         });
-        thread_manager
-            .plugins_manager()
-            .set_analytics_events_client(analytics_events_client.clone());
         let skills_watcher = SkillsWatcher::new(thread_manager.skills_manager(), outgoing.clone());
 
         let pending_thread_unloads = Arc::new(Mutex::new(HashSet::new()));
@@ -377,10 +367,8 @@ impl MessageProcessor {
         let git_processor = GitRequestProcessor::new();
         let initialize_processor = InitializeRequestProcessor::new(
             outgoing.clone(),
-            analytics_events_client.clone(),
             Arc::clone(&config),
             config_warnings,
-            rpc_transport,
         );
         let marketplace_processor = MarketplaceRequestProcessor::new(
             Arc::clone(&config),
@@ -397,7 +385,6 @@ impl MessageProcessor {
             auth_manager.clone(),
             Arc::clone(&thread_manager),
             outgoing.clone(),
-            analytics_events_client.clone(),
             config_manager.clone(),
             workspace_settings_cache,
         );
@@ -430,7 +417,6 @@ impl MessageProcessor {
             auth_manager.clone(),
             Arc::clone(&thread_manager),
             outgoing.clone(),
-            analytics_events_client.clone(),
             arg0_paths.clone(),
             Arc::clone(&config),
             config_manager.clone(),
@@ -457,7 +443,6 @@ impl MessageProcessor {
             config_manager.clone(),
             auth_manager,
             thread_manager.clone(),
-            analytics_events_client,
         );
         let external_agent_config_processor = ExternalAgentConfigRequestProcessor::new(
             outgoing.clone(),
@@ -802,13 +787,6 @@ impl MessageProcessor {
         {
             return Err(invalid_request(experimental_required_message(reason)));
         }
-        let connection_id = connection_request_id.connection_id;
-        self.initialize_processor.track_initialized_request(
-            connection_id,
-            connection_request_id.request_id.clone(),
-            &codex_request,
-        );
-
         let serialization_scope = codex_request.serialization_scope();
         let app_server_client_name = session.app_server_client_name().map(str::to_string);
         let client_version = session.client_version().map(str::to_string);

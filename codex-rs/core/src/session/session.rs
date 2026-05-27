@@ -495,7 +495,6 @@ impl Session {
         extensions: Arc<codex_extension_api::ExtensionRegistry<crate::config::Config>>,
         agent_control: AgentControl,
         environment_manager: Arc<EnvironmentManager>,
-        analytics_events_client: Option<AnalyticsEventsClient>,
         thread_store: Arc<dyn ThreadStore>,
         parent_rollout_thread_trace: ThreadTraceContext,
         attestation_provider: Option<Arc<dyn AttestationProvider>>,
@@ -941,13 +940,6 @@ impl Session {
                 });
             }
 
-            let analytics_events_client = analytics_events_client.unwrap_or_else(|| {
-                AnalyticsEventsClient::new(
-                    Arc::clone(&auth_manager),
-                    config.chatgpt_base_url.trim_end_matches('/').to_string(),
-                    config.analytics_enabled,
-                )
-            });
             let session_id = if session_configuration.session_source.is_non_root_agent() {
                 agent_control.session_id()
             } else {
@@ -986,7 +978,6 @@ impl Session {
                 ),
                 shell_zsh_path: config.zsh_path.clone(),
                 main_execve_wrapper_exe: config.main_execve_wrapper_exe.clone(),
-                analytics_events_client,
                 hooks: arc_swap::ArcSwap::from_pointee(hooks),
                 rollout_thread_trace,
                 user_shell: Arc::new(default_shell),

@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use crate::function_tool::FunctionCallError;
-use crate::maybe_emit_implicit_skill_invocation;
 use crate::tools::context::ExecCommandToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
@@ -131,14 +130,6 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
         let environment = Arc::clone(&turn_environment.environment);
         let fs = environment.get_filesystem();
         let args: ExecCommandArgs = parse_arguments_with_base_path(&arguments, &cwd)?;
-        let hook_command = args.cmd.clone();
-        maybe_emit_implicit_skill_invocation(
-            session.as_ref(),
-            context.turn.as_ref(),
-            &hook_command,
-            &cwd,
-        )
-        .await;
         let process_id = manager.allocate_process_id().await;
         let resolved_command = get_command(
             &args,

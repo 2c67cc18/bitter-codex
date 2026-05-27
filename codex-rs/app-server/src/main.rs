@@ -87,7 +87,6 @@ fn main() -> anyhow::Result<()> {
             CliConfigOverrides::default(),
             loader_overrides,
             strict_config,
-            /*default_analytics_enabled*/ false,
             transport,
             session_source,
             auth,

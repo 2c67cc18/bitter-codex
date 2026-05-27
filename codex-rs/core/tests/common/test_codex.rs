@@ -471,7 +471,6 @@ impl TestCodexBuilder {
             SessionSource::Exec,
             Arc::clone(&environment_manager),
             empty_extension_registry(),
-            /*analytics_events_client*/ None,
             thread_store,
             state_db.clone(),
             installation_id,

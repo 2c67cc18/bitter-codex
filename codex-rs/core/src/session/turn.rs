@@ -9,6 +9,8 @@ use crate::client::ModelClientSession;
 use crate::client_common::Prompt;
 use crate::client_common::ResponseEvent;
 use crate::collect_explicit_skill_mentions;
+use crate::compact::CompactionPhase;
+use crate::compact::CompactionReason;
 use crate::compact::InitialContextInjection;
 use crate::compact::run_inline_auto_compact_task;
 use crate::compact::should_use_remote_compact_task;
@@ -60,12 +62,6 @@ use crate::turn_diff_tracker::TurnDiffTracker;
 use crate::turn_timing::record_turn_ttft_metric;
 use crate::util::backoff;
 use crate::util::error_or_panic;
-use codex_analytics::AppInvocation;
-use codex_analytics::CompactionPhase;
-use codex_analytics::CompactionReason;
-use codex_analytics::InvocationType;
-use codex_analytics::TurnResolvedConfigFact;
-use codex_analytics::build_track_events_context;
 use codex_async_utils::OrCancelExt;
 use codex_features::Feature;
 use codex_git_utils::get_git_repo_root;
@@ -181,8 +177,6 @@ pub(crate) async fn run_turn(
         sess.record_conversation_items(&turn_context, std::slice::from_ref(&response_item))
             .await;
     }
-
-    track_turn_resolved_config_analytics(&sess, &turn_context, &input).await;
 
     let mut last_agent_message: Option<String> = None;
     let mut stop_hook_active = false;
@@ -444,11 +438,6 @@ async fn build_skills_and_plugins(
         .flatten()
         .cloned()
         .collect::<Vec<_>>();
-    let tracking = build_track_events_context(
-        turn_context.model_info.slug.clone(),
-        sess.conversation_id.to_string(),
-        turn_context.sub_id.clone(),
-    );
     let loaded_plugins = sess
         .services
         .plugins_manager
@@ -516,8 +505,6 @@ async fn build_skills_and_plugins(
         &mentioned_skills,
         Some(skills_outcome),
         Some(&turn_context.session_telemetry),
-        &sess.services.analytics_events_client,
-        tracking.clone(),
     )
     .await;
 
@@ -539,88 +526,10 @@ async fn build_skills_and_plugins(
         build_plugin_injections(&mentioned_plugins, &mcp_tools, &available_connectors);
     let mut explicitly_enabled_connectors = collect_explicit_app_ids(&user_input);
     explicitly_enabled_connectors.extend(skill_connector_ids);
-    let connector_names_by_id = available_connectors
-        .iter()
-        .map(|connector| (connector.id.as_str(), connector.name.as_str()))
-        .collect::<HashMap<&str, &str>>();
-    let mentioned_app_invocations = explicitly_enabled_connectors
-        .iter()
-        .map(|connector_id| AppInvocation {
-            connector_id: Some(connector_id.clone()),
-            app_name: connector_names_by_id
-                .get(connector_id.as_str())
-                .map(|name| (*name).to_string()),
-            invocation_type: Some(InvocationType::Explicit),
-        })
-        .collect::<Vec<_>>();
-    sess.services
-        .analytics_events_client
-        .track_app_mentioned(tracking.clone(), mentioned_app_invocations);
-    for plugin in mentioned_plugins
-        .iter()
-        .filter_map(crate::plugins::PluginCapabilitySummary::telemetry_metadata)
-    {
-        sess.services
-            .analytics_events_client
-            .track_plugin_used(tracking.clone(), plugin);
-    }
 
     let mut injection_items = skill_items;
     injection_items.extend(plugin_items);
     Some((injection_items, explicitly_enabled_connectors))
-}
-
-async fn track_turn_resolved_config_analytics(
-    sess: &Session,
-    turn_context: &TurnContext,
-    input: &[TurnInput],
-) {
-    let thread_config = {
-        let state = sess.state.lock().await;
-        state.session_configuration.thread_config_snapshot()
-    };
-    let is_first_turn = {
-        let mut state = sess.state.lock().await;
-        state.take_next_turn_is_first()
-    };
-    sess.services
-        .analytics_events_client
-        .track_turn_resolved_config(TurnResolvedConfigFact {
-            turn_id: turn_context.sub_id.clone(),
-            thread_id: sess.conversation_id.to_string(),
-            num_input_images: input
-                .iter()
-                .filter_map(|item| match item {
-                    TurnInput::UserInput(content) => Some(content.as_slice()),
-                    TurnInput::ResponseInputItem(_) => None,
-                })
-                .flatten()
-                .filter(|item| {
-                    matches!(item, UserInput::Image { .. } | UserInput::LocalImage { .. })
-                })
-                .count(),
-            submission_type: None,
-            ephemeral: thread_config.ephemeral,
-            session_source: thread_config.session_source,
-            model: turn_context.model_info.slug.clone(),
-            model_provider: turn_context.config.model_provider_id.clone(),
-            permission_profile: turn_context.permission_profile(),
-            #[allow(deprecated)]
-            permission_profile_cwd: turn_context.cwd.to_path_buf(),
-            reasoning_effort: turn_context.reasoning_effort,
-            reasoning_summary: Some(turn_context.reasoning_summary),
-            service_tier: turn_context
-                .config
-                .service_tier
-                .as_deref()
-                .and_then(ServiceTier::from_request_value),
-            approval_policy: turn_context.approval_policy.value(),
-            approvals_reviewer: turn_context.config.approvals_reviewer,
-            sandbox_network_access: turn_context.network_sandbox_policy().is_enabled(),
-            collaboration_mode: turn_context.collaboration_mode.mode,
-            personality: turn_context.personality,
-            is_first_turn,
-        });
 }
 
 #[derive(Debug)]

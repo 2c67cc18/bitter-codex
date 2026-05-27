@@ -15,7 +15,6 @@ use crate::session::INITIAL_SUBMIT_ID;
 use crate::shell_snapshot::ShellSnapshot;
 use crate::tasks::InterruptedTurnHistoryMarker;
 use crate::tasks::interrupted_turn_history_marker;
-use codex_analytics::AnalyticsEventsClient;
 use codex_app_server_protocol::ThreadHistoryBuilder;
 use codex_app_server_protocol::TurnStatus;
 use codex_core_plugins::PluginsManager;
@@ -210,7 +209,6 @@ pub(crate) struct ThreadManagerState {
     attestation_provider: Option<Arc<dyn AttestationProvider>>,
     session_source: SessionSource,
     installation_id: String,
-    analytics_events_client: Option<AnalyticsEventsClient>,
     state_db: Option<StateDbHandle>,
     // Captures submitted ops for testing purpose when test mode is enabled.
     ops_log: Option<SharedCapturedOps>,
@@ -248,7 +246,6 @@ impl ThreadManager {
         session_source: SessionSource,
         environment_manager: Arc<EnvironmentManager>,
         extensions: Arc<ExtensionRegistry<Config>>,
-        analytics_events_client: Option<AnalyticsEventsClient>,
         thread_store: Arc<dyn ThreadStore>,
         state_db: Option<StateDbHandle>,
         installation_id: String,
@@ -282,7 +279,6 @@ impl ThreadManager {
                 auth_manager,
                 session_source,
                 installation_id,
-                analytics_events_client,
                 state_db,
                 ops_log: should_use_test_thread_manager_behavior()
                     .then(|| Arc::new(std::sync::Mutex::new(Vec::new()))),
@@ -383,7 +379,6 @@ impl ThreadManager {
                 auth_manager,
                 session_source: SessionSource::Exec,
                 installation_id,
-                analytics_events_client: None,
                 state_db,
                 ops_log: should_use_test_thread_manager_behavior()
                     .then(|| Arc::new(std::sync::Mutex::new(Vec::new()))),
@@ -1240,7 +1235,6 @@ impl ThreadManagerState {
             user_shell_override,
             parent_trace,
             environment_selections,
-            analytics_events_client: self.analytics_events_client.clone(),
             thread_store: Arc::clone(&self.thread_store),
             attestation_provider: self.attestation_provider.clone(),
         })
