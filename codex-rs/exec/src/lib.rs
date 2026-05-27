@@ -261,7 +261,6 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         oss,
         oss_provider,
         config_profile_v2,
-        sandbox_mode: sandbox_mode_cli_arg,
         dangerously_bypass_approvals_and_sandbox,
         cwd,
         add_dir,
@@ -285,7 +284,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
     } else if dangerously_bypass_approvals_and_sandbox {
         Some(SandboxMode::DangerFullAccess)
     } else {
-        sandbox_mode_cli_arg.map(Into::<SandboxMode>::into)
+        None
     };
 
     // Parse `-c` overrides from the CLI.
