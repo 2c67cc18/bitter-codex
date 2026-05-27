@@ -1014,9 +1014,8 @@ impl ThreadRequestProcessor {
             && config.active_project.trust_level.is_none()
             && (requested_permissions_trust_project || effective_permissions_trust_project)
         {
-            let trust_target = resolve_root_git_project_for_trust(LOCAL_FS.as_ref(), &config.cwd)
-                .await
-                .unwrap_or_else(|| config.cwd.clone());
+            let trust_target =
+                resolve_root_git_project_for_trust(&config.cwd).unwrap_or_else(|| config.cwd.clone());
             let current_cli_overrides = config_manager.current_cli_overrides();
             let cli_overrides_with_trust;
             let cli_overrides_for_reload = if let Err(err) =

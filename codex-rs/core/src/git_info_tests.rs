@@ -1,8 +1,7 @@
-use codex_exec_server::LOCAL_FS;
 use codex_git_utils::GitInfo;
 use codex_git_utils::GitSha;
 use codex_git_utils::collect_git_info;
-use codex_git_utils::get_git_repo_root_with_fs;
+use codex_git_utils::get_git_repo_root_abs;
 use codex_git_utils::get_has_changes;
 use codex_git_utils::git_diff_to_remote;
 use codex_git_utils::recent_commits;
@@ -521,14 +520,12 @@ async fn test_get_git_working_tree_state_branch_fallback() {
 async fn resolve_root_git_project_for_trust_returns_none_outside_repo() {
     let tmp = TempDir::new().expect("tempdir");
     assert!(
-        resolve_root_git_project_for_trust(LOCAL_FS.as_ref(), &tmp.path().abs())
-            .await
-            .is_none()
+        resolve_root_git_project_for_trust(&tmp.path().abs()).is_none()
     );
 }
 
 #[tokio::test]
-async fn get_git_repo_root_with_fs_detects_gitdir_pointer() {
+async fn get_git_repo_root_abs_detects_gitdir_pointer() {
     let tmp = TempDir::new().expect("tempdir");
     let proj = tmp.path().join("proj");
     let nested = proj.join("nested");
@@ -536,7 +533,7 @@ async fn get_git_repo_root_with_fs_detects_gitdir_pointer() {
     std::fs::write(proj.join(".git"), "gitdir: /tmp/fake-worktree\n").unwrap();
 
     assert_eq!(
-        get_git_repo_root_with_fs(LOCAL_FS.as_ref(), &nested.abs()).await,
+        get_git_repo_root_abs(&nested.abs()),
         Some(proj.abs())
     );
 }
@@ -547,13 +544,13 @@ async fn resolve_root_git_project_for_trust_regular_repo_returns_repo_root() {
     let repo_path = create_test_git_repo(&temp_dir).await.abs();
 
     assert_eq!(
-        resolve_root_git_project_for_trust(LOCAL_FS.as_ref(), &repo_path).await,
+        resolve_root_git_project_for_trust(&repo_path),
         Some(repo_path.clone())
     );
     let nested = repo_path.join("sub/dir");
     std::fs::create_dir_all(nested.as_path()).unwrap();
     assert_eq!(
-        resolve_root_git_project_for_trust(LOCAL_FS.as_ref(), &nested).await,
+        resolve_root_git_project_for_trust(&nested),
         Some(repo_path)
     );
 }
@@ -579,7 +576,7 @@ async fn resolve_root_git_project_for_trust_detects_worktree_and_returns_main_ro
 
     let expected = normalize_for_path_comparison(&repo_path).unwrap();
     let wt_root = wt_root.abs();
-    let got = resolve_root_git_project_for_trust(LOCAL_FS.as_ref(), &wt_root).await;
+    let got = resolve_root_git_project_for_trust(&wt_root);
     assert_eq!(
         got.as_ref()
             .map(normalize_for_path_comparison)
@@ -589,7 +586,7 @@ async fn resolve_root_git_project_for_trust_detects_worktree_and_returns_main_ro
     );
     let nested = wt_root.join("nested/sub");
     std::fs::create_dir_all(nested.as_path()).unwrap();
-    let got_nested = resolve_root_git_project_for_trust(LOCAL_FS.as_ref(), &nested).await;
+    let got_nested = resolve_root_git_project_for_trust(&nested);
     assert_eq!(
         got_nested
             .as_ref()
@@ -619,12 +616,12 @@ async fn resolve_root_git_project_for_trust_detects_worktree_pointer_without_git
     let expected = repo_root.abs();
     let worktree_root = worktree_root.abs();
     assert_eq!(
-        resolve_root_git_project_for_trust(LOCAL_FS.as_ref(), &worktree_root).await,
+        resolve_root_git_project_for_trust(&worktree_root),
         Some(expected.clone())
     );
     let nested = worktree_root.join("nested");
     assert_eq!(
-        resolve_root_git_project_for_trust(LOCAL_FS.as_ref(), &nested).await,
+        resolve_root_git_project_for_trust(&nested),
         Some(expected)
     );
 }
@@ -647,15 +644,11 @@ async fn resolve_root_git_project_for_trust_non_worktrees_gitdir_returns_none() 
 
     let proj = proj.abs();
     assert!(
-        resolve_root_git_project_for_trust(LOCAL_FS.as_ref(), &proj)
-            .await
-            .is_none()
+        resolve_root_git_project_for_trust(&proj).is_none()
     );
     let nested = proj.join("nested");
     assert!(
-        resolve_root_git_project_for_trust(LOCAL_FS.as_ref(), &nested)
-            .await
-            .is_none()
+        resolve_root_git_project_for_trust(&nested).is_none()
     );
 }
 

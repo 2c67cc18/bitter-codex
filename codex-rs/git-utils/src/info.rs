@@ -4,7 +4,6 @@ use std::ffi::OsStr;
 use std::path::Path;
 use std::path::PathBuf;
 
-use codex_file_system::ExecutorFileSystem;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use futures::future::join_all;
 use serde::Deserialize;
@@ -36,21 +35,8 @@ pub fn get_git_repo_root(base_dir: &Path) -> Option<PathBuf> {
     find_ancestor_git_entry(base).map(|(repo_root, _)| repo_root)
 }
 
-/// Return the repository root for `cwd` using the provided filesystem.
-///
-/// This mirrors [`get_git_repo_root`] for local paths, but works when `cwd`
-/// only exists inside a selected remote environment.
-pub async fn get_git_repo_root_with_fs(
-    fs: &dyn ExecutorFileSystem,
-    cwd: &AbsolutePathBuf,
-) -> Option<AbsolutePathBuf> {
-    let base = match fs.get_metadata(cwd, /*sandbox*/ None).await {
-        Ok(metadata) if metadata.is_directory => cwd.clone(),
-        _ => cwd.parent()?,
-    };
-    find_ancestor_git_entry_with_fs(fs, &base)
-        .await
-        .map(|(repo_root, _)| repo_root)
+pub fn get_git_repo_root_abs(cwd: &AbsolutePathBuf) -> Option<AbsolutePathBuf> {
+    get_git_repo_root(cwd.as_path()).and_then(|path| AbsolutePathBuf::from_absolute_path(path).ok())
 }
 
 /// Timeout for git commands to prevent freezing on large repositories
@@ -740,22 +726,14 @@ async fn diff_against_sha(cwd: &Path, sha: &GitSha) -> Option<String> {
 /// `[get_git_repo_root]`, but resolves to the root of the main
 /// repository. Handles worktrees via filesystem inspection without invoking
 /// the `git` executable.
-pub async fn resolve_root_git_project_for_trust(
-    fs: &dyn ExecutorFileSystem,
-    cwd: &AbsolutePathBuf,
-) -> Option<AbsolutePathBuf> {
-    let repo_root = get_git_repo_root_with_fs(fs, cwd).await?;
+pub fn resolve_root_git_project_for_trust(cwd: &AbsolutePathBuf) -> Option<AbsolutePathBuf> {
+    let repo_root = get_git_repo_root_abs(cwd)?;
     let dot_git = repo_root.join(".git");
-    if fs
-        .get_metadata(&dot_git, /*sandbox*/ None)
-        .await
-        .ok()?
-        .is_directory
-    {
+    if dot_git.as_path().is_dir() {
         return Some(repo_root);
     }
 
-    let git_dir_s = fs.read_file_text(&dot_git, /*sandbox*/ None).await.ok()?;
+    let git_dir_s = std::fs::read_to_string(dot_git.as_path()).ok()?;
     let git_dir_rel = git_dir_s.trim().strip_prefix("gitdir:")?.trim();
     if git_dir_rel.is_empty() {
         return None;
@@ -787,19 +765,6 @@ fn find_ancestor_git_entry(base_dir: &Path) -> Option<(PathBuf, PathBuf)> {
         }
     }
 
-    None
-}
-
-async fn find_ancestor_git_entry_with_fs(
-    fs: &dyn ExecutorFileSystem,
-    base_dir: &AbsolutePathBuf,
-) -> Option<(AbsolutePathBuf, AbsolutePathBuf)> {
-    for dir in base_dir.ancestors() {
-        let dot_git = dir.join(".git");
-        if fs.get_metadata(&dot_git, /*sandbox*/ None).await.is_ok() {
-            return Some((dir, dot_git));
-        }
-    }
     None
 }
 

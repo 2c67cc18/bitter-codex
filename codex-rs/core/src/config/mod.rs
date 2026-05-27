@@ -2530,7 +2530,7 @@ impl Config {
             .into_iter()
             .map(|path| AbsolutePathBuf::resolve_path_against_base(path, resolved_cwd.as_path()))
             .collect();
-        let repo_root = resolve_root_git_project_for_trust(fs, &resolved_cwd).await;
+        let repo_root = resolve_root_git_project_for_trust(&resolved_cwd);
         let active_project = cfg
             .get_active_project(
                 resolved_cwd.as_path(),

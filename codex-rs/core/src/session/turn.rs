@@ -57,7 +57,7 @@ use crate::util::error_or_panic;
 use codex_async_utils::OrCancelExt;
 use codex_features::Feature;
 use codex_git_utils::get_git_repo_root;
-use codex_git_utils::get_git_repo_root_with_fs;
+use codex_git_utils::get_git_repo_root_abs;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::ServiceTier;
@@ -168,13 +168,9 @@ pub(crate) async fn run_turn(
     // many turns, from the perspective of the user, it is a single turn.
     #[allow(deprecated)]
     let display_root = match turn_context.environments.primary() {
-        Some(turn_environment) => get_git_repo_root_with_fs(
-            turn_environment.environment.get_filesystem().as_ref(),
-            &turn_environment.cwd,
-        )
-        .await
-        .unwrap_or_else(|| turn_environment.cwd.clone())
-        .into_path_buf(),
+        Some(turn_environment) => get_git_repo_root_abs(&turn_environment.cwd)
+            .unwrap_or_else(|| turn_environment.cwd.clone())
+            .into_path_buf(),
         None => get_git_repo_root(turn_context.cwd.as_path())
             .unwrap_or_else(|| turn_context.cwd.clone().into_path_buf()),
     };

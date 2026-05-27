@@ -924,7 +924,7 @@ async fn project_trust_context(
         .cloned()
         .unwrap_or_else(|| project_trust_key(project_root.as_path()));
     let checkout_root = find_git_checkout_root(fs, cwd).await;
-    let repo_root = resolve_root_git_project_for_trust(fs, cwd).await;
+    let repo_root = resolve_root_git_project_for_trust(cwd);
     let repo_root_lookup_keys = repo_root
         .as_ref()
         .map(|root| normalized_project_trust_keys(root.as_path()));
