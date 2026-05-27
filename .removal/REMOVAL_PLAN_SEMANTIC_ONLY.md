@@ -493,8 +493,10 @@ explicitly non-overlapping:
   local model catalog pruning.
 - Fresh root attempt `semantic-cleanup-20260528-root` launched
   `auth-bedrock-provider`, `execpolicy-narrow`, and `mcp-config-trim` workers,
-  but all three provider subprocesses stalled waiting for stdin before making
-  worktree edits. They were stopped with no commits and must not be merged as
+  then stopped them before accepting worker output. Do not describe these as
+  provider-stdin stalls unless a transcript shows a real blocked prompt; the
+  generic Codex line `Reading additional input from stdin...` is normal startup
+  output. They were stopped with no accepted commits and must not be merged as
   worker output. Their transcripts are useful only as discovery.
 - `auth-bedrock-provider` discovery showed Bedrock is mostly concentrated in
   `codex-rs/model-provider`, `codex-rs/model-provider-info`, and targeted
@@ -539,14 +541,14 @@ explicitly non-overlapping:
   sandbox, MCP, plan/file-change, guardian, and schema/codegen leftovers. Do
   not patch those by reintroducing protocol types.
 - A first `execpolicy-approval-runtime` Wave B worker was launched after Wave A
-  but stalled waiting for provider stdin before making edits. Its useful
-  discovery: current main already lacks `codex-rs/core/src/exec_policy.rs`, so
-  remaining work is in config requirements/state, core session/tool runtime,
-  app-server routing/mapping, CLI commands/tests, and stale
-  app-server-protocol references. Restart this slice from current main; do not
-  merge `.worktrees/execpolicy-approval-runtime-wave-b` as worker output.
-- A restarted `execpolicy-approval-runtime-b2` worker also stalled waiting for
-  provider stdin. Root salvaged and reviewed only the coherent local unified
+  but was stopped before making accepted edits. Its useful discovery: current
+  main already lacks `codex-rs/core/src/exec_policy.rs`, so remaining work is in
+  config requirements/state, core session/tool runtime, app-server
+  routing/mapping, CLI commands/tests, and stale app-server-protocol references.
+  Restart this slice from current main; do not merge
+  `.worktrees/execpolicy-approval-runtime-wave-b` as worker output.
+- A restarted `execpolicy-approval-runtime-b2` worker was also stopped. Root
+  salvaged and reviewed only the coherent local unified
   exec portion as `8ec0c3c60`: model-visible unified exec approval/sandbox
   permission arguments were removed, local process launch now bypasses the
   removed orchestrator/runtime approval path, and stale unified-exec tests for
@@ -557,8 +559,8 @@ explicitly non-overlapping:
   tests behind. Remaining execpolicy work should handle config requirements,
   core session/state/context, app-server warning and amendment mapping, and
   tests as a coherent follow-up rather than ignoring parsed policy data.
-- The follow-up `execpolicy-config-session-followup` worker was stopped after
-  another provider-stdin stall and must not be merged. Its only diff edited
+- The follow-up `execpolicy-config-session-followup` worker was stopped and
+  must not be merged. Its only diff edited
   `codex-rs/config/src/config_requirements.rs` by removing some execpolicy and
   permission-profile fields but then bound `allowed_sandbox_modes` to `_`,
   silently discarding managed sandbox requirements while leaving adjacent
@@ -577,8 +579,8 @@ explicitly non-overlapping:
   references to removed apply-patch/sandbox/exec-server helper crates, not by
   the CLI execpolicy removal itself.
 - `mcp-code-mode-removal-wave-b` was launched from `68a3f2c92` with a fresh
-  worktree and stopped after the provider stalled waiting for stdin during
-  discovery. It created no edits and must not be treated as worker output.
+  worktree and was stopped during discovery with exit code 130. It created no
+  edits and must not be treated as worker output.
   Its useful discovery is that MCP/code-mode/tool-search remnants are still
   broad across core tool planning, config loading/requirements, app-server
   request/event handling, and tests; the next attempt should be either a
@@ -595,13 +597,21 @@ explicitly non-overlapping:
   plan/file-change notifications, guardian request/review variants, and
   schema/codegen helper types. Those must be deleted in the later protocol/app
   trim; do not restore `tool_search` or code-mode wrappers to satisfy them.
-- A restarted `mcp-code-mode-config-session-wave-b2` worker stalled after a
-  small coherent diff. Root stopped the worker and reviewed/adopted only that
-  diff: the per-turn code-mode service worker, session service field,
+- A restarted `mcp-code-mode-config-session-wave-b2` worker was stopped after a
+  small coherent diff. Root reviewed/adopted only that diff as `cafbfe50b`: the
+  per-turn code-mode service worker, session service field,
   construction sites, `tools::code_mode` module registration, and stale
   code-mode trace tests were removed. This still leaves broader MCP config and
   session refresh producers for a later MCP slice; dynamic tools remain outside
   the removed code-mode service path.
+- Before the next root restart, all active bitter-loop jobs were stopped and
+  stale `.worktrees/` directories were scheduled for removal after this note.
+  Dirty stopped attempts were intentionally treated as rejected evidence rather
+  than preserved worktrees: auth-provider/Bedrock broad retries, execpolicy
+  config/session retries, old execpolicy broad removals, home-state starter,
+  MCP config trim, protocol compile triage, and the stopped code-mode session
+  worker worktree. Restart new work from clean worktrees based on current main
+  `cafbfe50b`; use old bitter-loop transcripts only as evidence.
 
 ### Daemex sandbox CLI copy follow-up
 
