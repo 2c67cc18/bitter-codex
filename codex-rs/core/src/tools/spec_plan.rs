@@ -524,7 +524,6 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut Planne
         ConfigShellToolType::UnifiedExec => {
             planned_tools.add(ExecCommandHandler::new(ExecCommandHandlerOptions {
                 allow_login_shell,
-                exec_permission_approvals_enabled,
                 include_environment_id,
             }));
             planned_tools.add(WriteStdinHandler);
