@@ -4,7 +4,6 @@ use crate::models::PermissionProfile;
 use crate::parse_command::ParsedCommand;
 use crate::protocol::FileChange;
 use crate::protocol::ReviewDecision;
-use crate::request_permissions::RequestPermissionProfile;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use serde::Deserialize;
 use serde::Serialize;
@@ -158,10 +157,6 @@ pub enum GuardianAssessmentAction {
         connector_id: Option<String>,
         connector_name: Option<String>,
         tool_title: Option<String>,
-    },
-    RequestPermissions {
-        reason: Option<String>,
-        permissions: RequestPermissionProfile,
     },
 }
 

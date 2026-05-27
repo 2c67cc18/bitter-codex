@@ -1,7 +1,6 @@
 use codex_utils_absolute_path::AbsolutePathBuf;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt;
 use std::num::NonZeroU64;
@@ -219,24 +218,6 @@ impl Default for ShellEnvironmentPolicy {
             use_profile: false,
         }
     }
-}
-
-fn string_enum_schema_with_description(values: &[&str], description: &str) -> Schema {
-    let mut schema = SchemaObject {
-        instance_type: Some(InstanceType::String.into()),
-        metadata: Some(Box::new(Metadata {
-            description: Some(description.to_string()),
-            ..Default::default()
-        })),
-        ..Default::default()
-    };
-    schema.enum_values = Some(
-        values
-            .iter()
-            .map(|value| Value::String((*value).to_string()))
-            .collect(),
-    );
-    Schema::Object(schema)
 }
 
 #[derive(
@@ -499,10 +480,6 @@ fn default_provider_auth_cwd() -> AbsolutePathBuf {
         Ok(cwd) => cwd,
         Err(err) => panic!("provider auth cwd must resolve: {err}"),
     }
-}
-
-fn is_default_provider_auth_cwd(path: &AbsolutePathBuf) -> bool {
-    path == &default_provider_auth_cwd()
 }
 
 /// Represents the trust level for a project directory.

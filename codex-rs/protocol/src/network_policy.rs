@@ -1,7 +1,19 @@
 use crate::approvals::NetworkApprovalProtocol;
-use codex_network_proxy::NetworkDecisionSource;
-use codex_network_proxy::NetworkPolicyDecision;
 use serde::Deserialize;
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum NetworkDecisionSource {
+    Decider,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum NetworkPolicyDecision {
+    Ask,
+    Allow,
+    Deny,
+}
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

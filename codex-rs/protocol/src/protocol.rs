@@ -11,8 +11,6 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 
-use strum_macros::EnumIter;
-
 use crate::AgentPath;
 use crate::SessionId;
 use crate::ThreadId;
@@ -45,8 +43,6 @@ use crate::num_format::format_with_separators;
 use crate::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use crate::parse_command::ParsedCommand;
 use crate::plan_tool::UpdatePlanArgs;
-use crate::request_permissions::RequestPermissionsEvent;
-use crate::request_permissions::RequestPermissionsResponse;
 use crate::request_user_input::RequestUserInputResponse;
 use crate::user_input::UserInput;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -81,7 +77,6 @@ pub use crate::permissions::FileSystemSandboxPolicy;
 pub use crate::permissions::FileSystemSpecialPath;
 pub use crate::permissions::NetworkSandboxPolicy;
 use crate::permissions::default_read_only_subpaths_for_writable_root;
-pub use crate::request_permissions::RequestPermissionsArgs;
 pub use crate::request_user_input::RequestUserInputEvent;
 
 /// Open/close tags for special user-input blocks. Used across crates to avoid
@@ -569,14 +564,6 @@ pub enum Op {
         response: RequestUserInputResponse,
     },
 
-    /// Resolve a request_permissions tool call.
-    RequestPermissionsResponse {
-        /// Call id for the in-flight request.
-        id: String,
-        /// User-granted permissions.
-        response: RequestPermissionsResponse,
-    },
-
     /// Resolve a dynamic tool call request.
     DynamicToolResponse {
         /// Call id for the in-flight request.
@@ -718,7 +705,6 @@ impl Op {
             Self::PatchApproval { .. } => "patch_approval",
             Self::ResolveElicitation { .. } => "resolve_elicitation",
             Self::UserInputAnswer { .. } => "user_input_answer",
-            Self::RequestPermissionsResponse { .. } => "request_permissions_response",
             Self::DynamicToolResponse { .. } => "dynamic_tool_response",
             Self::RefreshMcpServers { .. } => "refresh_mcp_servers",
             Self::ReloadUserConfig => "reload_user_config",
@@ -1228,8 +1214,6 @@ pub enum EventMsg {
     ViewImageToolCall(ViewImageToolCallEvent),
 
     ExecApprovalRequest(ExecApprovalRequestEvent),
-
-    RequestPermissions(RequestPermissionsEvent),
 
     RequestUserInput(RequestUserInputEvent),
 
