@@ -48,7 +48,6 @@ use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::parallel::ToolCallRuntime;
 use crate::tools::registry::ToolArgumentDiffConsumer;
 use crate::tools::router::ToolRouterParams;
-use crate::tools::spec_plan::search_tool_enabled;
 use crate::tools::spec_plan::tool_suggest_enabled;
 use crate::turn_diff_tracker::TurnDiffTracker;
 use crate::turn_timing::record_turn_ttft_metric;
@@ -938,7 +937,7 @@ pub(crate) async fn built_tools(
         &all_mcp_tools,
         connectors.as_deref(),
         &turn_context.config,
-        search_tool_enabled(turn_context),
+        false,
     );
     let mcp_tools = has_mcp_servers.then_some(mcp_tool_exposure.direct_tools);
     let deferred_mcp_tools = mcp_tool_exposure.deferred_tools;

@@ -584,6 +584,17 @@ explicitly non-overlapping:
   request/event handling, and tests; the next attempt should be either a
   root-owned serial patch or a smaller worker contract focused on one producer
   boundary while explicitly preserving dynamic tools.
+- Root serial follow-up removed the core tool-planning producers for model
+  visible code-mode executors and `tool_search`. Dynamic tools remain exposed
+  directly through the normal planner, v1 multi-agent tools no longer defer
+  behind search, and MCP exposure from real turn construction now disables the
+  deferred search path rather than registering unreachable tools. Targeted
+  `cargo-modal --dirty check -p codex-core` still fails before reaching this
+  slice in `codex-app-server-protocol`, with stale references to removed
+  shell-command helpers, MCP result/error v2 types, permission/sandbox profiles,
+  plan/file-change notifications, guardian request/review variants, and
+  schema/codegen helper types. Those must be deleted in the later protocol/app
+  trim; do not restore `tool_search` or code-mode wrappers to satisfy them.
 
 ### Daemex sandbox CLI copy follow-up
 

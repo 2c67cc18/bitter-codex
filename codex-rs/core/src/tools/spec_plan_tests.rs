@@ -432,7 +432,7 @@ async fn host_context_gates_goal_and_agent_job_tools() {
 }
 
 #[tokio::test]
-async fn mcp_and_tool_search_follow_direct_and_deferred_tool_exposure() {
+async fn mcp_runtime_tools_follow_direct_exposure_without_tool_search() {
     let direct_mcp = probe_with(
         |_| {},
         ToolPlanInputs {
@@ -451,44 +451,24 @@ async fn mcp_and_tool_search_follow_direct_and_deferred_tool_exposure() {
         &["lookup".to_string()]
     );
 
-    let searchable_mcp = ToolPlanInputs {
+    let deferred_mcp = ToolPlanInputs {
         deferred_mcp_tools: Some(vec![mcp_tool("searchable", "mcp__searchable__", "lookup")]),
         ..ToolPlanInputs::default()
     };
 
-    let missing_model_capability = probe_with(
-        |turn| {
-            turn.model_info.supports_search_tool = false;
-        },
-        ToolPlanInputs {
-            deferred_mcp_tools: searchable_mcp.deferred_mcp_tools.clone(),
-            ..ToolPlanInputs::default()
-        },
-    )
-    .await;
-    missing_model_capability.assert_visible_lacks(&["tool_search"]);
-
-    let missing_deferred_tools = probe(|turn| {
-        set_feature(turn, Feature::Collab, /*enabled*/ false);
-        turn.model_info.supports_search_tool = true;
-    })
-    .await;
-    missing_deferred_tools.assert_visible_lacks(&["tool_search"]);
-    missing_deferred_tools.assert_visible_lacks(&[
-        "list_mcp_resources",
-        "list_mcp_resource_templates",
-        "read_mcp_resource",
-    ]);
-
-    let enabled = probe_with(
+    let deferred = probe_with(
         |turn| {
             turn.model_info.supports_search_tool = true;
         },
-        searchable_mcp,
+        deferred_mcp,
     )
     .await;
-    enabled.assert_visible_contains(&["tool_search"]);
-    enabled.assert_registered_contains(&["tool_search", "mcp__searchable__lookup"]);
+    deferred.assert_visible_lacks(&["tool_search"]);
+    deferred.assert_registered_contains(&["mcp__searchable__lookup"]);
+    assert_eq!(
+        deferred.exposure("mcp__searchable__lookup"),
+        ToolExposure::Deferred
+    );
 }
 
 #[tokio::test]
@@ -630,7 +610,7 @@ async fn request_plugin_install_description_defers_inventory_to_list_tool() {
 }
 
 #[tokio::test]
-async fn code_mode_only_exposes_code_executor_and_hides_nested_tools() {
+async fn code_mode_only_no_longer_wraps_or_hides_nested_tools() {
     let input = ToolPlanInputs {
         dynamic_tools: vec![dynamic_tool(
             Some("codex_app"),
@@ -663,13 +643,13 @@ async fn code_mode_only_exposes_code_executor_and_hides_nested_tools() {
         },
     )
     .await;
-    code_mode_only.assert_visible_contains(&[
+    code_mode_only.assert_visible_lacks(&[
         codex_code_mode::PUBLIC_TOOL_NAME,
         codex_code_mode::WAIT_TOOL_NAME,
     ]);
     assert_eq!(
         code_mode_only.namespace_function_names("codex_app"),
-        Vec::<String>::new().as_slice()
+        &["lookup".to_string()]
     );
 }
 
@@ -746,7 +726,7 @@ async fn multi_agent_feature_selects_one_agent_tool_family() {
 }
 
 #[tokio::test]
-async fn v1_multi_agent_tools_defer_when_tool_search_available() {
+async fn v1_multi_agent_tools_stay_direct_without_tool_search() {
     let plan = probe(|turn| {
         turn.model_info.supports_search_tool = true;
         set_feature(turn, Feature::Collab, /*enabled*/ true);
@@ -754,8 +734,8 @@ async fn v1_multi_agent_tools_defer_when_tool_search_available() {
     })
     .await;
 
-    plan.assert_visible_contains(&["tool_search"]);
-    plan.assert_visible_lacks(&[
+    plan.assert_visible_lacks(&["tool_search"]);
+    plan.assert_visible_contains(&[
         "spawn_agent",
         "send_input",
         "resume_agent",
@@ -772,21 +752,17 @@ async fn v1_multi_agent_tools_defer_when_tool_search_available() {
         let namespaced_tool_name = ToolName::namespaced(MULTI_AGENT_V1_NAMESPACE, tool_name);
         let namespaced_tool_name = namespaced_tool_name.to_string();
         assert!(
-            plan.registered_names.contains(&namespaced_tool_name),
-            "expected namespaced runtime for {tool_name}"
+            !plan.registered_names.contains(&namespaced_tool_name),
+            "expected no deferred namespaced runtime for {tool_name}"
         );
         assert!(
-            !plan
+            plan
                 .registered_names
                 .contains(&ToolName::plain(tool_name).to_string()),
-            "expected no plain runtime for deferred {tool_name}"
+            "expected plain runtime for direct {tool_name}"
         );
-        assert_eq!(plan.exposure(&namespaced_tool_name), ToolExposure::Deferred);
+        assert_eq!(plan.exposure(tool_name), ToolExposure::Direct);
     }
-    let ToolSpec::ToolSearch { description, .. } = plan.visible_spec("tool_search") else {
-        panic!("expected visible tool_search spec");
-    };
-    assert!(description.contains("- Multi-agent tools: Spawn and manage sub-agents."));
 }
 
 #[tokio::test]
@@ -849,7 +825,7 @@ async fn code_mode_only_can_expose_namespaced_multi_agent_v2_as_normal_tools() {
     })
     .await;
 
-    assert_eq!(plan.visible_names, vec!["exec", "wait", "agents"]);
+    assert_eq!(plan.visible_names, vec!["agents"]);
     for tool_name in [
         "spawn_agent",
         "send_message",
