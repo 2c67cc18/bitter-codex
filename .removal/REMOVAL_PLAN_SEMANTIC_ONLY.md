@@ -11,10 +11,9 @@ done as blind deletion or line-range cleanup.
 - Remove feature gates for removed capabilities rather than preserving them as
   optional code paths.
 - Keep only Cargo as the supported build/test interface.
-- 2026-05-28 `cargo-modal check --workspace --all-targets --no-default-features`
-  currently stops first in `codex-arg0`, which still references removed
-  apply-patch, sandboxing, exec-server, shell-escalation, and Linux sandbox
-  crates. Remove or rewrite arg0 dispatch before relying on workspace checks.
+- 2026-05-28 `codex-arg0` stale dispatch references to removed apply-patch,
+  sandboxing, exec-server, shell-escalation, and Linux sandbox crates were
+  removed. Focused `cargo-modal` check/test for `codex-arg0` passed.
 
 ## Analytics removal follow-through
 
@@ -107,14 +106,18 @@ done as blind deletion or line-range cleanup.
 - Remove structural fields for environments, permissions, approval policy,
   sandbox, network policy/proxy, apps, memory, realtime, personality, and
   collaboration mode.
-- Current main still fails dependency checks in `codex-app-server-protocol`
-  before focused crates compile after the arg0 blocker is bypassed or in
-  clippy/test. `cargo-modal` reports unresolved references to removed protocol
-  symbols such as `PlanDelta`, `FileChangePatchUpdated`, guardian approval review
-  notifications, permission/sandbox types, MCP result types,
-  `CommandExecParams`, JSON schema helpers, and missing `codex_shell_command`.
-  Treat protocol trim as the next serial unblocker before broad final checks can
-  pass.
+- 2026-05-28 `codex-app-server-protocol` focused no-default-features check was
+  unblocked by removing stale mapper/schema/helper references to
+  `codex_shell_command`, `CommandExecParams`, removed guardian review
+  notifications, removed request-permissions actions, removed plan/patch update
+  notifications, and stale MCP wrapper imports.
+- Transitional caveat: app-server protocol still maps the core
+  `ProviderAccount::AmazonBedrock` variant because core still exposes it. Remove
+  this protocol exposure with the AWS/Bedrock provider cleanup.
+- Transitional caveat: removed `PlanDelta` and patch update core events are
+  currently projected as warnings because the app-server notification enum has no
+  no-op notification variant. Prefer removing the upstream event producers and
+  mapping arms rather than preserving these warnings.
 
 ## App-server implementation trim
 
@@ -284,8 +287,9 @@ done as blind deletion or line-range cleanup.
   `codex-login`, `codex-model-provider`, and `codex-core` were blocked before
   the target crates by existing `codex-app-server-protocol` compile failures
   listed above.
-- 2026-05-28 final `cargo-modal` phase results: workspace check failed in
-  `codex-arg0`; workspace clippy and test failed in `codex-app-server-protocol`.
+- 2026-05-28 final `cargo-modal` phase before the arg0/protocol follow-up:
+  workspace check failed in `codex-arg0`; workspace clippy and test failed in
+  `codex-app-server-protocol`. Rerun the final phase after the follow-up merge.
 - After semantic cleanup only, run the equivalent of:
 
 ```bash
