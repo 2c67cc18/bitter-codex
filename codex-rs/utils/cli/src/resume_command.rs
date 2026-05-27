@@ -29,30 +29,26 @@ pub fn resume_hint(thread_name: Option<&str>, thread_id: Option<ThreadId>) -> Op
 }
 
 fn shell_quote(value: &str) -> String {
-    if value.bytes().all(|byte| {
-        matches!(
-            byte,
-            b'A'..=b'Z'
-                | b'a'..=b'z'
-                | b'0'..=b'9'
-                | b'_'
-                | b'-'
-                | b'.'
-                | b'/'
-                | b':'
-                | b'@'
-                | b'%'
-        )
-    })
+    if !value.is_empty()
+        && value.bytes().all(|byte| {
+            matches!(
+                byte,
+                b'A'..=b'Z'
+                    | b'a'..=b'z'
+                    | b'0'..=b'9'
+                    | b'_'
+                    | b'-'
+                    | b'.'
+                    | b'/'
+                    | b':'
+                    | b'@'
+                    | b'%'
+            )
+        })
     {
         value.to_string()
-    } else if !value.contains('\'') {
-        format!("'{value}'")
     } else {
-        format!(
-            "\"{}\"",
-            value.replace('"', "\\\"").replace('$', "\\$").replace('`', "\\`")
-        )
+        format!("'{}'", value.replace('\'', "'\"'\"'"))
     }
 }
 
@@ -96,7 +92,18 @@ mod tests {
         assert_eq!(command, Some("codex resume 'two words'".to_string()));
 
         let command = resume_command(Some("quote'case"), /*thread_id*/ None);
-        assert_eq!(command, Some("codex resume \"quote'case\"".to_string()));
+        assert_eq!(
+            command,
+            Some("codex resume 'quote'\"'\"'case'".to_string())
+        );
+
+        let command = resume_command(Some("$(echo bad)`x`"), /*thread_id*/ None);
+        assert_eq!(command, Some("codex resume '$(echo bad)`x`'".to_string()));
+    }
+
+    #[test]
+    fn shell_quote_handles_empty_values() {
+        assert_eq!(shell_quote(""), "''");
     }
 
     #[test]
