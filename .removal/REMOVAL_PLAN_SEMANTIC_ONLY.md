@@ -545,6 +545,19 @@ explicitly non-overlapping:
   app-server routing/mapping, CLI commands/tests, and stale
   app-server-protocol references. Restart this slice from current main; do not
   merge `.worktrees/execpolicy-approval-runtime-wave-b` as worker output.
+- A restarted `execpolicy-approval-runtime-b2` worker also stalled waiting for
+  provider stdin. Root salvaged and reviewed only the coherent local unified
+  exec portion as `8ec0c3c60`: model-visible unified exec approval/sandbox
+  permission arguments were removed, local process launch now bypasses the
+  removed orchestrator/runtime approval path, and stale unified-exec tests for
+  exec-server/sandbox/network approval were deleted or adapted. Do not merge
+  the uncommitted config edits left in
+  `.worktrees/execpolicy-approval-runtime-wave-b2`; they silently discarded
+  `[rules]` requirements by binding them to `_` while leaving TOML parsing and
+  tests behind. Remaining execpolicy work should handle config requirements,
+  core session/state/context, CLI `execpolicy check`, app-server warning and
+  amendment mapping, and tests as a coherent follow-up rather than ignoring
+  parsed policy data.
 
 ### Daemex sandbox CLI copy follow-up
 
