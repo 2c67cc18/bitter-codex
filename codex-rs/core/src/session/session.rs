@@ -492,7 +492,6 @@ impl Session {
         skills_manager: Arc<SkillsManager>,
         plugins_manager: Arc<PluginsManager>,
         mcp_manager: Arc<McpManager>,
-        extensions: Arc<codex_extension_api::ExtensionRegistry<crate::config::Config>>,
         agent_control: AgentControl,
         environment_manager: Arc<EnvironmentManager>,
         thread_store: Arc<dyn ThreadStore>,
@@ -935,17 +934,6 @@ impl Session {
                 SessionId::from(thread_id)
             };
             let agent_control = agent_control.with_session_id(session_id);
-            let session_extension_data =
-                codex_extension_api::ExtensionData::new(session_id.to_string());
-            let thread_extension_data =
-                codex_extension_api::ExtensionData::new(thread_id.to_string());
-            for contributor in extensions.thread_lifecycle_contributors() {
-                contributor.on_thread_start(codex_extension_api::ThreadStartInput {
-                    config: config.as_ref(),
-                    session_store: &session_extension_data,
-                    thread_store: &thread_extension_data,
-                }).await;
-            }
 
             let services = SessionServices {
                 // Initialize the MCP connection manager with an uninitialized
@@ -982,10 +970,6 @@ impl Session {
                 skills_manager,
                 plugins_manager: Arc::clone(&plugins_manager),
                 mcp_manager: Arc::clone(&mcp_manager),
-                extensions,
-                // TODO(jif): extract session to share between sub-agents
-                session_extension_data,
-                thread_extension_data,
                 agent_control,
                 network_proxy: arc_swap::ArcSwapOption::from(network_proxy.map(Arc::new)),
                 network_proxy_audit_metadata,

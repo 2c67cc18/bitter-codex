@@ -36,7 +36,6 @@ use crate::session::TurnInput;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
 use crate::stream_events_utils::HandleOutputCtx;
-use crate::stream_events_utils::TurnItemContributorPolicy;
 use crate::stream_events_utils::finalize_non_tool_response_item;
 use crate::stream_events_utils::handle_non_tool_response_item;
 use crate::stream_events_utils::handle_output_item_done;
@@ -49,7 +48,6 @@ use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::parallel::ToolCallRuntime;
 use crate::tools::registry::ToolArgumentDiffConsumer;
 use crate::tools::router::ToolRouterParams;
-use crate::tools::router::extension_tool_executors;
 use crate::tools::spec_plan::search_tool_enabled;
 use crate::tools::spec_plan::tool_suggest_enabled;
 use crate::turn_diff_tracker::TurnDiffTracker;
@@ -120,7 +118,6 @@ use tracing::warn;
 pub(crate) async fn run_turn(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
-    turn_extension_data: Arc<codex_extension_api::ExtensionData>,
     input: Vec<TurnInput>,
     prewarmed_client_session: Option<ModelClientSession>,
     cancellation_token: CancellationToken,
@@ -215,7 +212,6 @@ pub(crate) async fn run_turn(
         match run_sampling_request(
             Arc::clone(&sess),
             Arc::clone(&turn_context),
-            Arc::clone(&turn_extension_data),
             Arc::clone(&turn_diff_tracker),
             &mut client_session,
             turn_metadata_header.as_deref(),
@@ -741,7 +737,6 @@ pub(crate) fn build_prompt(
 async fn run_sampling_request(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
-    turn_store: Arc<codex_extension_api::ExtensionData>,
     turn_diff_tracker: SharedTurnDiffTracker,
     client_session: &mut ModelClientSession,
     turn_metadata_header: Option<&str>,
@@ -788,7 +783,6 @@ async fn run_sampling_request(
             tool_runtime.clone(),
             Arc::clone(&sess),
             Arc::clone(&turn_context),
-            Arc::clone(&turn_store),
             client_session,
             turn_metadata_header,
             Arc::clone(&turn_diff_tracker),
@@ -958,7 +952,6 @@ pub(crate) async fn built_tools(
             mcp_tools,
             deferred_mcp_tools,
             discoverable_tools,
-            extension_tool_executors: extension_tool_executors(sess),
             dynamic_tools: turn_context.dynamic_tools.as_slice(),
         },
     )))
@@ -1449,7 +1442,6 @@ async fn emit_turn_item_in_plan_mode(
 async fn handle_assistant_item_done_in_plan_mode(
     sess: &Session,
     turn_context: &TurnContext,
-    turn_store: &codex_extension_api::ExtensionData,
     item: &ResponseItem,
     state: &mut PlanModeStreamState,
     previously_active_item: Option<&TurnItem>,
@@ -1464,7 +1456,6 @@ async fn handle_assistant_item_done_in_plan_mode(
         if let Some(finalized_turn_item) = finalize_non_tool_response_item(
             sess,
             turn_context,
-            TurnItemContributorPolicy::Run(turn_store),
             item,
             /*plan_mode*/ true,
         )
@@ -1537,7 +1528,6 @@ async fn try_run_sampling_request(
     tool_runtime: ToolCallRuntime,
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
-    turn_store: Arc<codex_extension_api::ExtensionData>,
     client_session: &mut ModelClientSession,
     turn_metadata_header: Option<&str>,
     turn_diff_tracker: SharedTurnDiffTracker,
@@ -1586,8 +1576,6 @@ async fn try_run_sampling_request(
     let plan_mode = turn_context.collaboration_mode.mode == ModeKind::Plan;
     let mut assistant_message_stream_parsers = AssistantMessageStreamParsers::new(plan_mode);
     let mut plan_mode_state = plan_mode.then(|| PlanModeStreamState::new(&turn_context.sub_id));
-    let defer_streamed_turn_items_for_contributors =
-        !sess.services.extensions.turn_item_contributors().is_empty();
     let mut active_item_is_streaming_to_client = false;
     let receiving_span = trace_span!("receiving_stream");
     let mut completed_response_id: Option<String> = None;
@@ -1664,7 +1652,6 @@ async fn try_run_sampling_request(
                     && handle_assistant_item_done_in_plan_mode(
                         &sess,
                         &turn_context,
-                        turn_store.as_ref(),
                         &item,
                         state,
                         previously_streamed_item.as_ref(),
@@ -1678,7 +1665,6 @@ async fn try_run_sampling_request(
                 let mut ctx = HandleOutputCtx {
                     sess: sess.clone(),
                     turn_context: turn_context.clone(),
-                    turn_store: Arc::clone(&turn_store),
                     tool_runtime: tool_runtime.clone(),
                     cancellation_token: cancellation_token.child_token(),
                 };
@@ -1738,14 +1724,13 @@ async fn try_run_sampling_request(
                 if let Some(turn_item) = handle_non_tool_response_item(
                     sess.as_ref(),
                     turn_context.as_ref(),
-                    TurnItemContributorPolicy::Skip,
                     &item,
                     plan_mode,
                 )
                 .await
                 {
                     let mut turn_item = turn_item;
-                    let stream_item_to_client = !defer_streamed_turn_items_for_contributors;
+                    let stream_item_to_client = true;
                     let mut seeded_parsed: Option<ParsedAssistantTextDelta> = None;
                     let mut seeded_item_id: Option<String> = None;
                     if stream_item_to_client

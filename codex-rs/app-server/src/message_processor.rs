@@ -8,8 +8,6 @@ use crate::attestation::app_server_attestation_provider;
 use crate::config_manager::ConfigManager;
 use crate::connection_rpc_gate::ConnectionRpcGate;
 use crate::error_code::invalid_request;
-use crate::extensions::guardian_agent_spawner;
-use crate::extensions::thread_extensions;
 use crate::fs_watch::FsWatchManager;
 use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::ConnectionRequestId;
@@ -298,22 +296,19 @@ impl MessageProcessor {
         // resumed, or forked threads to a different persistence backend/root.
         let thread_store = codex_core::thread_store_from_config(config.as_ref(), state_db.clone());
         let environment_manager_for_requests = Arc::clone(&environment_manager);
-        let thread_manager = Arc::new_cyclic(|thread_manager| {
-            ThreadManager::new(
-                config.as_ref(),
+        let thread_manager = Arc::new(ThreadManager::new(
+            config.as_ref(),
             auth_manager.clone(),
             session_source,
             environment_manager,
-            thread_extensions(guardian_agent_spawner(thread_manager.clone())),
             Arc::clone(&thread_store),
             state_db.clone(),
             installation_id,
-                Some(app_server_attestation_provider(
-                    outgoing.clone(),
-                    thread_state_manager.clone(),
-                )),
-            )
-        });
+            Some(app_server_attestation_provider(
+                outgoing.clone(),
+                thread_state_manager.clone(),
+            )),
+        ));
         let skills_watcher = SkillsWatcher::new(thread_manager.skills_manager(), outgoing.clone());
 
         let pending_thread_unloads = Arc::new(Mutex::new(HashSet::new()));

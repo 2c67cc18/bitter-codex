@@ -15,12 +15,9 @@ use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use crate::tools::flat_tool_name;
-use crate::tools::lifecycle::notify_tool_finish;
-use crate::tools::lifecycle::notify_tool_start;
 use crate::tools::tool_dispatch_trace::ToolDispatchTrace;
 use crate::tools::tool_search_entry::ToolSearchInfo;
 use crate::util::error_or_panic;
-use codex_extension_api::ToolCallOutcome;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::protocol::EventMsg;
 use codex_tools::ToolName;
@@ -329,8 +326,6 @@ impl ToolRegistry {
             return Err(err);
         }
 
-        notify_tool_start(&invocation).await;
-
         let response_cell = tokio::sync::Mutex::new(None);
         let invocation_for_tool = invocation.clone();
         let log_payload = invocation.payload.log_payload();
@@ -365,26 +360,9 @@ impl ToolRegistry {
             Err(_) => false,
         };
         emit_metric_for_tool_read(&invocation, success).await;
-        let lifecycle_outcome = match &result {
-            Ok(_) => {
-                let guard = response_cell.lock().await;
-                match guard.as_ref() {
-                    Some(result) => ToolCallOutcome::Completed {
-                        success: result.result.success_for_logging(),
-                    },
-                    None => ToolCallOutcome::Failed {
-                        handler_executed: true,
-                    },
-                }
-            }
-            Err(_) => ToolCallOutcome::Failed {
-                handler_executed: true,
-            },
-        };
         if let Some(terminal_outcome_reached) = &terminal_outcome_reached {
             terminal_outcome_reached.store(true, Ordering::Release);
         }
-        notify_tool_finish(&invocation, lifecycle_outcome).await;
 
         if let Err(err) = invocation
             .session
