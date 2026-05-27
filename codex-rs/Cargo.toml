@@ -8,7 +8,6 @@ members = [
     "app-server-client",
     "app-server-protocol",
     "app-server-test-client",
-    "debug-client",
     "arg0",
     "features",
     "install-context",
