@@ -30,7 +30,6 @@ pub enum PlanType {
 pub enum ProviderAccount {
     ApiKey,
     Chatgpt { email: String, plan_type: PlanType },
-    AmazonBedrock,
 }
 
 impl PlanType {

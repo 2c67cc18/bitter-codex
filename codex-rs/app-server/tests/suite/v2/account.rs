@@ -1625,47 +1625,6 @@ async fn get_account_when_auth_not_required() -> Result<()> {
 }
 
 #[tokio::test]
-async fn get_account_with_aws_provider() -> Result<()> {
-    let codex_home = TempDir::new()?;
-    create_config_toml(
-        codex_home.path(),
-        CreateConfigTomlParams {
-            model_provider_id: Some("amazon-bedrock".to_string()),
-            extra_provider_config: Some(
-                r#"[model_providers.amazon-bedrock.aws]
-profile = "codex-bedrock"
-region = "us-west-2"
-"#
-                .to_string(),
-            ),
-            ..Default::default()
-        },
-    )?;
-
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
-
-    let params = GetAccountParams {
-        refresh_token: false,
-    };
-    let request_id = mcp.send_get_account_request(params).await?;
-
-    let resp: JSONRPCResponse = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
-    )
-    .await??;
-    let received: GetAccountResponse = to_response(resp)?;
-
-    let expected = GetAccountResponse {
-        account: Some(Account::AmazonBedrock {}),
-        requires_openai_auth: false,
-    };
-    assert_eq!(received, expected);
-    Ok(())
-}
-
-#[tokio::test]
 async fn get_account_with_chatgpt() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(
