@@ -21,7 +21,8 @@ use crate::protocol::v2::TurnItemsView;
 use crate::protocol::v2::TurnStatus;
 use crate::protocol::v2::UserInput;
 use crate::protocol::v2::WebSearchAction;
-use codex_protocol::items::parse_hook_prompt_message;
+use codex_protocol::models::ContentItem;
+use codex_protocol::models::ImageDetail;
 use codex_protocol::models::MessagePhase;
 use codex_protocol::protocol::AgentReasoningEvent;
 use codex_protocol::protocol::AgentReasoningRawContentEvent;
@@ -214,7 +215,6 @@ impl ThreadHistoryBuilder {
             EventMsg::ExitedReviewMode(payload) => self.handle_exited_review_mode(payload),
             EventMsg::ItemStarted(payload) => self.handle_item_started(payload),
             EventMsg::ItemCompleted(payload) => self.handle_item_completed(payload),
-            EventMsg::HookStarted(_) | EventMsg::HookCompleted(_) => {}
             EventMsg::Error(payload) => self.handle_error(payload),
             EventMsg::TokenCount(_) => {}
             EventMsg::ThreadRolledBack(payload) => self.handle_thread_rollback(payload),
@@ -238,7 +238,7 @@ impl ThreadHistoryBuilder {
 
     fn handle_response_item(&mut self, item: &codex_protocol::models::ResponseItem) {
         let codex_protocol::models::ResponseItem::Message {
-            role, content, id, ..
+            role, content, ..
         } = item
         else {
             return;
@@ -248,17 +248,38 @@ impl ThreadHistoryBuilder {
             return;
         }
 
-        let Some(hook_prompt) = parse_hook_prompt_message(id.as_ref(), content) else {
-            return;
-        };
+        let mut message = String::new();
+        let mut images = Vec::new();
+        let mut image_details = Vec::new();
+        let local_images = Vec::new();
+        let local_image_details = Vec::new();
 
-        self.ensure_turn().items.push(ThreadItem::HookPrompt {
-            id: hook_prompt.id,
-            fragments: hook_prompt
-                .fragments
-                .into_iter()
-                .map(crate::protocol::v2::HookPromptFragment::from)
-                .collect(),
+        for content_item in content {
+            match content_item {
+                ContentItem::InputText { text } => {
+                    message.push_str(text);
+                }
+                ContentItem::InputImage { image_url, detail } => {
+                    images.push(image_url.clone());
+                    image_details.push(*detail);
+                }
+                ContentItem::OutputText { text } => {
+                    warn!("Output text in user response item: {text}");
+                }
+            }
+        }
+
+        if message.is_empty() && images.is_empty() && local_images.is_empty() {
+            return;
+        }
+
+        self.handle_user_message(&UserMessageEvent {
+            message,
+            images: (!images.is_empty()).then_some(images),
+            image_details,
+            local_images,
+            local_image_details,
+            text_elements: Vec::new(),
         });
     }
 
@@ -353,7 +374,6 @@ impl ThreadHistoryBuilder {
                 );
             }
             codex_protocol::items::TurnItem::UserMessage(_)
-            | codex_protocol::items::TurnItem::HookPrompt(_)
             | codex_protocol::items::TurnItem::AgentMessage(_)
             | codex_protocol::items::TurnItem::Reasoning(_)
             | codex_protocol::items::TurnItem::WebSearch(_)
@@ -377,7 +397,6 @@ impl ThreadHistoryBuilder {
                 );
             }
             codex_protocol::items::TurnItem::UserMessage(_)
-            | codex_protocol::items::TurnItem::HookPrompt(_)
             | codex_protocol::items::TurnItem::AgentMessage(_)
             | codex_protocol::items::TurnItem::Reasoning(_)
             | codex_protocol::items::TurnItem::WebSearch(_)
@@ -1206,10 +1225,8 @@ mod tests {
     use crate::protocol::v2::CommandExecutionSource;
     use codex_protocol::ThreadId;
     use codex_protocol::dynamic_tools::DynamicToolCallOutputContentItem as CoreDynamicToolCallOutputContentItem;
-    use codex_protocol::items::HookPromptFragment as CoreHookPromptFragment;
     use codex_protocol::items::TurnItem as CoreTurnItem;
     use codex_protocol::items::UserMessageItem as CoreUserMessageItem;
-    use codex_protocol::items::build_hook_prompt_message;
     use codex_protocol::mcp::CallToolResult;
     use codex_protocol::models::ImageDetail;
     use codex_protocol::models::MessagePhase as CoreMessagePhase;
@@ -3165,60 +3182,6 @@ mod tests {
                 ),
                 additional_details: None,
             })
-        );
-    }
-
-    #[test]
-    fn rebuilds_hook_prompt_items_from_rollout_response_items() {
-        let hook_prompt = build_hook_prompt_message(&[
-            CoreHookPromptFragment::from_single_hook("Retry with tests.", "hook-run-1"),
-            CoreHookPromptFragment::from_single_hook("Then summarize cleanly.", "hook-run-2"),
-        ])
-        .expect("hook prompt message");
-        let items = vec![
-            RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {
-                turn_id: "turn-a".into(),
-                trace_id: None,
-                started_at: None,
-                model_context_window: None,
-                collaboration_mode_kind: Default::default(),
-            })),
-            RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
-                message: "hello".into(),
-                images: None,
-                text_elements: Vec::new(),
-                local_images: Vec::new(),
-                ..Default::default()
-            })),
-            RolloutItem::ResponseItem(hook_prompt),
-            RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
-                turn_id: "turn-a".into(),
-                last_agent_message: None,
-                completed_at: None,
-                duration_ms: None,
-                time_to_first_token_ms: None,
-            })),
-        ];
-
-        let turns = build_turns_from_rollout_items(&items);
-
-        assert_eq!(turns.len(), 1);
-        assert_eq!(turns[0].items.len(), 2);
-        assert_eq!(
-            turns[0].items[1],
-            ThreadItem::HookPrompt {
-                id: turns[0].items[1].id().to_string(),
-                fragments: vec![
-                    crate::protocol::v2::HookPromptFragment {
-                        text: "Retry with tests.".into(),
-                        hook_run_id: "hook-run-1".into(),
-                    },
-                    crate::protocol::v2::HookPromptFragment {
-                        text: "Then summarize cleanly.".into(),
-                        hook_run_id: "hook-run-2".into(),
-                    },
-                ],
-            }
         );
     }
 

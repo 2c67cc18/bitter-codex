@@ -54,8 +54,6 @@ use codex_extension_api::PromptSlot;
 use codex_features::FEATURES;
 use codex_features::Feature;
 use codex_features::unstable_features_warning_event;
-use codex_hooks::Hooks;
-use codex_hooks::HooksConfig;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_login::auth_env_telemetry::collect_auth_env_telemetry;
@@ -1472,22 +1470,6 @@ impl Session {
         self.emit_config_changed_contributors(previous_config.as_ref(), new_config.as_ref());
         self.services.skills_manager.clear_cache();
         self.services.plugins_manager.clear_cache();
-        let hooks = build_hooks_for_config(
-            config.as_ref(),
-            self.services.plugins_manager.as_ref(),
-            self.services.user_shell.as_ref(),
-        )
-        .await;
-
-        let state = self.state.lock().await;
-        // A newer refresh may have updated the config while this hook build was in flight.
-        // Only publish hooks derived from the current config snapshot.
-        if Arc::ptr_eq(
-            &state.session_configuration.original_config_do_not_use,
-            &config,
-        ) {
-            self.services.hooks.store(Arc::new(hooks));
-        }
     }
 
     fn emit_config_changed_contributors(
@@ -1512,9 +1494,9 @@ impl Session {
     }
 
     pub(crate) async fn reload_user_config_layer(&self) {
-        // Refresh layer-backed runtime state for an existing session, including enabled plugin,
-        // skill, and hook state. Derived config fields such as feature gates and legacy notify
-        // settings remain session-static.
+        // Refresh layer-backed runtime state for an existing session, including enabled plugin
+        // and skill state. Derived config fields such as feature gates and legacy notify settings
+        // remain session-static.
         //
         // Prefer `refresh_runtime_config()` when the host can already provide a materialized
         // config snapshot. This file-based path exists for legacy local reload flows.
@@ -2624,10 +2606,6 @@ impl Session {
             self.persist_rollout_items(&[RolloutItem::TurnContext(turn_context_item)])
                 .await;
         }
-        {
-            let mut state = self.state.lock().await;
-            state.queue_pending_session_start_source(codex_hooks::SessionStartSource::Compact);
-        }
         self.services.model_client.advance_window_generation();
     }
 
@@ -3239,10 +3217,6 @@ impl Session {
         }
     }
 
-    pub(crate) fn hooks(&self) -> Arc<Hooks> {
-        self.services.hooks.load_full()
-    }
-
     pub(crate) fn user_shell(&self) -> Arc<shell::Shell> {
         Arc::clone(&self.services.user_shell)
     }
@@ -3252,24 +3226,6 @@ impl Session {
             return Ok(None);
         };
         live_thread.local_rollout_path().await.map_err(Into::into)
-    }
-
-    pub(crate) async fn hook_transcript_path(&self) -> Option<PathBuf> {
-        self.ensure_rollout_materialized().await;
-        match self.current_rollout_path().await {
-            Ok(path) => path,
-            Err(err) => {
-                warn!("{err}");
-                None
-            }
-        }
-    }
-
-    pub(crate) async fn take_pending_session_start_source(
-        &self,
-    ) -> Option<codex_hooks::SessionStartSource> {
-        let mut state = self.state.lock().await;
-        state.take_pending_session_start_source()
     }
 
     fn show_raw_agent_reasoning(&self) -> bool {
@@ -3308,31 +3264,6 @@ pub(crate) fn emit_subagent_session_started(
         subagent_source,
         created_at,
     });
-}
-
-/// Builds the hook engine for one config snapshot, including any enabled plugin hooks.
-async fn build_hooks_for_config(
-    config: &Config,
-    plugins_manager: &PluginsManager,
-    user_shell: &crate::shell::Shell,
-) -> Hooks {
-    let mut hook_shell_argv = user_shell.derive_exec_args("", /*use_login_shell*/ false);
-    let hook_shell_program = hook_shell_argv.remove(0);
-    let _ = hook_shell_argv.pop();
-    let plugins_input = config.plugins_config_input();
-    let plugin_outcome = plugins_manager.plugins_for_config(&plugins_input).await;
-    let plugin_hook_sources = plugin_outcome.effective_plugin_hook_sources();
-    let plugin_hook_load_warnings = plugin_outcome.effective_plugin_hook_warnings();
-    Hooks::new(HooksConfig {
-        legacy_notify_argv: config.notify.clone(),
-        feature_enabled: config.features.enabled(Feature::CodexHooks),
-        bypass_hook_trust: config.bypass_hook_trust,
-        config_layer_stack: Some(config.config_layer_stack.clone()),
-        plugin_hook_sources,
-        plugin_hook_load_warnings,
-        shell_program: Some(hook_shell_program),
-        shell_args: hook_shell_argv,
-    })
 }
 
 #[cfg(test)]

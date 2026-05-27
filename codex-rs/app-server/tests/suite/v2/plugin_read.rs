@@ -17,7 +17,6 @@ use axum::http::Uri;
 use axum::http::header::AUTHORIZATION;
 use axum::routing::get;
 use codex_app_server_protocol::AppInfo;
-use codex_app_server_protocol::HookEventName;
 use codex_app_server_protocol::JSONRPCError;
 use codex_app_server_protocol::JSONRPCResponse;
 use codex_app_server_protocol::PluginAuthPolicy;
@@ -1132,7 +1131,6 @@ async fn plugin_read_returns_plugin_details_with_bundle_contents() -> Result<()>
     std::fs::create_dir_all(repo_root.path().join(".git"))?;
     std::fs::create_dir_all(repo_root.path().join(".agents/plugins"))?;
     std::fs::create_dir_all(plugin_root.join(".codex-plugin"))?;
-    std::fs::create_dir_all(plugin_root.join("hooks"))?;
     std::fs::create_dir_all(plugin_root.join("skills/thread-summarizer"))?;
     std::fs::create_dir_all(plugin_root.join("skills/chatgpt-only"))?;
     std::fs::write(
@@ -1239,37 +1237,6 @@ description: Visible only for ChatGPT
 }"#,
     )?;
     std::fs::write(
-        plugin_root.join("hooks/hooks.json"),
-        r#"{
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo startup"
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo first"
-          },
-          {
-            "type": "command",
-            "command": "echo second"
-          }
-        ]
-      }
-    ]
-  }
-}"#,
-    )?;
-    std::fs::write(
         codex_home.path().join("config.toml"),
         r#"[features]
 plugins = true
@@ -1281,8 +1248,6 @@ enabled = false
 [plugins."demo-plugin@codex-curated"]
 enabled = true
 
-[hooks.state."demo-plugin@codex-curated:hooks/hooks.json:pre_tool_use:0:0"]
-enabled = false
 "#,
     )?;
     write_installed_plugin(&codex_home, "codex-curated", "demo-plugin")?;
@@ -1369,23 +1334,6 @@ enabled = false
         "Summarize email threads"
     );
     assert!(!response.plugin.skills[0].enabled);
-    assert_eq!(
-        response.plugin.hooks,
-        vec![
-            codex_app_server_protocol::PluginHookSummary {
-                key: "demo-plugin@codex-curated:hooks/hooks.json:pre_tool_use:0:0".to_string(),
-                event_name: HookEventName::PreToolUse,
-            },
-            codex_app_server_protocol::PluginHookSummary {
-                key: "demo-plugin@codex-curated:hooks/hooks.json:pre_tool_use:0:1".to_string(),
-                event_name: HookEventName::PreToolUse,
-            },
-            codex_app_server_protocol::PluginHookSummary {
-                key: "demo-plugin@codex-curated:hooks/hooks.json:session_start:0:0".to_string(),
-                event_name: HookEventName::SessionStart,
-            },
-        ]
-    );
     assert_eq!(response.plugin.apps.len(), 1);
     assert_eq!(response.plugin.apps[0].id, "gmail");
     assert_eq!(response.plugin.apps[0].name, "gmail");

@@ -18,12 +18,9 @@ use codex_app_server_protocol::ConfigRequirementsReadResponse;
 use codex_app_server_protocol::ConfigValueWriteParams;
 use codex_app_server_protocol::ConfigWriteErrorCode;
 use codex_app_server_protocol::ConfigWriteResponse;
-use codex_app_server_protocol::ConfiguredHookHandler;
-use codex_app_server_protocol::ConfiguredHookMatcherGroup;
 use codex_app_server_protocol::ExperimentalFeatureEnablementSetParams;
 use codex_app_server_protocol::ExperimentalFeatureEnablementSetResponse;
 use codex_app_server_protocol::JSONRPCErrorError;
-use codex_app_server_protocol::ManagedHooksRequirements;
 use codex_app_server_protocol::ModelProviderCapabilitiesReadResponse;
 use codex_app_server_protocol::NetworkDomainPermission;
 use codex_app_server_protocol::NetworkRequirements;
@@ -32,10 +29,6 @@ use codex_app_server_protocol::SandboxMode;
 use codex_app_server_protocol::ServerNotification;
 use codex_chatgpt::connectors;
 use codex_config::ConfigRequirementsToml;
-use codex_config::HookEventsToml;
-use codex_config::HookHandlerConfig as CoreHookHandlerConfig;
-use codex_config::ManagedHooksRequirementsToml;
-use codex_config::MatcherGroup as CoreMatcherGroup;
 use codex_config::ResidencyRequirement as CoreResidencyRequirement;
 use codex_config::SandboxModeRequirement as CoreSandboxModeRequirement;
 use codex_core::ThreadManager;
@@ -430,7 +423,6 @@ fn map_requirements_toml_to_api(requirements: ConfigRequirementsToml) -> ConfigR
             }
             normalized
         }),
-        allow_managed_hooks_only: requirements.allow_managed_hooks_only,
         allow_appshots: requirements.allow_appshots,
         computer_use: requirements
             .computer_use
@@ -438,7 +430,6 @@ fn map_requirements_toml_to_api(requirements: ConfigRequirementsToml) -> ConfigR
         feature_requirements: requirements
             .feature_requirements
             .map(|requirements| requirements.entries),
-        hooks: requirements.hooks.map(map_hooks_requirements_to_api),
         enforce_residency: requirements
             .enforce_residency
             .map(map_residency_requirement_to_api),
@@ -451,81 +442,6 @@ fn map_computer_use_requirements_to_api(
 ) -> ComputerUseRequirements {
     ComputerUseRequirements {
         allow_locked_computer_use: computer_use.allow_locked_computer_use,
-    }
-}
-
-fn map_hooks_requirements_to_api(hooks: ManagedHooksRequirementsToml) -> ManagedHooksRequirements {
-    let ManagedHooksRequirementsToml {
-        managed_dir,
-        windows_managed_dir,
-        hooks,
-    } = hooks;
-    let HookEventsToml {
-        pre_tool_use,
-        permission_request,
-        post_tool_use,
-        pre_compact,
-        post_compact,
-        session_start,
-        user_prompt_submit,
-        subagent_start,
-        subagent_stop,
-        stop,
-    } = hooks;
-
-    ManagedHooksRequirements {
-        managed_dir,
-        windows_managed_dir,
-        pre_tool_use: map_hook_matcher_groups_to_api(pre_tool_use),
-        permission_request: map_hook_matcher_groups_to_api(permission_request),
-        post_tool_use: map_hook_matcher_groups_to_api(post_tool_use),
-        pre_compact: map_hook_matcher_groups_to_api(pre_compact),
-        post_compact: map_hook_matcher_groups_to_api(post_compact),
-        session_start: map_hook_matcher_groups_to_api(session_start),
-        user_prompt_submit: map_hook_matcher_groups_to_api(user_prompt_submit),
-        subagent_start: map_hook_matcher_groups_to_api(subagent_start),
-        subagent_stop: map_hook_matcher_groups_to_api(subagent_stop),
-        stop: map_hook_matcher_groups_to_api(stop),
-    }
-}
-
-fn map_hook_matcher_groups_to_api(
-    groups: Vec<CoreMatcherGroup>,
-) -> Vec<ConfiguredHookMatcherGroup> {
-    groups
-        .into_iter()
-        .map(map_hook_matcher_group_to_api)
-        .collect()
-}
-
-fn map_hook_matcher_group_to_api(group: CoreMatcherGroup) -> ConfiguredHookMatcherGroup {
-    ConfiguredHookMatcherGroup {
-        matcher: group.matcher,
-        hooks: group
-            .hooks
-            .into_iter()
-            .map(map_hook_handler_to_api)
-            .collect(),
-    }
-}
-
-fn map_hook_handler_to_api(handler: CoreHookHandlerConfig) -> ConfiguredHookHandler {
-    match handler {
-        CoreHookHandlerConfig::Command {
-            command,
-            command_windows,
-            timeout_sec,
-            r#async,
-            status_message,
-        } => ConfiguredHookHandler::Command {
-            command,
-            command_windows,
-            timeout_sec,
-            r#async,
-            status_message,
-        },
-        CoreHookHandlerConfig::Prompt {} => ConfiguredHookHandler::Prompt {},
-        CoreHookHandlerConfig::Agent {} => ConfiguredHookHandler::Agent {},
     }
 }
 
@@ -638,28 +554,6 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     #[test]
-    fn requirements_api_includes_allow_managed_hooks_only() {
-        let mapped = map_requirements_toml_to_api(ConfigRequirementsToml {
-            allowed_permissions: Some(vec![
-                "managed-standard".to_string(),
-                "managed-build".to_string(),
-            ]),
-            allow_managed_hooks_only: Some(true),
-            ..ConfigRequirementsToml::default()
-        });
-
-        assert_eq!(
-            mapped.allowed_permissions,
-            Some(vec![
-                "managed-standard".to_string(),
-                "managed-build".to_string(),
-            ])
-        );
-        assert_eq!(mapped.allow_managed_hooks_only, Some(true));
-        assert_eq!(mapped.hooks, None);
-    }
-
-    #[test]
     fn requirements_api_includes_allow_appshots() {
         let mapped = map_requirements_toml_to_api(ConfigRequirementsToml {
             allow_appshots: Some(false),
@@ -667,7 +561,6 @@ mod tests {
         });
 
         assert_eq!(mapped.allow_appshots, Some(false));
-        assert_eq!(mapped.hooks, None);
     }
 
     #[test]

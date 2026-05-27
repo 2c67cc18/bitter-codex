@@ -40,7 +40,6 @@ mod goals;
 pub use goals::ExternalGoalPreviousStatus;
 pub use goals::ExternalGoalSet;
 mod guardian;
-mod hook_runtime;
 mod installation_id;
 pub(crate) mod landlock;
 pub use landlock::spawn_command_under_linux_sandbox;

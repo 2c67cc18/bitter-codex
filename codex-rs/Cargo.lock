@@ -882,7 +882,6 @@ dependencies = [
  "codex-core",
  "codex-features",
  "codex-git-utils",
- "codex-hooks",
  "codex-login",
  "codex-model-provider",
  "codex-model-provider-info",
@@ -1233,7 +1232,6 @@ dependencies = [
  "codex-extension-api",
  "codex-features",
  "codex-git-utils",
- "codex-hooks",
  "codex-login",
  "codex-model-provider",
  "codex-model-provider-info",
@@ -1412,27 +1410,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "walkdir",
-]
-
-[[package]]
-name = "codex-hooks"
-version = "0.134.0"
-dependencies = [
- "anyhow",
- "chrono",
- "codex-config",
- "codex-protocol",
- "codex-utils-absolute-path",
- "codex-utils-output-truncation",
- "futures",
- "pretty_assertions",
- "regex",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -2110,7 +2087,6 @@ dependencies = [
  "codex-core",
  "codex-extension-api",
  "codex-features",
- "codex-hooks",
  "codex-login",
  "codex-model-provider-info",
  "codex-models-manager",

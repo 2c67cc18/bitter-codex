@@ -18,12 +18,6 @@ use crate::connectors;
 use crate::context::ContextualUserFragment;
 use crate::feedback_tags;
 use crate::goals::GoalRuntimeEvent;
-use crate::hook_runtime::inspect_pending_input;
-use crate::hook_runtime::record_additional_contexts;
-use crate::hook_runtime::record_pending_input;
-use crate::hook_runtime::run_legacy_after_agent_hook;
-use crate::hook_runtime::run_pending_session_start_hooks;
-use crate::hook_runtime::run_turn_stop_hooks;
 use crate::injection::ToolMentionKind;
 use crate::injection::app_id_from_path;
 use crate::injection::tool_kind_for_path;
@@ -77,7 +71,6 @@ use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::items::PlanItem;
 use codex_protocol::items::TurnItem;
-use codex_protocol::items::build_hook_prompt_message;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::MessagePhase;
@@ -162,13 +155,8 @@ pub(crate) async fn run_turn(
     let (injection_items, explicitly_enabled_connectors) =
         build_skills_and_plugins(&sess, turn_context.as_ref(), &input, &cancellation_token).await?;
 
-    if run_pending_session_start_hooks(&sess, &turn_context).await {
-        return None;
-    }
     let mut can_drain_pending_input = input.is_empty();
-    if run_hooks_and_record_inputs(&sess, &turn_context, &input).await {
-        return None;
-    }
+    record_turn_inputs(&sess, &turn_context, &input).await;
 
     sess.merge_connector_selection(explicitly_enabled_connectors.clone())
         .await;
@@ -185,7 +173,6 @@ pub(crate) async fn run_turn(
     track_turn_resolved_config_analytics(&sess, &turn_context, &input).await;
 
     let mut last_agent_message: Option<String> = None;
-    let mut stop_hook_active = false;
     // Although from the perspective of codex.rs, TurnDiffTracker has the lifecycle of a Task which contains
     // many turns, from the perspective of the user, it is a single turn.
     #[allow(deprecated)]
@@ -221,9 +208,7 @@ pub(crate) async fn run_turn(
             Vec::new()
         };
 
-        if run_hooks_and_record_inputs(&sess, &turn_context, &pending_input).await {
-            break;
-        }
+        record_turn_inputs(&sess, &turn_context, &pending_input).await;
 
         // Construct the input that we will send to the model.
         let sampling_request_input: Vec<ResponseItem> = {
@@ -309,47 +294,6 @@ pub(crate) async fn run_turn(
 
                 if !needs_follow_up {
                     last_agent_message = sampling_request_last_agent_message;
-                    let stop_outcome = run_turn_stop_hooks(
-                        &sess,
-                        &turn_context,
-                        stop_hook_active,
-                        last_agent_message.clone(),
-                    )
-                    .await;
-                    if stop_outcome.should_block {
-                        if let Some(hook_prompt_message) =
-                            build_hook_prompt_message(&stop_outcome.continuation_fragments)
-                        {
-                            sess.record_conversation_items(
-                                &turn_context,
-                                std::slice::from_ref(&hook_prompt_message),
-                            )
-                            .await;
-                            stop_hook_active = true;
-                            continue;
-                        } else {
-                            sess.send_event(
-                                &turn_context,
-                                EventMsg::Warning(WarningEvent {
-                                    message: "Stop hook requested continuation without a prompt; ignoring the block.".to_string(),
-                                }),
-                            )
-                            .await;
-                        }
-                    }
-                    if stop_outcome.should_stop {
-                        break;
-                    }
-                    if run_legacy_after_agent_hook(
-                        &sess,
-                        &turn_context,
-                        &sampling_request_input,
-                        last_agent_message.clone(),
-                    )
-                    .await
-                    {
-                        return None;
-                    }
                     break;
                 }
                 continue;
@@ -399,30 +343,26 @@ pub(crate) async fn run_turn(
     last_agent_message
 }
 
-async fn run_hooks_and_record_inputs(
+async fn record_turn_inputs(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
     input: &[TurnInput],
-) -> bool {
-    let mut blocked_input = false;
-    let mut accepted_input = false;
+) {
     for input_item in input {
-        let hook_outcome = inspect_pending_input(sess, turn_context, input_item).await;
-        if hook_outcome.should_stop {
-            blocked_input = true;
-            record_additional_contexts(sess, turn_context, hook_outcome.additional_contexts).await;
-        } else {
-            accepted_input = true;
-            record_pending_input(
-                sess,
-                turn_context,
-                input_item.clone(),
-                hook_outcome.additional_contexts,
-            )
-            .await;
+        match input_item {
+            TurnInput::UserInput(user_input) => {
+                sess.record_user_prompt_and_emit_turn_item(turn_context, user_input)
+                    .await;
+            }
+            TurnInput::ResponseInputItem(response_input_item) => {
+                sess.record_response_item_and_emit_turn_item(
+                    turn_context,
+                    ResponseItem::from(response_input_item.clone()),
+                )
+                .await;
+            }
         }
     }
-    blocked_input && !accepted_input
 }
 
 #[expect(
@@ -1355,8 +1295,6 @@ pub(super) fn realtime_text_for_event(msg: &EventMsg) -> Option<String> {
         | EventMsg::ExitedReviewMode(_)
         | EventMsg::RawResponseItem(_)
         | EventMsg::ItemStarted(_)
-        | EventMsg::HookStarted(_)
-        | EventMsg::HookCompleted(_)
         | EventMsg::AgentMessageContentDelta(_)
         | EventMsg::PlanDelta(_)
         | EventMsg::ReasoningContentDelta(_)

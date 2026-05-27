@@ -77,13 +77,6 @@ fn apply_patch_freeform_is_removed_and_disabled_by_default() {
 }
 
 #[test]
-fn plugin_hooks_is_removed_and_disabled_by_default() {
-    assert_eq!(Feature::PluginHooks.stage(), Stage::Removed);
-    assert_eq!(Feature::PluginHooks.default_enabled(), false);
-    assert_eq!(feature_for_key("plugin_hooks"), Some(Feature::PluginHooks));
-}
-
-#[test]
 fn code_mode_only_requires_code_mode() {
     let mut features = Features::with_defaults();
     features.enable(Feature::CodeModeOnly);
@@ -350,12 +343,6 @@ fn collab_is_legacy_alias_for_multi_agent() {
 }
 
 #[test]
-fn codex_hooks_is_legacy_alias_for_hooks() {
-    assert_eq!(feature_for_key("hooks"), Some(Feature::CodexHooks));
-    assert_eq!(feature_for_key("codex_hooks"), Some(Feature::CodexHooks));
-}
-
-#[test]
 fn multi_agent_is_stable_and_enabled_by_default() {
     assert_eq!(Feature::Collab.stage(), Stage::Stable);
     assert_eq!(Feature::Collab.default_enabled(), true);
@@ -487,22 +474,6 @@ fn from_sources_ignores_removed_js_repl_feature_keys() {
 fn from_sources_ignores_removed_apply_patch_freeform_feature_key() {
     let features_toml =
         FeaturesToml::from(BTreeMap::from([("apply_patch_freeform".to_string(), true)]));
-
-    let features = Features::from_sources(
-        FeatureConfigSource {
-            features: Some(&features_toml),
-            ..Default::default()
-        },
-        FeatureConfigSource::default(),
-        FeatureOverrides::default(),
-    );
-
-    assert_eq!(features, Features::with_defaults());
-}
-
-#[test]
-fn from_sources_ignores_removed_plugin_hooks_feature_key() {
-    let features_toml = FeaturesToml::from(BTreeMap::from([("plugin_hooks".to_string(), true)]));
 
     let features = Features::from_sources(
         FeatureConfigSource {
