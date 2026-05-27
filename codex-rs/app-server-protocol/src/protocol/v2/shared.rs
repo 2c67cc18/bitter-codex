@@ -6,7 +6,6 @@ use codex_protocol::protocol::GranularApprovalConfig as CoreGranularApprovalConf
 use codex_protocol::protocol::NonSteerableTurnKind as CoreNonSteerableTurnKind;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::Value as JsonValue;
 
 // Macro to declare a camelCased API v2 enum mirroring a core enum which
 // tends to use either snake_case or kebab-case.
@@ -214,24 +213,6 @@ pub enum ApprovalsReviewer {
     AutoReview,
 }
 
-
-fn string_enum_schema_with_description(values: &[&str], description: &str) -> Schema {
-    let mut schema = SchemaObject {
-        instance_type: Some(InstanceType::String.into()),
-        metadata: Some(Box::new(Metadata {
-            description: Some(description.to_string()),
-            ..Default::default()
-        })),
-        ..Default::default()
-    };
-    schema.enum_values = Some(
-        values
-            .iter()
-            .map(|value| JsonValue::String((*value).to_string()))
-            .collect(),
-    );
-    Schema::Object(schema)
-}
 
 impl ApprovalsReviewer {
     pub fn to_core(self) -> CoreApprovalsReviewer {

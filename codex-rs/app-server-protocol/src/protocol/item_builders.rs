@@ -9,33 +9,28 @@
 //!   synthetic items, so sharing the logic avoids drift between those paths.
 //! - The projection is presentation-specific. Core protocol events stay generic, while the
 //!   app-server protocol decides how to surface those events as `ThreadItem`s for clients.
-use crate::protocol::common::ServerNotification;
-use crate::protocol::v2::AutoReviewDecisionSource;
 use crate::protocol::v2::CommandAction;
 use crate::protocol::v2::CommandExecutionSource;
 use crate::protocol::v2::CommandExecutionStatus;
 use crate::protocol::v2::FileUpdateChange;
-use crate::protocol::v2::GuardianApprovalReview;
-use crate::protocol::v2::GuardianApprovalReviewStatus;
-use crate::protocol::v2::ItemGuardianApprovalReviewCompletedNotification;
-use crate::protocol::v2::ItemGuardianApprovalReviewStartedNotification;
 use crate::protocol::v2::PatchApplyStatus;
 use crate::protocol::v2::PatchChangeKind;
 use crate::protocol::v2::ThreadItem;
-use codex_protocol::ThreadId;
+use codex_protocol::approvals::GuardianAssessmentAction;
 use codex_protocol::protocol::ApplyPatchApprovalRequestEvent;
 use codex_protocol::protocol::ExecApprovalRequestEvent;
 use codex_protocol::protocol::ExecCommandBeginEvent;
 use codex_protocol::protocol::ExecCommandEndEvent;
 use codex_protocol::protocol::FileChange;
-use codex_protocol::protocol::GuardianAssessmentAction;
 use codex_protocol::protocol::GuardianAssessmentEvent;
 use codex_protocol::protocol::PatchApplyBeginEvent;
 use codex_protocol::protocol::PatchApplyEndEvent;
-use codex_shell_command::parse_command::parse_command;
-use codex_shell_command::parse_command::shlex_join;
 use std::collections::HashMap;
 use std::path::PathBuf;
+
+fn command_to_display(command: &[String]) -> String {
+    command.join(" ")
+}
 
 pub fn build_file_change_approval_request_item(
     payload: &ApplyPatchApprovalRequestEvent,
@@ -68,7 +63,7 @@ pub fn build_command_execution_approval_request_item(
 ) -> ThreadItem {
     ThreadItem::CommandExecution {
         id: payload.call_id.clone(),
-        command: shlex_join(&payload.command),
+        command: command_to_display(&payload.command),
         cwd: payload.cwd.clone(),
         process_id: None,
         source: CommandExecutionSource::Agent,
@@ -88,7 +83,7 @@ pub fn build_command_execution_approval_request_item(
 pub fn build_command_execution_begin_item(payload: &ExecCommandBeginEvent) -> ThreadItem {
     ThreadItem::CommandExecution {
         id: payload.call_id.clone(),
-        command: shlex_join(&payload.command),
+        command: command_to_display(&payload.command),
         cwd: payload.cwd.clone(),
         process_id: payload.process_id.clone(),
         source: payload.source.into(),
@@ -115,7 +110,7 @@ pub fn build_command_execution_end_item(payload: &ExecCommandEndEvent) -> Thread
 
     ThreadItem::CommandExecution {
         id: payload.call_id.clone(),
-        command: shlex_join(&payload.command),
+        command: command_to_display(&payload.command),
         cwd: payload.cwd.clone(),
         process_id: payload.process_id.clone(),
         source: payload.source.into(),
@@ -171,18 +166,10 @@ pub fn build_item_from_guardian_event(
                     .chain(argv.iter().skip(1).cloned())
                     .collect::<Vec<_>>()
             };
-            let command = shlex_join(&argv);
-            let parsed_cmd = parse_command(&argv);
-            let command_actions = if parsed_cmd.is_empty() {
-                vec![CommandAction::Unknown {
-                    command: command.clone(),
-                }]
-            } else {
-                parsed_cmd
-                    .into_iter()
-                    .map(|parsed| CommandAction::from_core_with_cwd(parsed, cwd))
-                    .collect()
-            };
+            let command = command_to_display(&argv);
+            let command_actions = vec![CommandAction::Unknown {
+                command: command.clone(),
+            }];
             Some(ThreadItem::CommandExecution {
                 id: id.clone(),
                 command,
@@ -198,81 +185,7 @@ pub fn build_item_from_guardian_event(
         }
         GuardianAssessmentAction::ApplyPatch { .. }
         | GuardianAssessmentAction::NetworkAccess { .. }
-        | GuardianAssessmentAction::McpToolCall { .. }
-        | GuardianAssessmentAction::RequestPermissions { .. } => None,
-    }
-}
-
-pub fn guardian_auto_approval_review_notification(
-    conversation_id: &ThreadId,
-    event_turn_id: &str,
-    assessment: &GuardianAssessmentEvent,
-) -> ServerNotification {
-    let turn_id = if assessment.turn_id.is_empty() {
-        event_turn_id.to_string()
-    } else {
-        assessment.turn_id.clone()
-    };
-    let review = GuardianApprovalReview {
-        status: match assessment.status {
-            codex_protocol::protocol::GuardianAssessmentStatus::InProgress => {
-                GuardianApprovalReviewStatus::InProgress
-            }
-            codex_protocol::protocol::GuardianAssessmentStatus::Approved => {
-                GuardianApprovalReviewStatus::Approved
-            }
-            codex_protocol::protocol::GuardianAssessmentStatus::Denied => {
-                GuardianApprovalReviewStatus::Denied
-            }
-            codex_protocol::protocol::GuardianAssessmentStatus::TimedOut => {
-                GuardianApprovalReviewStatus::TimedOut
-            }
-            codex_protocol::protocol::GuardianAssessmentStatus::Aborted => {
-                GuardianApprovalReviewStatus::Aborted
-            }
-        },
-        risk_level: assessment.risk_level.map(Into::into),
-        user_authorization: assessment.user_authorization.map(Into::into),
-        rationale: assessment.rationale.clone(),
-    };
-    let action = assessment.action.clone().into();
-    match assessment.status {
-        codex_protocol::protocol::GuardianAssessmentStatus::InProgress => {
-            ServerNotification::ItemGuardianApprovalReviewStarted(
-                ItemGuardianApprovalReviewStartedNotification {
-                    thread_id: conversation_id.to_string(),
-                    turn_id,
-                    review_id: assessment.id.clone(),
-                    started_at_ms: assessment.started_at_ms,
-                    target_item_id: assessment.target_item_id.clone(),
-                    review,
-                    action,
-                },
-            )
-        }
-        codex_protocol::protocol::GuardianAssessmentStatus::Approved
-        | codex_protocol::protocol::GuardianAssessmentStatus::Denied
-        | codex_protocol::protocol::GuardianAssessmentStatus::TimedOut
-        | codex_protocol::protocol::GuardianAssessmentStatus::Aborted => {
-            ServerNotification::ItemGuardianApprovalReviewCompleted(
-                ItemGuardianApprovalReviewCompletedNotification {
-                    thread_id: conversation_id.to_string(),
-                    turn_id,
-                    review_id: assessment.id.clone(),
-                    started_at_ms: assessment.started_at_ms,
-                    completed_at_ms: assessment
-                        .completed_at_ms
-                        .unwrap_or(assessment.started_at_ms),
-                    target_item_id: assessment.target_item_id.clone(),
-                    decision_source: assessment
-                        .decision_source
-                        .map(AutoReviewDecisionSource::from)
-                        .unwrap_or(AutoReviewDecisionSource::Agent),
-                    review,
-                    action,
-                },
-            )
-        }
+        | GuardianAssessmentAction::McpToolCall { .. } => None,
     }
 }
 

@@ -1,7 +1,6 @@
 use crate::protocol::common::ServerNotification;
 use crate::protocol::item_builders::build_command_execution_begin_item;
 use crate::protocol::item_builders::build_command_execution_end_item;
-use crate::protocol::item_builders::convert_patch_changes;
 use crate::protocol::v2::AgentMessageDeltaNotification;
 use crate::protocol::v2::CollabAgentState;
 use crate::protocol::v2::CollabAgentTool;
@@ -9,15 +8,14 @@ use crate::protocol::v2::CollabAgentToolCallStatus;
 use crate::protocol::v2::CommandExecutionOutputDeltaNotification;
 use crate::protocol::v2::DynamicToolCallOutputContentItem;
 use crate::protocol::v2::DynamicToolCallStatus;
-use crate::protocol::v2::FileChangePatchUpdatedNotification;
 use crate::protocol::v2::ItemCompletedNotification;
 use crate::protocol::v2::ItemStartedNotification;
-use crate::protocol::v2::PlanDeltaNotification;
 use crate::protocol::v2::ReasoningSummaryPartAddedNotification;
 use crate::protocol::v2::ReasoningSummaryTextDeltaNotification;
 use crate::protocol::v2::ReasoningTextDeltaNotification;
 use crate::protocol::v2::TerminalInteractionNotification;
 use crate::protocol::v2::ThreadItem;
+use crate::protocol::v2::WarningNotification;
 use codex_protocol::dynamic_tools::DynamicToolCallOutputContentItem as CoreDynamicToolCallOutputContentItem;
 use codex_protocol::protocol::EventMsg;
 use std::collections::HashMap;
@@ -352,11 +350,9 @@ pub fn item_event_to_server_notification(
                 delta,
             })
         }
-        EventMsg::PlanDelta(event) => ServerNotification::PlanDelta(PlanDeltaNotification {
-            thread_id,
-            turn_id,
-            item_id: event.item_id,
-            delta: event.delta,
+        EventMsg::PlanDelta(_) => ServerNotification::Warning(WarningNotification {
+            thread_id: Some(thread_id),
+            message: "ignored removed plan delta event".to_string(),
         }),
         EventMsg::ReasoningContentDelta(event) => {
             ServerNotification::ReasoningSummaryTextDelta(ReasoningSummaryTextDeltaNotification {
@@ -400,14 +396,10 @@ pub fn item_event_to_server_notification(
                 completed_at_ms: item_completed_event.completed_at_ms,
             })
         }
-        EventMsg::PatchApplyUpdated(event) => {
-            ServerNotification::FileChangePatchUpdated(FileChangePatchUpdatedNotification {
-                thread_id,
-                turn_id,
-                item_id: event.call_id,
-                changes: convert_patch_changes(&event.changes),
-            })
-        }
+        EventMsg::PatchApplyUpdated(_) => ServerNotification::Warning(WarningNotification {
+            thread_id: Some(thread_id),
+            message: "ignored removed patch update event".to_string(),
+        }),
         EventMsg::ExecCommandBegin(exec_command_begin_event) => {
             ServerNotification::ItemStarted(ItemStartedNotification {
                 thread_id,

@@ -10,8 +10,6 @@ use crate::protocol::v2::CollabAgentToolCallStatus;
 use crate::protocol::v2::CommandExecutionStatus;
 use crate::protocol::v2::DynamicToolCallOutputContentItem;
 use crate::protocol::v2::DynamicToolCallStatus;
-use crate::protocol::v2::McpToolCallError;
-use crate::protocol::v2::McpToolCallResult;
 use crate::protocol::v2::McpToolCallStatus;
 use crate::protocol::v2::ThreadItem;
 use crate::protocol::v2::Turn;
@@ -22,8 +20,8 @@ use crate::protocol::v2::TurnStatus;
 use crate::protocol::v2::UserInput;
 use crate::protocol::v2::WebSearchAction;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ImageDetail;
 use codex_protocol::models::MessagePhase;
+use codex_protocol::items::McpToolCallError;
 use codex_protocol::protocol::AgentReasoningEvent;
 use codex_protocol::protocol::AgentReasoningRawContentEvent;
 use codex_protocol::protocol::AgentStatus;
@@ -560,14 +558,7 @@ impl ThreadHistoryBuilder {
         };
         let duration_ms = i64::try_from(payload.duration.as_millis()).ok();
         let (result, error) = match &payload.result {
-            Ok(value) => (
-                Some(Box::new(McpToolCallResult {
-                    content: value.content.clone(),
-                    structured_content: value.structured_content.clone(),
-                    meta: value.meta.clone(),
-                })),
-                None,
-            ),
+            Ok(value) => (Some(Box::new(value.clone())), None),
             Err(message) => (
                 None,
                 Some(McpToolCallError {
