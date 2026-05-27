@@ -11,6 +11,10 @@ done as blind deletion or line-range cleanup.
 - Remove feature gates for removed capabilities rather than preserving them as
   optional code paths.
 - Keep only Cargo as the supported build/test interface.
+- 2026-05-28 `cargo-modal check --workspace --all-targets --no-default-features`
+  currently stops first in `codex-arg0`, which still references removed
+  apply-patch, sandboxing, exec-server, shell-escalation, and Linux sandbox
+  crates. Remove or rewrite arg0 dispatch before relying on workspace checks.
 
 ## Analytics removal follow-through
 
@@ -39,7 +43,8 @@ done as blind deletion or line-range cleanup.
   delete `src/tool_call.rs`, remove the `tool_call` module and
   `ConversationHistory`/`ToolCall` re-exports from `src/lib.rs`, and update the
   crate README so it no longer claims retained shared `ToolCall` executable-tool
-  contracts.
+  contracts. The only remaining work found on 2026-05-28 was the README claim;
+  no `tool_call` module or `ConversationHistory`/`ToolCall` re-export remained.
 
 ## Hooks removal follow-through
 
@@ -67,15 +72,24 @@ done as blind deletion or line-range cleanup.
   --with-access-token` were removed from main. Stored agent-identity auth
   records and provider signing support still remain and belong to the remaining
   auth-provider cleanup.
+- Generic command-backed bearer/provider command auth was removed on
+  2026-05-28 from login auth, model-provider, models-manager refresh logic, and
+  focused tests. The stale `ModelProviderInfo::has_command_auth` helper remains
+  outside that slice and should be removed with provider field cleanup.
 
 ## Model provider/catalog simplification
 
 - Remove AWS/Bedrock provider structs, constants, factories, and SigV4 signing.
 - Remove provider command-backed bearer auth.
+- Provider command-backed bearer auth is removed from runtime construction and
+  focused tests as of 2026-05-28. Continue by removing stale provider metadata
+  fields/helpers with the AWS/Bedrock/provider-info cleanup.
 - Decide whether local unauthenticated providers such as Ollama/LM Studio remain.
 - Keep local static models only for `gpt-5.5` and `gpt-5.4-mini`; accept
   `gpt-5.3-codex-spark` only from the server/model catalog path.
 - Remove `apply_patch_tool_type` and code that reads it.
+- `apply_patch_tool_type` was removed from the static model catalog and fallback
+  model construction on 2026-05-28.
 - Keep hosted web/image capability metadata, but expose tools only when session
   settings enable them.
 
@@ -93,6 +107,14 @@ done as blind deletion or line-range cleanup.
 - Remove structural fields for environments, permissions, approval policy,
   sandbox, network policy/proxy, apps, memory, realtime, personality, and
   collaboration mode.
+- Current main still fails dependency checks in `codex-app-server-protocol`
+  before focused crates compile after the arg0 blocker is bypassed or in
+  clippy/test. `cargo-modal` reports unresolved references to removed protocol
+  symbols such as `PlanDelta`, `FileChangePatchUpdated`, guardian approval review
+  notifications, permission/sandbox types, MCP result types,
+  `CommandExecParams`, JSON schema helpers, and missing `codex_shell_command`.
+  Treat protocol trim as the next serial unblocker before broad final checks can
+  pass.
 
 ## App-server implementation trim
 
@@ -238,6 +260,10 @@ done as blind deletion or line-range cleanup.
 - Remove mentions of update_plan, apply_patch, approvals, sandboxing, permission
   escalation, network proxy, personality, collaboration modes, subagents, review,
   guardian, memories, interactive TUI, old models, and telemetry/analytics.
+- Retained `models-manager` prompts/catalog metadata and core prompt templates
+  were simplified on 2026-05-28. Follow-up remains to delete or disconnect the
+  now-minimal permission/personality/collaboration/review templates once the
+  corresponding runtime/protocol producers are removed.
 
 ## Tests after semantic cleanup
 
@@ -252,7 +278,15 @@ done as blind deletion or line-range cleanup.
 
 ## Final compile/build check
 
-- After semantic cleanup only, run:
+- Use `cargo-modal` only; do not run raw cargo/rustfmt/clippy/test commands.
+  Legacy raw cargo commands below are kept as intent, not invocation syntax.
+- 2026-05-28 focused `cargo-modal` checks for `codex-models-manager`,
+  `codex-login`, `codex-model-provider`, and `codex-core` were blocked before
+  the target crates by existing `codex-app-server-protocol` compile failures
+  listed above.
+- 2026-05-28 final `cargo-modal` phase results: workspace check failed in
+  `codex-arg0`; workspace clippy and test failed in `codex-app-server-protocol`.
+- After semantic cleanup only, run the equivalent of:
 
 ```bash
 cargo fmt --all
