@@ -2806,7 +2806,7 @@ mod tests {
     }
 
     #[test]
-    fn app_server_defaults_without_analytics_flag() {
+    fn app_server_defaults_to_stdio_transport() {
         let app_server = app_server_from_args(["codex", "app-server"].as_ref());
         assert!(!app_server.remote_control);
         assert_eq!(
