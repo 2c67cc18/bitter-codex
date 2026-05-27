@@ -590,7 +590,7 @@ impl Match for ResponseMock {
             .push(ResponsesRequest(request.clone()));
 
         // Enforce invariant checks on every request body captured by the mock.
-        // Panic on orphan tool outputs or calls to catch regressions early.
+        // Panic on orphan tool outputs to catch regressions early.
         validate_request_body_invariants(request);
         true
     }
