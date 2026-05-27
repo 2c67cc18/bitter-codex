@@ -1,4 +1,5 @@
 mod dynamic;
+mod shell_spec;
 pub(crate) mod unified_exec;
 mod view_image;
 pub(crate) mod view_image_spec;

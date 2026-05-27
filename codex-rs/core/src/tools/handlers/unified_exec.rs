@@ -1,11 +1,9 @@
-use crate::sandboxing::SandboxPermissions;
 use crate::shell::Shell;
 use crate::shell::ShellType;
 use crate::shell::get_shell_by_model_provided_path;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
-use codex_protocol::models::AdditionalPermissionProfile;
 use codex_tools::UnifiedExecShellMode;
 use serde::Deserialize;
 use std::path::PathBuf;
@@ -36,14 +34,6 @@ pub(crate) struct ExecCommandArgs {
     yield_time_ms: u64,
     #[serde(default)]
     max_output_tokens: Option<usize>,
-    #[serde(default)]
-    sandbox_permissions: SandboxPermissions,
-    #[serde(default)]
-    additional_permissions: Option<AdditionalPermissionProfile>,
-    #[serde(default)]
-    justification: Option<String>,
-    #[serde(default)]
-    prefix_rule: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
