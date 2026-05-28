@@ -26,7 +26,6 @@ pub mod exec_env;
 mod git_info_tests;
 mod installation_id;
 mod original_image_detail;
-pub use codex_mcp::SandboxState;
 pub(crate) mod mention_syntax;
 pub(crate) mod utils;
 pub use mention_syntax::PLUGIN_TEXT_MENTION_SIGIL;
