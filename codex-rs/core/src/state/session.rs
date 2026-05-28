@@ -32,7 +32,6 @@ pub(crate) struct SessionState {
     auto_compact_window: AutoCompactWindow,
     /// Startup prewarmed session prepared during session initialization.
     pub(crate) startup_prewarm: Option<SessionStartupPrewarmHandle>,
-    pub(crate) active_connector_selection: HashSet<String>,
     granted_permissions: Option<AdditionalPermissionProfile>,
     next_turn_is_first: bool,
 }
@@ -50,7 +49,6 @@ impl SessionState {
             previous_turn_settings: None,
             auto_compact_window: AutoCompactWindow::new(),
             startup_prewarm: None,
-            active_connector_selection: HashSet::new(),
             granted_permissions: None,
             next_turn_is_first: true,
         }
@@ -197,24 +195,22 @@ impl SessionState {
         self.startup_prewarm.take()
     }
 
-    // Adds connector IDs to the active set and returns the merged selection.
-    pub(crate) fn merge_connector_selection<I>(&mut self, connector_ids: I) -> HashSet<String>
+    // Connector runtime selection has been removed; keep this inert while callers
+    // shed the stale session plumbing.
+    pub(crate) fn merge_connector_selection<I>(&mut self, _connector_ids: I) -> HashSet<String>
     where
         I: IntoIterator<Item = String>,
     {
-        self.active_connector_selection.extend(connector_ids);
-        self.active_connector_selection.clone()
+        HashSet::new()
     }
 
-    // Returns the current connector selection tracked on session state.
+    // Returns an empty selection now that connector runtime selection is inert.
     pub(crate) fn get_connector_selection(&self) -> HashSet<String> {
-        self.active_connector_selection.clone()
+        HashSet::new()
     }
 
-    // Removes all currently tracked connector selections.
-    pub(crate) fn clear_connector_selection(&mut self) {
-        self.active_connector_selection.clear();
-    }
+    // No-op retained for stale session callers.
+    pub(crate) fn clear_connector_selection(&mut self) {}
 
     pub(crate) fn record_granted_permissions(&mut self, permissions: AdditionalPermissionProfile) {
         self.granted_permissions =
