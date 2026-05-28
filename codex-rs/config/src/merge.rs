@@ -1,6 +1,5 @@
 use crate::key_aliases::normalize_key_aliases;
 use crate::key_aliases::normalized_with_key_aliases;
-use codex_network_proxy::normalize_host;
 use toml::Value as TomlValue;
 
 /// Merge config `overlay` into `base`, giving `overlay` precedence.
@@ -47,6 +46,10 @@ fn normalize_network_domain_keys(table: &mut toml::map::Map<String, TomlValue>) 
     for (pattern, value) in entries {
         table.insert(normalize_host(&pattern), value);
     }
+}
+
+fn normalize_host(host: &str) -> String {
+    host.trim().trim_end_matches('.').to_ascii_lowercase()
 }
 
 #[cfg(test)]

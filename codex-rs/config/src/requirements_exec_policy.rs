@@ -1,13 +1,121 @@
-use codex_execpolicy::Decision;
-use codex_execpolicy::Policy;
-use codex_execpolicy::RuleRef;
-use codex_execpolicy::rule::PatternToken;
-use codex_execpolicy::rule::PrefixPattern;
-use codex_execpolicy::rule::PrefixRule;
 use multimap::MultiMap;
 use serde::Deserialize;
 use std::sync::Arc;
 use thiserror::Error;
+
+pub type RuleRef = Arc<PrefixRule>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Decision {
+    Allow,
+    Prompt,
+    Forbidden,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Evaluation {
+    pub decision: Decision,
+    pub matched_rules: Vec<RuleMatch>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuleMatch {
+    PrefixRuleMatch {
+        matched_prefix: Vec<String>,
+        decision: Decision,
+        resolved_program: Option<String>,
+        justification: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PatternToken {
+    Single(String),
+    Alts(Vec<String>),
+}
+
+impl PatternToken {
+    fn matches(&self, token: &str) -> bool {
+        match self {
+            Self::Single(expected) => expected == token,
+            Self::Alts(alts) => alts.iter().any(|expected| expected == token),
+        }
+    }
+
+    fn alternatives(&self) -> Vec<String> {
+        match self {
+            Self::Single(token) => vec![token.clone()],
+            Self::Alts(alts) => alts.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrefixPattern {
+    pub first: Arc<str>,
+    pub rest: Arc<[PatternToken]>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrefixRule {
+    pub pattern: PrefixPattern,
+    pub decision: Decision,
+    pub justification: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Policy {
+    rules_by_program: MultiMap<String, RuleRef>,
+}
+
+impl Policy {
+    pub fn new(rules_by_program: MultiMap<String, RuleRef>) -> Self {
+        Self { rules_by_program }
+    }
+
+    pub fn rules(&self) -> &MultiMap<String, RuleRef> {
+        &self.rules_by_program
+    }
+
+    pub fn check(
+        &self,
+        command: &[String],
+        fallback: &dyn Fn(&[String]) -> Evaluation,
+    ) -> Evaluation {
+        let Some((program, args)) = command.split_first() else {
+            return fallback(command);
+        };
+        let Some(rules) = self.rules_by_program.get_vec(program) else {
+            return fallback(command);
+        };
+
+        for rule in rules {
+            if rule.pattern.rest.len() > args.len() {
+                continue;
+            }
+            if rule
+                .pattern
+                .rest
+                .iter()
+                .zip(args.iter())
+                .all(|(expected, actual)| expected.matches(actual))
+            {
+                let matched_prefix = command[..=rule.pattern.rest.len()].to_vec();
+                return Evaluation {
+                    decision: rule.decision,
+                    matched_rules: vec![RuleMatch::PrefixRuleMatch {
+                        matched_prefix,
+                        decision: rule.decision,
+                        resolved_program: None,
+                        justification: rule.justification.clone(),
+                    }],
+                };
+            }
+        }
+
+        fallback(command)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct RequirementsExecPolicy {
