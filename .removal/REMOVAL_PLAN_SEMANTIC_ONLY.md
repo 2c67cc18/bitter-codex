@@ -434,6 +434,22 @@ done as blind deletion or line-range cleanup.
   `exec_policy`, `sandboxing`, MCP/RMCP, connectors, guardian,
   request-permissions, and deleted skill/app/plugin infrastructure), but no
   remaining diagnostics are from the restored context fragment files.
+- 2026-05-28 accepted narrow core shell-command trim
+  `semantic-root-20260528-core-shell-command-trim/core-shell-command-trim` as
+  merge commit `Merge core shell-command trim`. It kept ownership to
+  `core/src/{tools/events.rs,session/mod.rs,tasks/user_shell.rs,tools/runtimes/unified_exec.rs}`,
+  removed the remaining owned-file `codex_shell_command` imports, and inlined
+  the retained PowerShell UTF-8 command prefixing. Command event parsing now
+  preserves the display command as `ParsedCommand::Unknown` instead of
+  restoring the deleted structured parser crate; this is an intentional
+  retained-behavior degradation for this removal slice. The worker reached
+  terminal `completed` normally with clean branch
+  `semantic-core-shell-command-trim` at `4bd4e319d`. `git diff --check` passed.
+  Its focused cargo-modal core lib check reached Cargo and failed from broader
+  unresolved core surfaces (`agent`, connectors, environment selection,
+  execpolicy, realtime, MCP/request-permissions, sandboxing, guardian, and
+  related missing crates/modules), with no remaining owned-file
+  `codex_shell_command` references.
 
 ## Analytics removal follow-through
 
