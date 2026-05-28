@@ -1544,3 +1544,21 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   concentrated in exec-policy/network approval/sandboxing,
   MCP/realtime/session state service, deleted exec-server/plugin/rollout-trace
   crates, managed network proxy, and legacy tests.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/realtime-conversation-trim`
+  as merge commit `Merge realtime conversation trim`. The slice removed the
+  remaining live session dependency on the deleted
+  `crate::realtime_conversation::RealtimeConversationManager`: the `Session`
+  conversation field and constructor/shutdown wiring were deleted, realtime
+  event mirroring and handoff-clear paths are now inert no-ops, and new turn
+  contexts set `realtime_active` to `false` without restoring realtime runtime
+  behavior. The worker reached terminal `completed` normally through
+  `bitter-loop wait`, left a clean branch at `e5961ff41`, `git diff --check`
+  passed, and a scoped search found no remaining `crate::realtime_conversation`,
+  `RealtimeConversationManager`, or `self`/`sess` conversation-field references
+  in `codex-rs/core/src`. Its focused `cargo-modal --dirty --repo codex-rs
+  check -p codex-core` run still failed at 126 broader errors, with realtime
+  manager references removed and remaining blockers concentrated in
+  exec-policy/network approval/sandboxing, MCP/session state service, deleted
+  exec-server/plugin/rollout-trace crates, managed network proxy, and legacy
+  tests.
