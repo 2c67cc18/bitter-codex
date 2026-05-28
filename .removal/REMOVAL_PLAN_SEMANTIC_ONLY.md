@@ -483,6 +483,9 @@ done as blind deletion or line-range cleanup.
   `effective_plugin_skill_roots` references are in core tests and should be
   removed with the broader plugin/test cleanup, not by restoring the plugin
   crates.
+- 2026-05-28 root serial follow-up removed the unused
+  `codex_mcp::SandboxState` re-export from `core/src/lib.rs`; `rg SandboxState`
+  is now empty in `codex-rs`.
 
 ## Analytics removal follow-through
 
