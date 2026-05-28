@@ -1248,3 +1248,23 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   tools errors are now in the separate runtime/sandbox slice
   (`tools/runtimes/*`, sandboxing/network approval/guardian/canonicalization)
   and should not be solved by restoring deleted crates.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/core-tools-runtimes-trim` as
+  merge commit `Merge unified exec runtime trim` after root review amended the
+  branch to delete the now-unreferenced `tools/runtimes/unified_exec.rs`
+  adapter instead of retaining a dead wrapper around the unified exec process
+  manager. The accepted slice removed deleted sandbox/network/guardian/runtime
+  plumbing from `tools/runtimes/*` and direct unified-exec call sites, including
+  network proxy fields on `ExecCommandRequest` and obsolete tests for removed
+  runtime behavior. The worker reached terminal `completed` normally with a
+  clean branch, and `git diff --check` passed. Focused
+  `cargo-modal --repo codex-rs --dirty check -p codex-core
+  --no-default-features --lib` still fails at 163 broader errors. The next
+  visible blockers are broad session/thread state references to deleted
+  `agent`, `goals`, `environment_selection`, `exec_policy`, `guardian`,
+  request-permissions/MCP surfaces, deleted `codex_exec_server` uses in
+  prompt/test/unified-exec layers, `codex_rollout_trace` in tool dispatch
+  tracing, `codex_mcp`/`codex_rmcp_client`/`rmcp` in router and session MCP,
+  and leftover `codex_network_proxy`/`codex_sandboxing` in
+  `tasks/user_shell.rs`. Do not restore those crates or modules to satisfy the
+  remaining errors; schedule smaller producer/removal slices.
