@@ -337,6 +337,22 @@ done as blind deletion or line-range cleanup.
   `codex_network_proxy`, MCP/request-permissions, and related deleted modules);
   after review `git diff --check` passed and the owned file no longer contains
   `codex_windows_sandbox` references.
+- 2026-05-28 accepted context-manager execpolicy update trim
+  `semantic-root-20260528-context-manager-execpolicy-trim/context-manager-execpolicy-trim`
+  as merge commit `Merge context manager execpolicy trim`. It kept ownership to
+  `core/src/context_manager/updates.rs` plus the minimal session call-site
+  adjustment in `core/src/session/mod.rs`, removing the direct
+  `codex_execpolicy::Policy` dependency from the context-manager settings
+  update builder. Permission instruction rendering remains in session code,
+  where the retained exec-policy service is already present, and the update
+  builder now receives rendered permission instructions text. The worker reached
+  terminal `completed` normally with clean branch
+  `semantic/context-manager-execpolicy-trim` at `f7c6c74ef`. `git diff --check`
+  passed. Its focused `cargo-modal --repo codex-rs --dirty check -p
+  codex-core --no-default-features --lib` reached Cargo and failed from broader
+  unresolved core surfaces, including pre-existing missing context exports,
+  `guardian`, `sandboxing`, `exec_policy`, `codex_execpolicy`,
+  `codex_network_proxy`, MCP, connectors, and related deleted modules.
 
 ## Analytics removal follow-through
 
