@@ -22,6 +22,10 @@ done as blind deletion or line-range cleanup.
   `codex_file_system` crates by keeping config-owned representations for the
   surviving requirements/network/filesystem-loader surfaces. These retained
   surfaces should be revisited in the remaining permission/runtime cleanup.
+- 2026-05-28 late compile slices removed the stale terminal-detection
+  dependency, inlined the retained models-manager collaboration mode presets
+  after removing the deleted template crate, and replaced rollout's removed
+  file-search fallback plus deleted request-permissions event reference.
 
 ## Analytics removal follow-through
 
@@ -304,6 +308,10 @@ done as blind deletion or line-range cleanup.
 - 2026-05-28 final-compile workers merged targeted `codex-tools` and
   `codex-config` repairs. Re-run full workspace `cargo-modal` check, clippy,
   and test from main after those merges.
+- 2026-05-28 late compile workers merged targeted models-manager and rollout
+  repairs after workspace check advanced to removed template/file-search
+  dependencies. Re-run full workspace `cargo-modal` check, clippy, and test
+  from main after those merges.
 - After semantic cleanup only, run the equivalent of:
 
 ```bash
