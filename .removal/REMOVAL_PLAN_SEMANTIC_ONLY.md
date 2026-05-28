@@ -1524,3 +1524,23 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   selection, exec-policy/network approval/sandboxing, MCP/realtime/session state
   service, deleted exec-server/plugin/rollout-trace crates, managed network
   proxy, and legacy tests.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/environment-selection-trim` as
+  merge commit `Merge environment selection trim`. The slice removed live core
+  dependencies on the deleted `crate::environment_selection` module from
+  session, turn-context, and thread-manager setup. A small local inert
+  `ResolvedTurnEnvironments` shape now preserves public/stored
+  `TurnEnvironmentSelection` vectors without resolving live environments;
+  default thread environment selections return empty vectors, validation is a
+  no-op, and MCP/skill warmup now uses session cwd/no filesystem instead of
+  restoring manager-backed environment behavior. The worker reached terminal
+  `completed` normally through `bitter-loop wait`, left a clean branch at
+  `d309f5aa7`, `git diff --check` passed, and a scoped search found no
+  remaining `crate::environment_selection`,
+  `default_thread_environment_selections`, or `resolve_environment_selections`
+  references in `codex-rs/core/src` or `codex-rs/core/tests`. Its focused
+  `cargo-modal --dirty check -p codex-core` run still failed at 130 broader
+  errors, with environment-selection removed and remaining blockers
+  concentrated in exec-policy/network approval/sandboxing,
+  MCP/realtime/session state service, deleted exec-server/plugin/rollout-trace
+  crates, managed network proxy, and legacy tests.
