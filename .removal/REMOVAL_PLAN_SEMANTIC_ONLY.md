@@ -252,10 +252,26 @@ done as blind deletion or line-range cleanup.
   The worker reached terminal `completed` normally with clean branch
   `semantic/core-session-sandbox-policy-trim` at `7607e1690`. Focused
   cargo-modal core lib checks failed at 285 broader errors with no remaining
-  owned-file diagnostics for the removed compatibility function. Separate
-  `codex_sandboxing::policy_transforms` use in `session/turn_context.rs`
-  remains intentionally outside this compatibility-only slice and should be
-  removed with the runtime/additional-permissions sandbox cleanup.
+  owned-file diagnostics for the removed compatibility function.
+- 2026-05-28 accepted narrow turn-context policy-transform trim
+  `semantic-root-20260528-core-turn-context-policy-trim/core-turn-context-policy-trim`
+  as merge commit `Merge turn context policy transform trim`. It kept
+  ownership to `core/src/session/turn_context.rs` and replaced direct imports
+  of `codex_sandboxing::policy_transforms::{effective_file_system_sandbox_policy,
+  effective_network_sandbox_policy}` with local helpers for applying approved
+  additional filesystem/network permissions to the retained runtime permission
+  profile flow. The worker reached terminal `completed` normally with clean
+  branch `semantic/core-turn-context-policy-trim` at `563ec5b2e`. Its
+  `cargo-modal --dirty check -p codex-core --lib` and
+  `cargo-modal --dirty check -p codex-core --lib --all-features` runs still
+  failed from broader unresolved core surfaces (`agent`,
+  `environment_selection`, `guardian`, `codex_execpolicy`,
+  `codex_network_proxy`, `codex_windows_sandbox`, MCP/request-permissions,
+  and related deleted modules), not from this owned file. The remaining
+  `policy_transforms` references are now in broader session request-permissions
+  intersection, app-server bespoke event handling, and core state grant merging;
+  handle those with separate ownership because they cross protocol/app-server
+  or persistent permission-state behavior.
 
 ## Analytics removal follow-through
 
