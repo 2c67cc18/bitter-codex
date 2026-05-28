@@ -16,8 +16,6 @@ use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
 use crate::tools::parallel::ToolCallRuntime;
 use crate::tools::router::ToolRouter;
-use codex_memories_read::citations::parse_memory_citation;
-use codex_memories_read::citations::thread_ids_from_memory_citation;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result;
 use codex_protocol::memory_citation::MemoryCitation;
@@ -73,20 +71,17 @@ fn strip_hidden_assistant_markup(text: &str, plan_mode: bool) -> String {
     }
 }
 
-fn strip_hidden_assistant_markup_and_parse_memory_citation(
+fn strip_hidden_assistant_markup_and_ignore_memory_citation(
     text: &str,
     plan_mode: bool,
-) -> (
-    String,
-    Option<codex_protocol::memory_citation::MemoryCitation>,
-) {
-    let (without_citations, citations) = strip_citations(text);
+) -> (String, Option<codex_protocol::memory_citation::MemoryCitation>) {
+    let (without_citations, _) = strip_citations(text);
     let visible_text = if plan_mode {
         strip_proposed_plan_blocks(&without_citations)
     } else {
         without_citations
     };
-    (visible_text, parse_memory_citation(citations))
+    (visible_text, None)
 }
 
 pub(crate) fn raw_assistant_output_text_from_item(item: &ResponseItem) -> Option<String> {
@@ -208,32 +203,16 @@ pub(crate) async fn mark_thread_memory_mode_polluted_if_external_context(
 }
 
 async fn record_stage1_output_usage_and_detect_memory_citation(
-    state_db_ctx: Option<&state_db::StateDbHandle>,
-    item: &ResponseItem,
+    _state_db_ctx: Option<&state_db::StateDbHandle>,
+    _item: &ResponseItem,
 ) -> bool {
-    let Some(raw_text) = raw_assistant_output_text_from_item(item) else {
-        return false;
-    };
-
-    let (_, citations) = strip_citations(&raw_text);
-    let Some(memory_citation) = parse_memory_citation(citations) else {
-        return false;
-    };
-    record_stage1_output_usage_for_memory_citation(state_db_ctx, &memory_citation).await
+    false
 }
 
 async fn record_stage1_output_usage_for_memory_citation(
-    state_db_ctx: Option<&state_db::StateDbHandle>,
-    memory_citation: &MemoryCitation,
+    _state_db_ctx: Option<&state_db::StateDbHandle>,
+    _memory_citation: &MemoryCitation,
 ) -> bool {
-    let thread_ids = thread_ids_from_memory_citation(memory_citation);
-    if thread_ids.is_empty() {
-        return true;
-    }
-
-    if let Some(db) = state_db_ctx {
-        let _ = db.record_stage1_output_usage(&thread_ids).await;
-    }
     true
 }
 
@@ -448,7 +427,7 @@ pub(crate) async fn handle_non_tool_response_item(
                     })
                     .collect::<String>();
                 let (stripped, memory_citation) =
-                    strip_hidden_assistant_markup_and_parse_memory_citation(&combined, plan_mode);
+                    strip_hidden_assistant_markup_and_ignore_memory_citation(&combined, plan_mode);
                 agent_message.content =
                     vec![codex_protocol::items::AgentMessageContent::Text { text: stripped }];
                 if agent_message.memory_citation.is_none() {
