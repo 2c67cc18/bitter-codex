@@ -1348,3 +1348,21 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   handlers, notably compact/state/session construction surfaces; handle them in
   slices that own the corresponding trace context producers instead of
   restoring `codex_rollout_trace`.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/compact-remote-trace-trim`
+  as merge commit `Merge compact remote trace trim`. The slice removed legacy
+  `compact_remote.rs` dependencies on deleted
+  `codex_rollout_trace::CompactionCheckpointTracePayload` and rollout trace
+  context/checkpoint recording, while preserving the compaction request,
+  history trimming, compacted history processing, history replacement, token
+  recompute, and turn item lifecycle. The retained compact client API now
+  receives a local no-op `&()` trace argument for this legacy path. The worker
+  reached terminal `completed` normally with a clean branch, and
+  `git diff --check` passed. Its focused `cargo-modal --repo codex-rs --dirty
+  check -p codex-core --no-default-features --lib` still failed at 137 broader
+  errors with no owned-file diagnostics. Remaining source blockers are broad
+  session/thread/state service references to deleted
+  agent/goals/environment-selection/exec-policy/guardian/MCP/app-server
+  elicitation/request-permissions, deleted exec-server/plugin plumbing, MCP
+  router/session/state turn types, and rollout trace context surfaces in
+  session construction/state service.
