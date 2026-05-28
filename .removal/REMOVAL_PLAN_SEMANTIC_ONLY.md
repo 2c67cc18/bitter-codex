@@ -1466,3 +1466,18 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   --repo codex-rs check -p codex-core` run failed at 162 broader errors in
   remaining agent/MCP/exec-policy/request-permissions/realtime/state service
   cleanup.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/request-permissions-runtime-trim`
+  as merge commit `Merge request permissions runtime trim`. The slice removed
+  the retained core request-permissions runtime after the protocol module/event
+  had already been deleted: `codex_protocol::request_permissions` imports,
+  `PendingRequestPermissions` turn-state waiters, request/notify methods,
+  normalization and grant-recording helpers, and the
+  `EventMsg::RequestPermissions` match arm were deleted. Retained permission
+  profile state, user-input waits, dynamic-tool waits, elicitation waits, and
+  approval waiters were left in place. The worker reached terminal `completed`
+  normally with a clean branch, `git diff --check` passed, and a scoped search
+  found no remaining direct request-permissions runtime references outside
+  untouched legacy tests. Its focused `cargo-modal --repo codex-rs --dirty
+  check -p codex-core --lib` run still failed on broader unresolved deleted
+  surfaces such as agent, MCP, exec-policy, and exec-server plumbing.
