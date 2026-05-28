@@ -4,6 +4,7 @@ use crate::function_tool::FunctionCallError;
 use crate::tools::context::ExecCommandToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
+use crate::tools::context::boxed_tool_output;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::handlers::parse_arguments_with_base_path;
 use crate::tools::handlers::resolve_tool_environment;
@@ -123,7 +124,7 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
         .map_err(FunctionCallError::RespondToModel)?;
         let command = resolved_command.command;
         let shell_type = resolved_command.shell_type;
-        let command_for_display = codex_shell_command::parse_command::shlex_join(&command);
+        let command_for_display = command.join(" ");
 
         let ExecCommandArgs {
             tty,
@@ -138,7 +139,7 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
                 ExecCommandRequest {
                     command,
                     shell_type,
-                    hook_command: hook_command.clone(),
+                    hook_command: String::new(),
                     process_id,
                     yield_time_ms,
                     max_output_tokens,
@@ -151,7 +152,10 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
             )
             .await
         {
-            Ok(response) => Ok(boxed_tool_output(response)),
+            Ok(mut response) => {
+                response.hook_command = None;
+                Ok(boxed_tool_output(response))
+            }
             Err(UnifiedExecError::SandboxDenied { output, .. }) => {
                 let output_text = output.aggregated_output.text;
                 let original_token_count = approx_token_count(&output_text);
@@ -167,6 +171,7 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
                     process_id: None,
                     exit_code: Some(output.exit_code),
                     original_token_count: Some(original_token_count),
+                    hook_command: None,
                 }))
             }
             Err(err) => Err(FunctionCallError::RespondToModel(format!(
