@@ -4,6 +4,7 @@ use crate::function_tool::FunctionCallError;
 use crate::tools::context::ExecCommandToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
+use crate::tools::context::boxed_tool_output;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::handlers::parse_arguments_with_base_path;
 use crate::tools::handlers::resolve_tool_environment;
@@ -138,7 +139,7 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
                 ExecCommandRequest {
                     command,
                     shell_type,
-                    hook_command: hook_command.clone(),
+                    hook_command: None,
                     process_id,
                     yield_time_ms,
                     max_output_tokens,
