@@ -10,7 +10,6 @@ use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use crate::tools::flat_tool_name;
-use crate::tools::tool_dispatch_trace::ToolDispatchTrace;
 use crate::tools::tool_search_entry::ToolSearchInfo;
 use crate::util::error_or_panic;
 use codex_protocol::models::ResponseInputItem;
@@ -250,7 +249,6 @@ impl ToolRegistry {
             }
         }
 
-        let dispatch_trace = ToolDispatchTrace::start(&invocation);
         let tool = match self.tool(&tool_name) {
             Some(tool) => tool,
             None => {
@@ -267,7 +265,6 @@ impl ToolRegistry {
                     /*extra_trace_fields*/ &[],
                 );
                 let err = FunctionCallError::RespondToModel(message);
-                dispatch_trace.record_failed(&err);
                 return Err(err);
             }
         };
@@ -298,7 +295,6 @@ impl ToolRegistry {
                 &extra_trace_fields,
             );
             let err = FunctionCallError::Fatal(message);
-            dispatch_trace.record_failed(&err);
             return Err(err);
         }
 
@@ -345,18 +341,9 @@ impl ToolRegistry {
                 let result = guard.take().ok_or_else(|| {
                     FunctionCallError::Fatal("tool produced no output".to_string())
                 })?;
-                dispatch_trace.record_completed(
-                    &invocation,
-                    &result.call_id,
-                    &result.payload,
-                    result.result.as_ref(),
-                );
                 Ok(result)
             }
-            Err(err) => {
-                dispatch_trace.record_failed(&err);
-                Err(err)
-            }
+            Err(err) => Err(err),
         }
     }
 }
