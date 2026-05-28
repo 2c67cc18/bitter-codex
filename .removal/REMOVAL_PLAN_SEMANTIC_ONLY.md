@@ -1443,3 +1443,13 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   a clean branch, and `git diff --check` passed. Its focused
   `cargo-modal --repo codex-rs --dirty check -p codex-core` run failed at 165
   broader errors, with the prior skill metadata budget mismatch removed.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/session-telemetry-terminal-trim`
+  as merge commit `Merge session telemetry terminal trim`. The slice fixed the
+  retained `SessionTelemetry::new` terminal type argument by making the local
+  `"unknown"` placeholder an owned `String` and moving it into the constructor.
+  No telemetry behavior or removed runtime surfaces were restored. The worker
+  reached terminal `completed` normally with a clean branch, `git diff --check`
+  passed, and its focused `cargo-modal --dirty --repo codex-rs check -p
+  codex-core` run failed at 164 broader errors in the remaining
+  agent/MCP/exec-policy/request-permissions/realtime/state service cleanup.
