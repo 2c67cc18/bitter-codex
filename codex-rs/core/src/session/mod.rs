@@ -13,6 +13,7 @@ use crate::agent::status::is_final;
 use crate::build_available_skills;
 use crate::compact;
 use crate::config::ManagedFeatures;
+use crate::config::NetworkProxyAuditMetadata;
 use crate::config::resolve_tool_suggest_config_from_layer_stack;
 use crate::connectors;
 use crate::context::ApprovedCommandPrefixSaved;
@@ -57,9 +58,6 @@ use codex_mcp::McpRuntimeContext;
 use codex_mcp::codex_apps_tools_cache_key;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_models_manager::manager::SharedModelsManager;
-use codex_network_proxy::NetworkProxy;
-use codex_network_proxy::NetworkProxyAuditMetadata;
-use codex_network_proxy::normalize_host;
 use codex_otel::current_span_trace_id;
 use codex_otel::current_span_w3c_trace_context;
 use codex_otel::set_parent_from_w3c_trace_context;
@@ -287,8 +285,6 @@ use crate::stream_events_utils::HandleOutputCtx;
 #[cfg(test)]
 use crate::stream_events_utils::handle_output_item_done;
 use crate::tools::network_approval::NetworkApprovalService;
-use crate::tools::network_approval::build_blocked_request_observer;
-use crate::tools::network_approval::build_network_policy_decider;
 #[cfg(test)]
 use crate::tools::parallel::ToolCallRuntime;
 use crate::tools::sandboxing::ApprovalStore;
@@ -335,7 +331,6 @@ use codex_protocol::protocol::RequestUserInputEvent;
 use codex_protocol::protocol::ReviewDecision;
 use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::SessionConfiguredEvent;
-use codex_protocol::protocol::SessionNetworkProxyRuntime;
 use codex_protocol::protocol::StreamErrorEvent;
 use codex_protocol::protocol::Submission;
 use codex_protocol::protocol::ThreadMemoryMode;
@@ -917,6 +912,10 @@ async fn thread_title_from_thread_store(
     (!title.is_empty() && thread.preview.trim() != title).then(|| title.to_string())
 }
 
+fn normalize_network_policy_host(host: &str) -> String {
+    host.trim().trim_end_matches('.').to_ascii_lowercase()
+}
+
 impl Session {
     pub(crate) async fn app_server_client_metadata(&self) -> AppServerClientMetadata {
         let state = self.state.lock().await;
@@ -965,40 +964,19 @@ impl Session {
 
     async fn start_managed_network_proxy(
         spec: &crate::config::NetworkProxySpec,
-        exec_policy: &codex_execpolicy::Policy,
         permission_profile: &PermissionProfile,
-        network_policy_decider: Option<Arc<dyn codex_network_proxy::NetworkPolicyDecider>>,
-        blocked_request_observer: Option<Arc<dyn codex_network_proxy::BlockedRequestObserver>>,
         managed_network_requirements_enabled: bool,
         audit_metadata: NetworkProxyAuditMetadata,
-    ) -> anyhow::Result<(StartedNetworkProxy, SessionNetworkProxyRuntime)> {
-        let spec = spec
-            .with_exec_policy_network_rules(exec_policy)
-            .map_err(|err| {
-                tracing::warn!(
-                    "failed to apply execpolicy network rules to managed proxy; continuing with configured network policy: {err}"
-                );
-                err
-            })
-            .unwrap_or_else(|_| spec.clone());
-        let network_proxy = spec
-            .start_proxy(
-                permission_profile,
-                network_policy_decider,
-                blocked_request_observer,
-                managed_network_requirements_enabled,
-                audit_metadata,
-            )
-            .await
-            .map_err(|err| anyhow::anyhow!("failed to start managed network proxy: {err}"))?;
-        let session_network_proxy = {
-            let proxy = network_proxy.proxy();
-            SessionNetworkProxyRuntime {
-                http_addr: proxy.http_addr().to_string(),
-                socks_addr: proxy.socks_addr().to_string(),
-            }
-        };
-        Ok((network_proxy, session_network_proxy))
+    ) -> anyhow::Result<StartedNetworkProxy> {
+        spec.start_proxy(
+            permission_profile,
+            None,
+            None,
+            managed_network_requirements_enabled,
+            audit_metadata,
+        )
+        .await
+        .map_err(|err| anyhow::anyhow!("managed network proxy is unavailable: {err}"))
     }
 
     async fn refresh_managed_network_proxy_for_current_permission_profile(&self) {
@@ -1030,16 +1008,6 @@ impl Session {
                 return;
             }
         };
-        let current_exec_policy = self.services.exec_policy.current();
-        let spec = match spec.with_exec_policy_network_rules(current_exec_policy.as_ref()) {
-            Ok(spec) => spec,
-            Err(err) => {
-                warn!(
-                    "failed to apply execpolicy network rules while refreshing managed network proxy: {err}"
-                );
-                spec
-            }
-        };
         if let Some(started_proxy) = self.services.network_proxy.load_full() {
             if let Err(err) = spec.apply_to_started_proxy(started_proxy.as_ref()).await {
                 warn!("failed to refresh managed network proxy for sandbox change: {err}");
@@ -1049,20 +1017,13 @@ impl Session {
 
         match Self::start_managed_network_proxy(
             &spec,
-            current_exec_policy.as_ref(),
             &session_configuration.permission_profile(),
-            /*network_policy_decider*/ None,
-            self.services
-                .managed_network_requirements_configured
-                .then(|| {
-                    build_blocked_request_observer(Arc::clone(&self.services.network_approval))
-                }),
             self.services.managed_network_requirements_configured,
             self.services.network_proxy_audit_metadata.clone(),
         )
         .await
         {
-            Ok((started_proxy, _session_network_proxy)) => {
+            Ok(started_proxy) => {
                 self.services
                     .network_proxy
                     .store(Some(Arc::new(started_proxy)));
@@ -1918,20 +1879,6 @@ impl Session {
         let execpolicy_amendment =
             execpolicy_network_rule_amendment(amendment, network_approval_context, &host);
 
-        if let Some(started_network_proxy) = self.services.network_proxy.load_full() {
-            let proxy = started_network_proxy.proxy();
-            match amendment.action {
-                NetworkPolicyRuleAction::Allow => proxy
-                    .add_allowed_domain(&host)
-                    .await
-                    .map_err(|err| anyhow::anyhow!("failed to update runtime allowlist: {err}"))?,
-                NetworkPolicyRuleAction::Deny => proxy
-                    .add_denied_domain(&host)
-                    .await
-                    .map_err(|err| anyhow::anyhow!("failed to update runtime denylist: {err}"))?,
-            }
-        }
-
         self.services
             .exec_policy
             .append_network_rule_and_update(
@@ -1953,8 +1900,8 @@ impl Session {
         amendment: &NetworkPolicyAmendment,
         network_approval_context: &NetworkApprovalContext,
     ) -> anyhow::Result<String> {
-        let approved_host = normalize_host(&network_approval_context.host);
-        let amendment_host = normalize_host(&amendment.host);
+        let approved_host = normalize_network_policy_host(&network_approval_context.host);
+        let amendment_host = normalize_network_policy_host(&amendment.host);
         if amendment_host != approved_host {
             return Err(anyhow::anyhow!(
                 "network policy amendment host '{}' does not match approved host '{}'",
