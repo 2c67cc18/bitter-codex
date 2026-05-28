@@ -81,9 +81,6 @@ use codex_protocol::protocol::InternalSessionSource;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::W3cTraceContext;
-use codex_rollout_trace::CompactionTraceContext;
-use codex_rollout_trace::InferenceTraceAttempt;
-use codex_rollout_trace::InferenceTraceContext;
 use codex_tools::create_tools_json_for_responses_api;
 use eventsource_stream::Event;
 use eventsource_stream::EventStreamError;
@@ -153,6 +150,27 @@ const MEMORIES_SUMMARIZE_ENDPOINT: &str = "/memories/trace_summarize";
 #[cfg(test)]
 pub(crate) const WEBSOCKET_CONNECT_TIMEOUT: Duration =
     Duration::from_millis(DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS);
+
+#[derive(Clone, Copy, Debug, Default)]
+struct InferenceTraceAttempt;
+
+impl InferenceTraceAttempt {
+    fn disabled() -> Self {
+        Self
+    }
+
+    fn add_request_headers(&self, _headers: &mut ApiHeaderMap) {}
+
+    fn record_started<T: serde::Serialize + ?Sized>(&self, _request: &T) {}
+
+    fn record_failed<E: std::fmt::Display>(
+        &self,
+        _error: &E,
+        _request_id: Option<&str>,
+        _output_items: &[ResponseItem],
+    ) {
+    }
+}
 
 pub(crate) struct CompactConversationRequestSettings {
     pub(crate) effort: Option<ReasoningEffortConfig>,
@@ -440,7 +458,7 @@ impl ModelClient {
         model_info: &ModelInfo,
         settings: CompactConversationRequestSettings,
         session_telemetry: &SessionTelemetry,
-        compaction_trace: &CompactionTraceContext,
+        _compaction_trace: &impl Send,
     ) -> Result<Vec<ResponseItem>> {
         if prompt.input.is_empty() {
             return Ok(Vec::new());
@@ -513,12 +531,10 @@ impl ModelClient {
         let client =
             ApiCompactClient::new(transport, client_setup.api_provider, client_setup.api_auth)
                 .with_telemetry(Some(request_telemetry));
-        let trace_attempt = compaction_trace.start_attempt(&payload);
         let result = client
             .compact_input(&payload, extra_headers, compact_request_timeout)
             .await
             .map_err(map_api_error);
-        trace_attempt.record_result(result.as_deref());
         result
     }
 
@@ -1230,7 +1246,6 @@ impl ModelClientSession {
         summary: ReasoningSummaryConfig,
         service_tier: Option<String>,
         turn_metadata_header: Option<&str>,
-        inference_trace: &InferenceTraceContext,
     ) -> Result<ResponseStream> {
         let auth_manager = self.client.state.provider.auth_manager();
         let mut auth_recovery = auth_manager
@@ -1264,7 +1279,7 @@ impl ModelClientSession {
                 summary,
                 service_tier.clone(),
             )?;
-            let inference_trace_attempt = inference_trace.start_attempt();
+            let inference_trace_attempt = InferenceTraceAttempt::disabled();
             inference_trace_attempt.add_request_headers(&mut options.extra_headers);
             inference_trace_attempt.record_started(&request);
             let client = ApiResponsesClient::new(
@@ -1345,7 +1360,6 @@ impl ModelClientSession {
         turn_metadata_header: Option<&str>,
         warmup: bool,
         request_trace: Option<W3cTraceContext>,
-        inference_trace: &InferenceTraceContext,
     ) -> Result<WebsocketStreamOutcome> {
         let auth_manager = self.client.state.provider.auth_manager();
 
@@ -1427,7 +1441,7 @@ impl ModelClientSession {
                 // model inference attempt that should appear in rollout traces.
                 InferenceTraceAttempt::disabled()
             } else {
-                inference_trace.start_attempt()
+                InferenceTraceAttempt::disabled()
             };
             stamp_ws_stream_request_start_ms(&mut ws_request);
             if previous_response_id_from_untraced_warmup {
@@ -1523,7 +1537,6 @@ impl ModelClientSession {
             return Ok(());
         }
 
-        let disabled_trace = InferenceTraceContext::disabled();
         match self
             .stream_responses_websocket(
                 prompt,
@@ -1535,7 +1548,6 @@ impl ModelClientSession {
                 turn_metadata_header,
                 /*warmup*/ true,
                 current_span_w3c_trace_context(),
-                &disabled_trace,
             )
             .await
         {
@@ -1564,9 +1576,7 @@ impl ModelClientSession {
     /// The caller is responsible for passing per-turn settings explicitly (model selection,
     /// reasoning settings, telemetry context, and turn metadata). This method will prefer the
     /// Responses WebSocket transport when the provider supports it and it remains healthy, and will
-    /// fall back to the HTTP Responses API transport otherwise. The trace context may be enabled or
-    /// disabled, but is always explicit so transport paths do not need separate trace/no-trace
-    /// branches.
+    /// fall back to the HTTP Responses API transport otherwise.
     pub async fn stream(
         &mut self,
         prompt: &Prompt,
@@ -1576,7 +1586,6 @@ impl ModelClientSession {
         summary: ReasoningSummaryConfig,
         service_tier: Option<String>,
         turn_metadata_header: Option<&str>,
-        inference_trace: &InferenceTraceContext,
     ) -> Result<ResponseStream> {
         let wire_api = self.client.state.provider.info().wire_api;
         match wire_api {
@@ -1594,7 +1603,6 @@ impl ModelClientSession {
                             turn_metadata_header,
                             /*warmup*/ false,
                             request_trace,
-                            inference_trace,
                         )
                         .await?
                     {
@@ -1613,7 +1621,6 @@ impl ModelClientSession {
                     summary,
                     service_tier,
                     turn_metadata_header,
-                    inference_trace,
                 )
                 .await
             }
