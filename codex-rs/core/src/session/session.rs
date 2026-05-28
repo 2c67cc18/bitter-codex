@@ -751,7 +751,7 @@ impl Session {
             let account_id = auth.and_then(CodexAuth::get_account_id);
             let account_email = auth.and_then(CodexAuth::get_account_email);
             let originator = originator().value;
-            let terminal_type = user_agent();
+            let terminal_type = "unknown";
             let session_model = session_configuration.collaboration_mode.model().to_string();
             let auth_env_telemetry = collect_auth_env_telemetry(
                 &session_configuration.provider,

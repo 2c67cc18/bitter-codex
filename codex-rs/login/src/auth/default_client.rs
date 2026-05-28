@@ -9,7 +9,6 @@ use codex_client::CodexHttpClient;
 pub use codex_client::CodexRequestBuilder;
 use codex_client::build_reqwest_client_with_custom_ca;
 use codex_client::with_chatgpt_cloudflare_cookie_store;
-use codex_terminal_detection::user_agent;
 use reqwest::header::HeaderMap;
 use reqwest::header::HeaderValue;
 use reqwest::header::USER_AGENT;
@@ -38,6 +37,10 @@ pub const CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR: &str = "CODEX_INTERNAL_ORI
 pub const RESIDENCY_HEADER_NAME: &str = "x-openai-internal-codex-residency";
 
 pub use codex_config::ResidencyRequirement;
+
+fn terminal_user_agent() -> &'static str {
+    "unknown"
+}
 
 #[derive(Debug, Clone)]
 pub struct Originator {
@@ -140,7 +143,7 @@ pub fn get_codex_user_agent() -> String {
         os_info.os_type(),
         os_info.version(),
         os_info.architecture().unwrap_or("unknown"),
-        user_agent()
+        terminal_user_agent()
     );
     let suffix = USER_AGENT_SUFFIX
         .lock()
