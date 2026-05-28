@@ -20,7 +20,6 @@ use crate::default_skill_metadata_budget;
 use crate::exec_policy::ExecPolicyManager;
 use crate::parse_turn_item;
 use crate::path_utils::normalize_for_native_workdir;
-use crate::realtime_conversation::RealtimeConversationManager;
 use crate::skills::SkillRenderSideEffects;
 use crate::skills_load_input_from_config;
 use crate::turn_metadata::TurnMetadataState;
@@ -188,7 +187,6 @@ pub(crate) use self::session::SessionSettingsUpdate;
 use self::turn::AssistantMessageStreamParsers;
 #[cfg(test)]
 use self::turn::collect_explicit_app_ids_from_skill_items;
-use self::turn::realtime_text_for_event;
 use self::turn_context::TurnContext;
 use self::turn_context::ResolvedTurnEnvironments;
 use self::turn_context::TurnSkillsContext;
@@ -1560,28 +1558,12 @@ impl Session {
         let _ = (turn_context, parent_thread_id, child_agent_path, status);
     }
 
-    async fn maybe_mirror_event_text_to_realtime(&self, msg: &EventMsg) {
-        let Some(text) = realtime_text_for_event(msg) else {
-            return;
-        };
-        if self.conversation.running_state().await.is_none()
-            || self.conversation.active_handoff_id().await.is_none()
-        {
-            return;
-        }
-        if let Err(err) = self.conversation.handoff_out(text).await {
-            debug!("failed to mirror event text to realtime conversation: {err}");
-        }
+    async fn maybe_mirror_event_text_to_realtime(&self, _msg: &EventMsg) {
+        // Realtime runtime has been removed; event mirroring is intentionally inert.
     }
 
-    async fn maybe_clear_realtime_handoff_for_event(&self, msg: &EventMsg) {
-        if !matches!(msg, EventMsg::TurnComplete(_)) {
-            return;
-        }
-        if let Err(err) = self.conversation.handoff_complete().await {
-            debug!("failed to finalize realtime handoff output: {err}");
-        }
-        self.conversation.clear_active_handoff().await;
+    async fn maybe_clear_realtime_handoff_for_event(&self, _msg: &EventMsg) {
+        // Realtime runtime has been removed; handoff state no longer exists.
     }
 
     pub(crate) async fn send_event_raw(&self, event: Event) {

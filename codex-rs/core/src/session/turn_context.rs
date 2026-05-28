@@ -748,7 +748,7 @@ impl Session {
             skills_outcome,
             goal_tools_supported,
         );
-        turn_context.realtime_active = self.conversation.running_state().await.is_some();
+        turn_context.realtime_active = false;
 
         if let Some(final_schema) = final_output_json_schema {
             turn_context.final_output_json_schema = final_schema;
