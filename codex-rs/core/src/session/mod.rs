@@ -1593,12 +1593,32 @@ impl Session {
         };
         let shell = self.user_shell();
         let exec_policy = self.services.exec_policy.current();
+        let permissions_instructions = current_context
+            .config
+            .include_permissions_instructions
+            .then(|| {
+                PermissionsInstructions::from_permission_profile(
+                    &current_context.permission_profile,
+                    current_context.approval_policy.value(),
+                    current_context.config.approvals_reviewer,
+                    exec_policy.as_ref(),
+                    #[allow(deprecated)]
+                    &current_context.cwd,
+                    current_context
+                        .features
+                        .enabled(Feature::ExecPermissionApprovals),
+                    current_context
+                        .features
+                        .enabled(Feature::RequestPermissionsTool),
+                )
+                .render()
+            });
         crate::context_manager::updates::build_settings_update_items(
             reference_context_item,
             previous_turn_settings.as_ref(),
             current_context,
             shell.as_ref(),
-            exec_policy.as_ref(),
+            permissions_instructions.as_deref(),
             self.features.enabled(Feature::Personality),
         )
     }
