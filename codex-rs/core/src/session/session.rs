@@ -462,7 +462,6 @@ pub(crate) struct AppServerClientMetadata {
 async fn warm_plugins_and_skills_for_session_init(
     config: Arc<Config>,
     environment_manager: Arc<EnvironmentManager>,
-    plugins_manager: Arc<PluginsManager>,
     skills_manager: Arc<SkillsManager>,
     environments: Vec<TurnEnvironmentSelection>,
 ) -> Vec<SkillError> {
@@ -472,10 +471,7 @@ async fn warm_plugins_and_skills_for_session_init(
     )
     .ok()
     .and_then(|resolved| resolved.primary_filesystem());
-    let plugins_input = config.plugins_config_input();
-    let plugin_outcome = plugins_manager.plugins_for_config(&plugins_input).await;
-    let effective_skill_roots = plugin_outcome.effective_plugin_skill_roots();
-    let skills_input = skills_load_input_from_config(config.as_ref(), effective_skill_roots);
+    let skills_input = skills_load_input_from_config(config.as_ref());
     skills_manager
         .skills_for_config(&skills_input, fs)
         .await
@@ -655,7 +651,6 @@ impl Session {
         let plugin_and_skill_warmup_fut = warm_plugins_and_skills_for_session_init(
             Arc::clone(&config),
             Arc::clone(&environment_manager),
-            Arc::clone(&plugins_manager),
             Arc::clone(&skills_manager),
             session_configuration.environments.clone(),
         )
