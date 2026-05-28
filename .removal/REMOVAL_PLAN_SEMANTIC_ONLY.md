@@ -369,6 +369,27 @@ done as blind deletion or line-range cleanup.
   managed-network removal slice that owns both `core/src/session/mod.rs` and
   `core/src/session/session.rs`, or keep the parent imports until the child
   startup path is removed in the same reviewed patch.
+- 2026-05-28 accepted replacement session managed-network startup trim
+  `semantic-root-20260528-session-managed-network-complete/session-managed-network-complete`
+  as merge commit `Merge session managed network startup trim`. It replaced
+  the rejected parent-only patch with a complete two-file startup update across
+  `core/src/session/mod.rs` and `core/src/session/session.rs`. The managed
+  network proxy startup helper no longer accepts deleted execpolicy or
+  network-proxy callback trait types, initial session startup no longer builds
+  allowlist callback shims, and `SessionConfiguredEvent` now reports
+  `network_proxy: None` rather than advertising an active runtime proxy after
+  the retained config stub fails closed with Unsupported. Network-policy
+  amendment persistence still updates the retained exec-policy service, but no
+  longer mutates a deleted live proxy trait object. The worker reached terminal
+  `completed` normally with clean branch
+  `semantic/session-managed-network-complete` at `ce202ec12`. `git diff
+  --check` passed. Its first `cargo-modal --repo codex-rs --dirty check -p
+  codex-core --no-default-features --lib` attempt failed before Cargo during a
+  rustup manifest download reset; the retry reached Cargo and failed from the
+  broader unresolved core cleanup surfaces (`agent`, `guardian`,
+  `environment_selection`, `exec_policy`, `sandboxing`, MCP/RMCP, connectors,
+  and related deleted modules), with no visible owned managed-network startup
+  diagnostics remaining.
 
 ## Analytics removal follow-through
 
