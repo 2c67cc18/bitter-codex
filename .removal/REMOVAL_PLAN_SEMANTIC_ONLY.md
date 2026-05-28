@@ -61,6 +61,21 @@ done as blind deletion or line-range cleanup.
   crates. Worker stop evidence: it emitted a final report and marked its own
   goal blocked, but `bitter-loop` status stayed `running` with no new output;
   root stopped it at `2026-05-28T01:13:27Z` to collect the clean branch.
+- 2026-05-28 accepted narrow module declaration slice
+  `semantic-root-20260528-core-module-decls/core-module-decls` as merge commit
+  `Merge core module declaration trim`. It removed stale `core/src/lib.rs` and
+  `core/src/context/mod.rs` declarations/re-exports for deleted files and
+  updated contextual fragment registration/tests to retained fragments only.
+  The worker ran the focused cargo-modal core lib check; it advanced past the
+  removed lib/context module declarations and exposed the next frontier:
+  deleted `session::{multi_agents,review}` and `tools::{network_approval,
+  orchestrator,sandboxing}`/`tasks::review` module declarations, malformed
+  `tools/handlers/view_image_spec.rs` schema constructors, and non-config
+  references to removed sandboxing/execpolicy/network-proxy/Windows sandbox and
+  rollout-trace crates. Worker stop evidence: it emitted a final completion
+  report and marked its own goal complete, but `bitter-loop` status stayed
+  `running` with no new output; root stopped it at `2026-05-28T01:22:03Z` to
+  collect the clean branch.
 
 ## Analytics removal follow-through
 
