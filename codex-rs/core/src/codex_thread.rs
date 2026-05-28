@@ -1,7 +1,4 @@
-use crate::agent::AgentStatus;
 use crate::config::ConstraintResult;
-use crate::goals::ExternalGoalSet;
-use crate::goals::GoalRuntimeEvent;
 use crate::session::Codex;
 use crate::session::SessionSettingsUpdate;
 use crate::session::SteerInputError;
@@ -34,6 +31,7 @@ use codex_protocol::protocol::TokenUsageInfo;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::protocol::W3cTraceContext;
 use codex_protocol::user_input::UserInput;
+use codex_protocol::protocol::AgentStatus;
 use codex_thread_store::StoredThread;
 use codex_thread_store::StoredThreadHistory;
 use codex_thread_store::ThreadMetadataPatch;
@@ -72,13 +70,9 @@ pub struct ThreadConfigSnapshot {
 
 impl ThreadConfigSnapshot {
     pub fn sandbox_policy(&self) -> SandboxPolicy {
-        let file_system_sandbox_policy = self.permission_profile.file_system_sandbox_policy();
-        codex_sandboxing::compatibility_sandbox_policy_for_permission_profile(
-            &self.permission_profile,
-            &file_system_sandbox_policy,
-            self.permission_profile.network_sandbox_policy(),
-            self.cwd.as_path(),
-        )
+        self.permission_profile
+            .to_legacy_sandbox_policy(&self.cwd)
+            .unwrap_or(SandboxPolicy::DangerFullAccess)
     }
 }
 
@@ -147,50 +141,20 @@ impl CodexThread {
     }
 
     pub async fn apply_goal_resume_runtime_effects(&self) -> anyhow::Result<()> {
-        self.codex
-            .session
-            .goal_runtime_apply(GoalRuntimeEvent::ThreadResumed)
-            .await
+        Ok(())
     }
 
     pub async fn continue_active_goal_if_idle(&self) -> anyhow::Result<()> {
-        self.codex
-            .session
-            .goal_runtime_apply(GoalRuntimeEvent::MaybeContinueIfIdle)
-            .await
+        Ok(())
     }
 
     pub async fn prepare_external_goal_mutation(&self) {
-        if let Err(err) = self
-            .codex
-            .session
-            .goal_runtime_apply(GoalRuntimeEvent::ExternalMutationStarting)
-            .await
-        {
-            tracing::warn!("failed to prepare external goal mutation: {err}");
-        }
     }
 
-    pub async fn apply_external_goal_set(&self, external_set: ExternalGoalSet) {
-        if let Err(err) = self
-            .codex
-            .session
-            .goal_runtime_apply(GoalRuntimeEvent::ExternalSet { external_set })
-            .await
-        {
-            tracing::warn!("failed to apply external goal status runtime effects: {err}");
-        }
+    pub async fn apply_external_goal_set(&self, _external_set: ()) {
     }
 
     pub async fn apply_external_goal_clear(&self) {
-        if let Err(err) = self
-            .codex
-            .session
-            .goal_runtime_apply(GoalRuntimeEvent::ExternalClear)
-            .await
-        {
-            tracing::warn!("failed to apply external goal clear runtime effects: {err}");
-        }
     }
 
     #[doc(hidden)]
@@ -420,11 +384,7 @@ impl CodexThread {
     }
 
     pub async fn guardian_trunk_rollout_path(&self) -> Option<PathBuf> {
-        self.codex
-            .session
-            .guardian_review_session
-            .trunk_rollout_path()
-            .await
+        None
     }
 
     pub async fn load_history(
