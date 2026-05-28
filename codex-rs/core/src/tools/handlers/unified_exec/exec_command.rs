@@ -151,7 +151,6 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
                     max_output_tokens,
                     cwd,
                     environment,
-                    network: context.turn.network.clone(),
                     tty,
                 },
                 &context,

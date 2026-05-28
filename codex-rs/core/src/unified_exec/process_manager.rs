@@ -556,10 +556,6 @@ impl UnifiedExecProcessManager {
             context.session.conversation_id.to_string(),
         );
         let mut env = apply_unified_exec_env(env);
-        if let Some(network) = request.network.as_ref() {
-            network.apply_to_env(&mut env);
-        }
-
         let (program, args) = request
             .command
             .split_first()

@@ -59,7 +59,6 @@ async fn failed_initial_end_for_unstored_process_uses_fallback_output() {
             .environments
             .primary_environment()
             .expect("primary environment"),
-        network: None,
         tty: true,
     };
 
