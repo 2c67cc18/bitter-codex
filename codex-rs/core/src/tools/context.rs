@@ -5,7 +5,6 @@ use crate::session::turn_context::TurnContext;
 use crate::tools::TELEMETRY_PREVIEW_MAX_BYTES;
 use crate::tools::TELEMETRY_PREVIEW_MAX_LINES;
 use crate::tools::TELEMETRY_PREVIEW_TRUNCATION_NOTICE;
-use crate::turn_diff_tracker::TurnDiffTracker;
 use crate::unified_exec::resolve_max_tokens;
 use codex_protocol::mcp::CallToolResult;
 use codex_protocol::models::FunctionCallOutputBody;
@@ -35,7 +34,7 @@ where
     Box::new(output)
 }
 
-pub type SharedTurnDiffTracker = Arc<Mutex<TurnDiffTracker>>;
+pub type SharedTurnDiffTracker = Arc<Mutex<()>>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ToolCallSource {
