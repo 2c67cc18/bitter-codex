@@ -1,12 +1,7 @@
 use super::*;
 use async_trait::async_trait;
-use codex_file_system::CopyOptions;
-use codex_file_system::CreateDirectoryOptions;
-use codex_file_system::FileMetadata;
-use codex_file_system::FileSystemResult;
-use codex_file_system::FileSystemSandboxContext;
-use codex_file_system::ReadDirectoryEntry;
-use codex_file_system::RemoveOptions;
+use crate::file_system::FileMetadata;
+use crate::file_system::FileSystemResult;
 use pretty_assertions::assert_eq;
 use tempfile::tempdir;
 
@@ -14,65 +9,15 @@ struct TestFileSystem;
 
 #[async_trait]
 impl ExecutorFileSystem for TestFileSystem {
-    async fn read_file(
-        &self,
-        path: &AbsolutePathBuf,
-        _sandbox: Option<&FileSystemSandboxContext>,
-    ) -> FileSystemResult<Vec<u8>> {
-        tokio::fs::read(path.as_path()).await
+    async fn read_file_text(&self, path: &AbsolutePathBuf) -> FileSystemResult<String> {
+        tokio::fs::read_to_string(path.as_path()).await
     }
 
-    async fn write_file(
-        &self,
-        _path: &AbsolutePathBuf,
-        _contents: Vec<u8>,
-        _sandbox: Option<&FileSystemSandboxContext>,
-    ) -> FileSystemResult<()> {
-        unimplemented!("test filesystem only supports reads")
-    }
-
-    async fn create_directory(
-        &self,
-        _path: &AbsolutePathBuf,
-        _create_directory_options: CreateDirectoryOptions,
-        _sandbox: Option<&FileSystemSandboxContext>,
-    ) -> FileSystemResult<()> {
-        unimplemented!("test filesystem only supports reads")
-    }
-
-    async fn get_metadata(
-        &self,
-        _path: &AbsolutePathBuf,
-        _sandbox: Option<&FileSystemSandboxContext>,
-    ) -> FileSystemResult<FileMetadata> {
-        unimplemented!("test filesystem only supports reads")
-    }
-
-    async fn read_directory(
-        &self,
-        _path: &AbsolutePathBuf,
-        _sandbox: Option<&FileSystemSandboxContext>,
-    ) -> FileSystemResult<Vec<ReadDirectoryEntry>> {
-        unimplemented!("test filesystem only supports reads")
-    }
-
-    async fn remove(
-        &self,
-        _path: &AbsolutePathBuf,
-        _remove_options: RemoveOptions,
-        _sandbox: Option<&FileSystemSandboxContext>,
-    ) -> FileSystemResult<()> {
-        unimplemented!("test filesystem only supports reads")
-    }
-
-    async fn copy(
-        &self,
-        _source_path: &AbsolutePathBuf,
-        _destination_path: &AbsolutePathBuf,
-        _copy_options: CopyOptions,
-        _sandbox: Option<&FileSystemSandboxContext>,
-    ) -> FileSystemResult<()> {
-        unimplemented!("test filesystem only supports reads")
+    async fn get_metadata(&self, path: &AbsolutePathBuf) -> FileSystemResult<FileMetadata> {
+        let metadata = tokio::fs::metadata(path.as_path()).await?;
+        Ok(FileMetadata {
+            is_directory: metadata.is_dir(),
+        })
     }
 }
 

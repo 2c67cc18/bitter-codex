@@ -32,7 +32,7 @@ use crate::strict_config::unknown_feature_toml_value_field;
 use crate::thread_config::ThreadConfigContext;
 use crate::thread_config::ThreadConfigLoader;
 use codex_app_server_protocol::ConfigLayerSource;
-use codex_file_system::ExecutorFileSystem;
+use crate::file_system::ExecutorFileSystem;
 use codex_git_utils::resolve_root_git_project_for_trust;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::config_types::SandboxMode;
@@ -441,7 +441,7 @@ async fn load_config_toml_for_required_layer(
     strict_config: bool,
     create_entry: impl FnOnce(TomlValue) -> ConfigLayerEntry,
 ) -> io::Result<ConfigLayerEntry> {
-    let toml_value = match fs.read_file_text(toml_file, /*sandbox*/ None).await {
+    let toml_value = match fs.read_file_text(toml_file).await {
         Ok(contents) => {
             let config_parent = toml_file.as_path().parent().ok_or_else(|| {
                 io::Error::new(
@@ -540,7 +540,7 @@ pub async fn load_requirements_toml(
     requirements_toml_file: &AbsolutePathBuf,
 ) -> io::Result<()> {
     match fs
-        .read_file_text(requirements_toml_file, /*sandbox*/ None)
+        .read_file_text(requirements_toml_file)
         .await
     {
         Ok(contents) => {
@@ -1073,7 +1073,7 @@ async fn find_project_root(
         for marker in project_root_markers {
             let marker_path = ancestor.join(marker);
             if fs
-                .get_metadata(&marker_path, /*sandbox*/ None)
+                .get_metadata(&marker_path)
                 .await
                 .is_ok()
             {
@@ -1088,14 +1088,14 @@ async fn find_git_checkout_root(
     fs: &dyn ExecutorFileSystem,
     cwd: &AbsolutePathBuf,
 ) -> Option<AbsolutePathBuf> {
-    let base = match fs.get_metadata(cwd, /*sandbox*/ None).await {
+    let base = match fs.get_metadata(cwd).await {
         Ok(metadata) if metadata.is_directory => cwd.clone(),
         _ => cwd.parent()?,
     };
 
     for dir in base.ancestors() {
         let dot_git = dir.join(".git");
-        if fs.get_metadata(&dot_git, /*sandbox*/ None).await.is_ok() {
+        if fs.get_metadata(&dot_git).await.is_ok() {
             return Some(dir);
         }
     }
@@ -1144,7 +1144,7 @@ async fn load_project_layers(
     for dir in dirs {
         let dot_codex_abs = dir.join(".codex");
         if !fs
-            .get_metadata(&dot_codex_abs, /*sandbox*/ None)
+            .get_metadata(&dot_codex_abs)
             .await
             .map(|metadata| metadata.is_directory)
             .unwrap_or(false)
@@ -1160,7 +1160,7 @@ async fn load_project_layers(
             continue;
         }
         let config_file = dot_codex_abs.join(CONFIG_TOML_FILE);
-        match fs.read_file_text(&config_file, /*sandbox*/ None).await {
+        match fs.read_file_text(&config_file).await {
             Ok(contents) => {
                 let config: TomlValue = match toml::from_str(&contents) {
                     Ok(config) => config,
