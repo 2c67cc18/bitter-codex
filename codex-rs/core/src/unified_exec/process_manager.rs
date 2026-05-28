@@ -591,12 +591,7 @@ impl UnifiedExecProcessManager {
         let spawned =
             spawn_result.map_err(|err| UnifiedExecError::create_process(err.to_string()))?;
         spawn_lifecycle.after_spawn();
-        UnifiedExecProcess::from_spawned(
-            spawned,
-            codex_sandboxing::SandboxType::None,
-            spawn_lifecycle,
-        )
-        .await
+        UnifiedExecProcess::from_spawned(spawned, spawn_lifecycle).await
     }
 
     pub(super) async fn collect_output_until_deadline(
