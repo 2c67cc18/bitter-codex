@@ -14,11 +14,13 @@ pub struct ViewImageToolOptions {
 
 pub fn create_view_image_tool(options: ViewImageToolOptions) -> ToolSpec {
     let mut properties = BTreeMap::from([(
-        "path".to_string()::string(Some("Local filesystem path to an image file".to_string())),
+        "path".to_string(),
+        JsonSchema::string(Some("Local filesystem path to an image file".to_string())),
     )]);
     if options.can_request_original_image_detail {
         properties.insert(
-            "detail".to_string()::string_enum(
+            "detail".to_string(),
+            JsonSchema::string_enum(
                 vec![json!("high"), json!("original")],
                 Some(
                     "Optional detail override. Supported values are `high` and `original`; omit this field for default high resized behavior. Use `original` to preserve the file's original resolution instead of resizing to fit. This is important when high-fidelity image perception or precise localization is needed, especially for CUA agents.".to_string(),
@@ -28,7 +30,8 @@ pub fn create_view_image_tool(options: ViewImageToolOptions) -> ToolSpec {
     }
     if options.include_environment_id {
         properties.insert(
-            "environment_id".to_string()::string(Some(
+            "environment_id".to_string(),
+            JsonSchema::string(Some(
                 "Optional selected environment id to target. Omit this to use the primary environment."
                     .to_string(),
             )),
