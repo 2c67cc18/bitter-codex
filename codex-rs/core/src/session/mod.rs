@@ -10,7 +10,6 @@ use crate::agent::AgentControl;
 use crate::agent::AgentStatus;
 use crate::agent::agent_status_from_event;
 use crate::agent::status::is_final;
-use crate::attestation::AttestationProvider;
 use crate::build_available_skills;
 use crate::compact;
 use crate::config::ManagedFeatures;
@@ -398,7 +397,6 @@ pub(crate) struct CodexSpawnArgs {
     pub(crate) parent_trace: Option<W3cTraceContext>,
     pub(crate) environment_selections: ResolvedTurnEnvironments,
     pub(crate) thread_store: Arc<dyn ThreadStore>,
-    pub(crate) attestation_provider: Option<Arc<dyn AttestationProvider>>,
 }
 
 pub(crate) const INITIAL_SUBMIT_ID: &str = "";
@@ -456,7 +454,6 @@ impl Codex {
             parent_trace: _,
             environment_selections,
             thread_store,
-            attestation_provider,
         } = args;
         let (tx_sub, rx_sub) = async_channel::bounded(SUBMISSION_CHANNEL_CAPACITY);
         let (tx_event, rx_event) = async_channel::unbounded();
@@ -616,7 +613,6 @@ impl Codex {
             environment_manager,
             thread_store,
             parent_rollout_thread_trace,
-            attestation_provider,
         )
         .await
         .map_err(|e| {

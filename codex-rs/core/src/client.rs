@@ -102,9 +102,6 @@ use tracing::instrument;
 use tracing::trace;
 use tracing::warn;
 
-use crate::attestation::AttestationContext;
-use crate::attestation::AttestationProvider;
-use crate::attestation::X_OAI_ATTESTATION_HEADER;
 use crate::client_common::Prompt;
 use crate::client_common::ResponseEvent;
 use crate::client_common::ResponseStream;
@@ -195,8 +192,6 @@ struct ModelClientState {
     enable_request_compression: bool,
     include_timing_metrics: bool,
     beta_features_header: Option<String>,
-    include_attestation: bool,
-    attestation_provider: Option<Arc<dyn AttestationProvider>>,
     disable_websockets: AtomicBool,
     cached_websocket_session: StdMutex<WebsocketSession>,
 }
@@ -342,7 +337,6 @@ impl ModelClient {
         enable_request_compression: bool,
         include_timing_metrics: bool,
         beta_features_header: Option<String>,
-        attestation_provider: Option<Arc<dyn AttestationProvider>>,
     ) -> Self {
         let model_provider = create_model_provider(provider_info, auth_manager);
         let codex_api_key_env_enabled = model_provider
@@ -351,7 +345,6 @@ impl ModelClient {
             .is_some_and(|manager| manager.codex_api_key_env_enabled());
         let auth_env_telemetry =
             collect_auth_env_telemetry(model_provider.info(), codex_api_key_env_enabled);
-        let include_attestation = model_provider.supports_attestation();
         Self {
             state: Arc::new(ModelClientState {
                 session_id,
@@ -365,8 +358,6 @@ impl ModelClient {
                 enable_request_compression,
                 include_timing_metrics,
                 beta_features_header,
-                include_attestation,
-                attestation_provider,
                 disable_websockets: AtomicBool::new(false),
                 cached_websocket_session: StdMutex::new(WebsocketSession::default()),
             }),
@@ -521,9 +512,6 @@ impl ModelClient {
             Some(self.state.session_id.to_string()),
             Some(self.state.thread_id.to_string()),
         ));
-        if let Some(header_value) = self.generate_attestation_header_for().await {
-            extra_headers.insert(X_OAI_ATTESTATION_HEADER, header_value);
-        }
         let compact_request_timeout = client_setup
             .api_provider
             .stream_idle_timeout
@@ -547,9 +535,6 @@ impl ModelClient {
         // Create the media call over HTTP first, then retain matching auth so realtime can attach
         // the server-side control WebSocket to the call id from that HTTP response.
         let client_setup = self.current_client_setup().await?;
-        if let Some(header_value) = self.generate_attestation_header_for().await {
-            extra_headers.insert(X_OAI_ATTESTATION_HEADER, header_value);
-        }
         let mut sideband_headers = extra_headers.clone();
         sideband_headers.extend(sideband_websocket_auth_headers(
             client_setup.api_auth.as_ref(),
@@ -678,20 +663,6 @@ impl ModelClient {
             );
         }
         client_metadata
-    }
-
-    async fn generate_attestation_header_for(&self) -> Option<HeaderValue> {
-        if !self.state.include_attestation {
-            return None;
-        }
-
-        self.state
-            .attestation_provider
-            .as_ref()?
-            .header_for_request(AttestationContext {
-                thread_id: self.state.thread_id,
-            })
-            .await
     }
 
     /// Builds request telemetry for unary API calls (e.g., Compact endpoint).
@@ -928,9 +899,6 @@ impl ModelClient {
         }
         headers.extend(build_session_headers(Some(session_id), Some(thread_id)));
         headers.extend(self.build_responses_identity_headers());
-        if let Some(header_value) = self.generate_attestation_header_for().await {
-            headers.insert(X_OAI_ATTESTATION_HEADER, header_value);
-        }
         headers.insert(
             OPENAI_BETA_HEADER,
             HeaderValue::from_static(RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE),
@@ -999,9 +967,6 @@ impl ModelClientSession {
                     turn_metadata_header.as_ref(),
                 );
                 headers.extend(self.client.build_responses_identity_headers());
-                if let Some(header_value) = self.client.generate_attestation_header_for().await {
-                    headers.insert(X_OAI_ATTESTATION_HEADER, header_value);
-                }
                 headers
             },
             compression,
