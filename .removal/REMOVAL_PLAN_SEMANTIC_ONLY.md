@@ -160,6 +160,38 @@ done as blind deletion or line-range cleanup.
   cargo-modal core lib check after the root fix failed at 344 out-of-scope
   errors in the remaining session/runtime surfaces; no attestation-specific
   errors remained in the focused output.
+- 2026-05-28 rejected agent runtime surface worker
+  `semantic-root-20260528-core-agent-surface/core-agent-surface` as unsafe.
+  Evidence: the worker reached terminal `completed` normally with clean branch
+  `semantic/core-agent-surface` at `097397815`, touching six core files
+  (`codex_thread.rs`, `session/mod.rs`, `session/session.rs`,
+  `state/service.rs`, `thread_manager.rs`, and `tools/spec_plan.rs`) with 95
+  insertions and 387 deletions. The patch removed direct deleted-agent imports
+  and MultiAgentV2 tool registration, but replaced `AgentControl` in
+  `SessionServices` with `Arc<ThreadManagerState>`. Because
+  `ThreadManagerState` owns the live thread map and each `CodexThread` owns a
+  `Codex`/`Session`, that creates a strong reference cycle
+  `ThreadManagerState -> CodexThread -> Session -> ThreadManagerState`.
+  It also changed descendant session identity to always use the child
+  `ThreadId` and stubbed environment-context subagent formatting to an empty
+  string. Do not merge this branch wholesale. A replacement slice should either
+  remove the remaining subagent environment-context producer entirely or use a
+  weak/manager-owned helper that does not let sessions retain the manager
+  state strongly; keep tool-planning MultiAgentV2 removal separable if possible.
+- 2026-05-28 accepted replacement spec-plan agent tool trim
+  `semantic-root-20260528-core-spec-plan-agent-tools/core-spec-plan-agent-tools`
+  as merge commit `Merge core spec plan agent tool trim`. It kept ownership to
+  `core/src/tools/spec_plan.rs` and removed stale planner dependencies on
+  already-absent agent handler modules (`multi_agents`, `multi_agents_v2`,
+  `agent_jobs`, `multi_agents_common`, and `multi_agents_spec`) plus the direct
+  `crate::agent::role::spawn_tool_spec` dependency and MultiAgentV2 namespace
+  wrapper. It did not touch `AgentControl`, session identity, thread-manager
+  ownership, or subagent lifecycle. The focused cargo-modal core lib check still
+  failed at 324 broader errors from session/runtime and removed
+  MCP/request-permissions/sandboxing/execpolicy/network-proxy/Windows sandbox
+  surfaces. Remaining `spec_plan.rs` errors in that output are unrelated stale
+  utility/MCP/goal/shell/plugin imports and should be handled by the
+  corresponding tool-planner cleanup, not by restoring agent tools.
 
 ## Analytics removal follow-through
 
