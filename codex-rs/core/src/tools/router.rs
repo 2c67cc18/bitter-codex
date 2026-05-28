@@ -12,7 +12,6 @@ use codex_mcp::ToolInfo;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::models::SearchToolCallParams;
-use codex_tools::DiscoverableTool;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 use std::sync::Arc;
@@ -37,7 +36,7 @@ pub struct ToolRouter {
 pub(crate) struct ToolRouterParams<'a> {
     pub(crate) mcp_tools: Option<Vec<ToolInfo>>,
     pub(crate) deferred_mcp_tools: Option<Vec<ToolInfo>>,
-    pub(crate) discoverable_tools: Option<Vec<DiscoverableTool>>,
+    pub(crate) discoverable_tools: Option<Vec<()>>,
     pub(crate) dynamic_tools: &'a [DynamicToolSpec],
 }
 

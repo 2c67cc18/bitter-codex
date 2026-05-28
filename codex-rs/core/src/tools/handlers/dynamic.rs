@@ -20,7 +20,6 @@ use codex_protocol::protocol::EventMsg;
 use codex_tools::ResponsesApiNamespace;
 use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::ToolName;
-use codex_tools::ToolSearchSourceInfo;
 use codex_tools::ToolSpec;
 use codex_tools::default_namespace_description;
 use codex_tools::dynamic_tool_to_responses_api_tool;
@@ -128,14 +127,7 @@ impl ToolExecutor<ToolInvocation> for DynamicToolHandler {
 
 impl CoreToolRuntime for DynamicToolHandler {
     fn search_info(&self) -> Option<ToolSearchInfo> {
-        ToolSearchInfo::from_spec(
-            self.search_text.clone(),
-            self.spec(),
-            Some(ToolSearchSourceInfo {
-                name: "Dynamic tools".to_string(),
-                description: Some("Tools provided by the current Codex thread.".to_string()),
-            }),
-        )
+        ToolSearchInfo::from_spec(self.search_text.clone(), self.spec())
     }
 }
 

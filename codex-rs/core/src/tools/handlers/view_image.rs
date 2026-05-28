@@ -18,7 +18,6 @@ use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
 use crate::tools::handlers::parse_arguments;
-use crate::tools::handlers::resolve_tool_environment;
 use crate::tools::handlers::view_image_spec::ViewImageToolOptions;
 use crate::tools::handlers::view_image_spec::create_view_image_tool;
 use crate::tools::registry::CoreToolRuntime;
@@ -128,9 +127,15 @@ impl ToolExecutor<ToolInvocation> for ViewImageHandler {
             }
         };
 
-        let Some(turn_environment) =
-            resolve_tool_environment(turn.as_ref(), environment_id.as_deref())?
-        else {
+        if let Some(environment_id) = environment_id
+            .as_deref()
+            .filter(|environment_id| !environment_id.is_empty())
+        {
+            return Err(FunctionCallError::RespondToModel(format!(
+                "view_image environment_id is no longer supported; requested `{environment_id}`"
+            )));
+        }
+        let Some(turn_environment) = turn.environments.primary() else {
             return Err(FunctionCallError::RespondToModel(
                 "view_image is unavailable in this session".to_string(),
             ));
@@ -251,7 +256,7 @@ mod tests {
     use crate::session::tests::make_session_and_context;
     use crate::tools::context::ToolCallSource;
     use crate::tools::context::ToolInvocation;
-    use crate::turn_diff_tracker::TurnDiffTracker;
+    use crate::tools::context::TurnDiffTracker;
     use codex_protocol::models::PermissionProfile;
     use core_test_support::TempDirExt;
     use pretty_assertions::assert_eq;

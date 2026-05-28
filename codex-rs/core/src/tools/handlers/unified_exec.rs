@@ -1,9 +1,6 @@
 use crate::shell::Shell;
 use crate::shell::ShellType;
 use crate::shell::get_shell_by_model_provided_path;
-use crate::tools::context::ToolInvocation;
-use crate::tools::context::ToolOutput;
-use crate::tools::context::ToolPayload;
 use codex_tools::UnifiedExecShellMode;
 use serde::Deserialize;
 use std::path::PathBuf;
