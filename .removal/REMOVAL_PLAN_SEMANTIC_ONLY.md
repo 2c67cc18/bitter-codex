@@ -1488,3 +1488,22 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   exec-policy/network approval/sandboxing, MCP/realtime/session state service,
   deleted exec-server/plugin/rollout-trace crates, managed network proxy, and
   legacy tests.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/agent-status-control-trim` as
+  merge commit `Merge agent status control trim`. The slice removed live core
+  dependencies on the deleted `crate::agent` module from the session/thread
+  surfaces: retained status APIs now use
+  `codex_protocol::protocol::AgentStatus`, local event-to-status mapping
+  replaces the deleted helper, `AgentControl` spawn/session plumbing was
+  replaced by retained `SessionId` propagation, subagent subtree enumeration
+  and parent notification through the deleted control layer were dropped, and
+  environment context now omits deleted subagent-control details. The worker
+  reached terminal `completed` normally through `bitter-loop wait`, left a
+  clean branch at `ad7d75984`, and `git diff --check` passed. A scoped search
+  found no remaining live core `crate::agent`, `AgentControl`,
+  `agent_status_from_event`, or `status::is_final` references outside untouched
+  legacy tests. Its focused `cargo-modal --repo codex-rs --dirty check -p
+  codex-core` run still failed at 141 broader errors, now concentrated in
+  environment selection, exec-policy/network approval/sandboxing,
+  MCP/realtime/session state service, deleted exec-server/plugin/rollout-trace
+  crates, managed network proxy, and legacy tests.
