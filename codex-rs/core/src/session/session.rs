@@ -797,15 +797,9 @@ impl Session {
                 session_telemetry = session_telemetry.with_metrics_service_name(service_name);
             }
             let network_proxy_audit_metadata = NetworkProxyAuditMetadata {
-                conversation_id: Some(thread_id.to_string()),
-                app_version: Some(env!("CARGO_PKG_VERSION").to_string()),
-                user_account_id: account_id,
-                auth_mode: auth_mode.map(|mode| mode.to_string()),
                 originator: Some(originator),
-                user_email: account_email,
-                terminal_type: Some(terminal_type),
-                model: Some(session_model.clone()),
-                slug: Some(session_model),
+                session_id: Some(thread_id.to_string()),
+                user_id: account_id,
             };
             config.features.emit_metrics(&session_telemetry);
             session_telemetry.counter(
@@ -896,57 +890,24 @@ impl Session {
                 .is_some();
             let managed_network_requirements_enabled = config.managed_network_requirements_enabled();
             let network_approval = Arc::new(NetworkApprovalService::default());
-            // The managed proxy can call back into core for allowlist-miss decisions.
-            let network_policy_decider_session = if managed_network_requirements_configured {
-                config
-                    .permissions
-                    .network
-                    .as_ref()
-                    .map(|_| Arc::new(RwLock::new(std::sync::Weak::<Session>::new())))
+            let network_proxy = if let Some(spec) = config.permissions.network.as_ref() {
+                let network_proxy = Self::start_managed_network_proxy(
+                    spec,
+                    config.permissions.permission_profile(),
+                    managed_network_requirements_configured,
+                    network_proxy_audit_metadata.clone(),
+                )
+                .instrument(info_span!(
+                    "session_init.network_proxy",
+                    otel.name = "session_init.network_proxy",
+                    session_init.managed_network_requirements_enabled =
+                        managed_network_requirements_enabled,
+                ))
+                .await?;
+                Some(network_proxy)
             } else {
                 None
             };
-            let blocked_request_observer = if managed_network_requirements_configured {
-                config
-                    .permissions
-                    .network
-                    .as_ref()
-                    .map(|_| build_blocked_request_observer(Arc::clone(&network_approval)))
-            } else {
-                None
-            };
-            let network_policy_decider =
-                network_policy_decider_session
-                    .as_ref()
-                    .map(|network_policy_decider_session| {
-                        build_network_policy_decider(
-                            Arc::clone(&network_approval),
-                            Arc::clone(network_policy_decider_session),
-                        )
-                    });
-            let (network_proxy, session_network_proxy) =
-                if let Some(spec) = config.permissions.network.as_ref() {
-                    let current_exec_policy = exec_policy.current();
-                    let (network_proxy, session_network_proxy) = Self::start_managed_network_proxy(
-                        spec,
-                        current_exec_policy.as_ref(),
-                        config.permissions.permission_profile(),
-                        network_policy_decider.as_ref().map(Arc::clone),
-                        blocked_request_observer.as_ref().map(Arc::clone),
-                        managed_network_requirements_configured,
-                        network_proxy_audit_metadata.clone(),
-                    )
-                    .instrument(info_span!(
-                        "session_init.network_proxy",
-                        otel.name = "session_init.network_proxy",
-                        session_init.managed_network_requirements_enabled =
-                            managed_network_requirements_enabled,
-                    ))
-                    .await?;
-                    (Some(network_proxy), Some(session_network_proxy))
-                } else {
-                    (None, None)
-                };
 
             let session_id = if session_configuration.session_source.is_non_root_agent() {
                 agent_control.session_id()
@@ -1036,10 +997,6 @@ impl Session {
                 services,
                 next_internal_sub_id: AtomicU64::new(0),
             });
-            if let Some(network_policy_decider_session) = network_policy_decider_session {
-                let mut guard = network_policy_decider_session.write().await;
-                *guard = Arc::downgrade(&sess);
-            }
             // Dispatch the SessionConfiguredEvent first and then report any errors.
             // If resuming, include converted initial messages in the payload so UIs can render them immediately.
             let initial_messages = initial_history.get_event_msgs();
@@ -1061,13 +1018,7 @@ impl Session {
                     cwd: session_configuration.cwd.clone(),
                     reasoning_effort: session_configuration.collaboration_mode.reasoning_effort(),
                     initial_messages,
-                    network_proxy: session_network_proxy.filter(|_| {
-                        Self::managed_network_proxy_active_for_permission_profile(
-                            session_configuration
-                                .permission_profile_state()
-                                .permission_profile(),
-                        )
-                    }),
+                    network_proxy: None,
                     rollout_path,
                 }),
             })
