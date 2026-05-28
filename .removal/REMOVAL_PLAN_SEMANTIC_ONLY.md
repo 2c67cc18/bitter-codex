@@ -1315,3 +1315,22 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   turn metadata, and residual rollout/MCP crates. Do not restore the removed
   apply-patch crate for the remaining tool tests; defer apply-patch protocol
   and tests cleanup to the later all-target/test rebuild phase.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/turn-metadata-sandbox-trim`
+  as merge commit `Merge turn metadata sandbox tag trim`. The slice removed
+  the deleted `crate::sandbox_tags::permission_profile_sandbox_tag` dependency
+  from `turn_metadata.rs`, stopped deriving session sandbox metadata from
+  permission profiles/Windows sandbox/network flags, and updated the owned test
+  to assert that session-derived sandbox metadata is omitted. The explicit
+  `build_turn_metadata_header(cwd, sandbox)` path still preserves caller-supplied
+  sandbox text for the later decision on whether that public compatibility
+  surface should also be trimmed. The worker reached terminal `completed`
+  normally with a clean branch, and `git diff --check` passed. Its focused
+  `cargo-modal --repo codex-rs --dirty check -p codex-core
+  --no-default-features --lib` still failed at 139 broader errors with no
+  owned-file diagnostics. Remaining source blockers are now in broad
+  session/thread/state service references to deleted
+  agents/goals/environment-selection/exec-policy/guardian/MCP/app-server
+  elicitation/request-permissions, deleted exec-server plumbing in
+  prompt/test/unified-exec/session/state/thread-manager, and residual
+  rollout/MCP crates.
