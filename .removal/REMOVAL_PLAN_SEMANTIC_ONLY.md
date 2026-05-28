@@ -464,6 +464,25 @@ done as blind deletion or line-range cleanup.
   `codex_utils_plugins` helper crate. This preserves the retained public
   `PLUGIN_TEXT_MENTION_SIGIL` and `TOOL_MENTION_SIGIL` constants as local core
   constants while leaving broader plugin/MCP cleanup untouched.
+- 2026-05-28 accepted core skills/plugin bridge trim
+  `semantic-root-20260528-core-skills-plugin-trim/core-skills-plugin-trim` as
+  merge commit `Merge core skills plugin bridge trim`. It removed the remaining
+  core runtime dependency on deleted `codex_core_skills` and
+  `codex_utils_plugins` by replacing `core/src/skills.rs` with a core-owned
+  inert compatibility layer, and by removing plugin-derived skill roots from
+  session startup/per-turn skill loading. Skill discovery now yields empty
+  outcomes, available-skill developer prompts render nothing, and skill
+  injections/explicit skill mentions return no items; this intentionally
+  removes skill behavior rather than restoring plugin/MCP/app capability
+  surfaces. The worker reached terminal `completed` normally with clean branch
+  `semantic-core-skills-plugin-trim` at `80e2ec334`. `git diff --check`
+  passed. Its focused cargo-modal core lib check reached Cargo and failed from
+  broader unresolved core surfaces (`agent`, environment selection, connectors,
+  MCP/RMCP, request-permissions, guardian, sandboxing, execpolicy, and related
+  runtime modules), not from deleted skill/plugin crates. Remaining
+  `effective_plugin_skill_roots` references are in core tests and should be
+  removed with the broader plugin/test cleanup, not by restoring the plugin
+  crates.
 
 ## Analytics removal follow-through
 
