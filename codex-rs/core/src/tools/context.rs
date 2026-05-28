@@ -33,9 +33,6 @@ pub type SharedTurnDiffTracker = Arc<Mutex<TurnDiffTracker>>;
 pub struct TurnDiffTracker;
 
 impl TurnDiffTracker {
-    pub(crate) fn new() -> Self {
-        Self
-    }
 
     pub(crate) fn with_display_root(_display_root: std::path::PathBuf) -> Self {
         Self
@@ -45,7 +42,6 @@ impl TurnDiffTracker {
         None
     }
 
-    pub(crate) fn invalidate(&mut self) {}
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -69,14 +65,6 @@ pub struct FunctionToolOutput {
 }
 
 impl FunctionToolOutput {
-    pub fn from_text(text: String, success: Option<bool>) -> Self {
-        Self {
-            body: vec![FunctionCallOutputContentItem::InputText { text }],
-            success,
-            post_tool_use_response: None,
-        }
-    }
-
     pub fn from_content(
         content: Vec<FunctionCallOutputContentItem>,
         success: Option<bool>,
@@ -88,9 +76,6 @@ impl FunctionToolOutput {
         }
     }
 
-    pub fn into_text(self) -> String {
-        function_call_output_content_items_to_text(&self.body).unwrap_or_default()
-    }
 }
 
 impl ToolOutput for FunctionToolOutput {

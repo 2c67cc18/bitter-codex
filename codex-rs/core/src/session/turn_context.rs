@@ -191,14 +191,6 @@ impl TurnContext {
         }
     }
 
-    #[deprecated(note = "resolve paths from the selected turn environment cwd instead")]
-
-    pub(crate) fn compact_prompt(&self) -> &str {
-        self.compact_prompt
-            .as_deref()
-            .unwrap_or(compact::SUMMARIZATION_PROMPT)
-    }
-
     pub(crate) fn to_turn_context_item(&self) -> TurnContextItem {
         TurnContextItem {
             turn_id: Some(self.sub_id.clone()),

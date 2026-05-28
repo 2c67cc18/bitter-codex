@@ -24,8 +24,6 @@ use crate::session::turn_context::TurnContext;
 use crate::state::ActiveTurn;
 use crate::state::RunningTask;
 use crate::state::TaskKind;
-use codex_login::AuthManager;
-use codex_models_manager::manager::SharedModelsManager;
 use codex_otel::TURN_E2E_DURATION_METRIC;
 use codex_otel::TURN_TOKEN_USAGE_METRIC;
 use codex_otel::TURN_TOOL_CALL_METRIC;
@@ -79,13 +77,7 @@ impl SessionTaskContext {
         Arc::clone(&self.session)
     }
 
-    pub(crate) fn auth_manager(&self) -> Arc<AuthManager> {
-        Arc::clone(&self.session.services.auth_manager)
-    }
 
-    pub(crate) fn models_manager(&self) -> SharedModelsManager {
-        Arc::clone(&self.session.services.models_manager)
-    }
 }
 
 pub(crate) trait SessionTask: Send + Sync + 'static {
@@ -364,39 +356,6 @@ impl Session {
         }
     }
 
-    pub(crate) async fn abort_turn_if_active(
-        self: &Arc<Self>,
-        turn_id: &str,
-        reason: TurnAbortReason,
-    ) -> bool {
-        let active_turn = {
-            let mut active = self.active_turn.lock().await;
-            if active
-                .as_ref()
-                .is_some_and(|active_turn| active_turn.tasks.contains_key(turn_id))
-            {
-                active.take()
-            } else {
-                None
-            }
-        };
-        let Some(mut active_turn) = active_turn else {
-            return false;
-        };
-
-        let tasks = active_turn.drain_tasks();
-        for task in tasks {
-            self.handle_task_abort(task, reason.clone()).await;
-        }
-
-        self.input_queue.clear_pending(&active_turn).await;
-
-        if reason == TurnAbortReason::Interrupted {
-            self.maybe_start_turn_for_pending_work().await;
-        }
-
-        true
-    }
 
     pub async fn on_task_finished(
         self: &Arc<Self>,

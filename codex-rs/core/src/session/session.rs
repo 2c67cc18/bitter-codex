@@ -145,10 +145,6 @@ pub(crate) struct SessionSettingsUpdate {
     pub(crate) app_server_client_version: Option<String>,
 }
 
-pub(crate) struct AppServerClientMetadata {
-    pub(crate) client_name: Option<String>,
-    pub(crate) client_version: Option<String>,
-}
 
 impl Session {
     pub(crate) fn thread_id(&self) -> ThreadId {

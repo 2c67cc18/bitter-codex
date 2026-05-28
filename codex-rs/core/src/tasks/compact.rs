@@ -42,7 +42,11 @@ impl SessionTask for CompactTask {
                 &[("type", "local")],
             );
             let input = vec![UserInput::Text {
-                text: ctx.compact_prompt().to_string(),
+                text: ctx
+                    .compact_prompt
+                    .as_deref()
+                    .unwrap_or(crate::compact::SUMMARIZATION_PROMPT)
+                    .to_string(),
 
                 text_elements: Vec::new(),
             }];

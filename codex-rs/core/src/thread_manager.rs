@@ -28,7 +28,6 @@ use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::InitialHistory;
-use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ResumedHistory;
 use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::SessionConfiguredEvent;
@@ -41,7 +40,6 @@ use codex_rollout::state_db::StateDbHandle;
 use codex_thread_store::LocalThreadStore;
 use codex_thread_store::LocalThreadStoreConfig;
 use codex_thread_store::ReadThreadByRolloutPathParams;
-use codex_thread_store::ReadThreadParams;
 use codex_thread_store::StoredThread;
 use codex_thread_store::ThreadMetadataPatch;
 use codex_thread_store::ThreadStore;
@@ -64,16 +62,11 @@ const THREAD_CREATED_CHANNEL_CAPACITY: usize = 1024;
 
 static FORCE_TEST_THREAD_MANAGER_BEHAVIOR: AtomicBool = AtomicBool::new(false);
 
-type CapturedOps = Vec<(ThreadId, Op)>;
-type SharedCapturedOps = Arc<std::sync::Mutex<CapturedOps>>;
 
 pub(crate) fn set_thread_manager_test_mode_for_tests(enabled: bool) {
     FORCE_TEST_THREAD_MANAGER_BEHAVIOR.store(enabled, Ordering::Relaxed);
 }
 
-fn should_use_test_thread_manager_behavior() -> bool {
-    FORCE_TEST_THREAD_MANAGER_BEHAVIOR.load(Ordering::Relaxed)
-}
 
 struct TempCodexHomeGuard {
     path: PathBuf,
@@ -133,13 +126,6 @@ pub struct StartThreadOptions {
     pub environments: Vec<TurnEnvironmentSelection>,
 }
 
-pub(crate) struct ResumeThreadWithHistoryOptions {
-    pub(crate) config: Config,
-    pub(crate) initial_history: InitialHistory,
-    pub(crate) parent_session_id: Option<SessionId>,
-    pub(crate) session_source: SessionSource,
-    pub(crate) inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
-}
 
 pub(crate) struct ThreadManagerState {
     threads: Arc<RwLock<HashMap<ThreadId, Arc<CodexThread>>>>,
@@ -627,35 +613,7 @@ impl ThreadManagerState {
             .ok_or(CodexErr::ThreadNotFound(thread_id))
     }
 
-    pub(crate) async fn read_stored_thread(
-        &self,
-        params: ReadThreadParams,
-    ) -> CodexResult<StoredThread> {
-        let thread_id = params.thread_id;
-        self.thread_store
-            .read_thread(params)
-            .await
-            .map_err(|err| match err {
-                ThreadStoreError::ThreadNotFound { thread_id } => {
-                    CodexErr::ThreadNotFound(thread_id)
-                }
-                ThreadStoreError::InvalidRequest { message } => {
-                    if message.starts_with("no rollout found for thread id ") {
-                        CodexErr::ThreadNotFound(thread_id)
-                    } else {
-                        CodexErr::Fatal(format!(
-                            "failed to read stored thread {thread_id}: invalid thread-store request: {message}"
-                        ))
-                    }
-                }
-                err => CodexErr::Fatal(format!("failed to read stored thread {thread_id}: {err}")),
-            })
-    }
 
-    pub(crate) async fn send_op(&self, thread_id: ThreadId, op: Op) -> CodexResult<String> {
-        let thread = self.get_thread(thread_id).await?;
-        thread.submit(op).await
-    }
 
     #[cfg(test)]
 
@@ -668,115 +626,12 @@ impl ThreadManagerState {
         thread.append_message(message).await
     }
 
-    pub(crate) async fn remove_thread(&self, thread_id: &ThreadId) -> Option<Arc<CodexThread>> {
-        self.threads.write().await.remove(thread_id)
-    }
 
-    pub(crate) async fn spawn_new_thread(
-        &self,
-        config: Config,
-        parent_session_id: Option<SessionId>,
-    ) -> CodexResult<NewThread> {
-        Box::pin(self.spawn_new_thread_with_source(
-            config,
-            parent_session_id,
-            self.session_source.clone(),
-            Vec::new(),
-            false,
-            None,
-            None,
-            None,
-        ))
-        .await
-    }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn spawn_new_thread_with_source(
-        &self,
-        config: Config,
-        parent_session_id: Option<SessionId>,
-        session_source: SessionSource,
-        dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
-        persist_extended_history: bool,
-        metrics_service_name: Option<String>,
-        inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
-        environments: Option<Vec<TurnEnvironmentSelection>>,
-    ) -> CodexResult<NewThread> {
-        let environments = environments.unwrap_or_default();
-        Box::pin(self.spawn_thread_with_source(
-            config,
-            InitialHistory::New,
-            Arc::clone(&self.auth_manager),
-            parent_session_id,
-            session_source,
-            dynamic_tools,
-            persist_extended_history,
-            metrics_service_name,
-            inherited_shell_snapshot,
-            None,
-            environments,
-            None,
-        ))
-        .await
-    }
 
-    pub(crate) async fn resume_thread_with_history_with_source(
-        &self,
-        options: ResumeThreadWithHistoryOptions,
-    ) -> CodexResult<NewThread> {
-        let ResumeThreadWithHistoryOptions {
-            config,
-            initial_history,
-            parent_session_id,
-            session_source,
-            inherited_shell_snapshot,
-        } = options;
-        let environments = Vec::new();
-        Box::pin(self.spawn_thread_with_source(
-            config,
-            initial_history,
-            Arc::clone(&self.auth_manager),
-            parent_session_id,
-            session_source,
-            Vec::new(),
-            false,
-            None,
-            inherited_shell_snapshot,
-            None,
-            environments,
-            None,
-        ))
-        .await
-    }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn fork_thread_with_source(
-        &self,
-        config: Config,
-        initial_history: InitialHistory,
-        parent_session_id: Option<SessionId>,
-        session_source: SessionSource,
-        persist_extended_history: bool,
-        inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
-        environments: Option<Vec<TurnEnvironmentSelection>>,
-    ) -> CodexResult<NewThread> {
-        let environments = environments.unwrap_or_default();
-        Box::pin(self.spawn_thread_with_source(
-            config,
-            initial_history,
-            Arc::clone(&self.auth_manager),
-            parent_session_id,
-            session_source,
-            Vec::new(),
-            persist_extended_history,
-            None,
-            inherited_shell_snapshot,
-            None,
-            environments,
-            None,
-        ))
-        .await
-    }
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn spawn_thread(
@@ -917,9 +772,6 @@ impl ThreadManagerState {
         )))
     }
 
-    pub(crate) fn notify_thread_created(&self, thread_id: ThreadId) {
-        let _ = self.thread_created_tx.send(thread_id);
-    }
 }
 
 fn stored_thread_to_initial_history(

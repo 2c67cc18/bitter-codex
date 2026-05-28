@@ -70,14 +70,6 @@ impl ContextManager {
         self.reference_context_item.clone()
     }
 
-    pub(crate) fn set_token_usage_full(&mut self, context_window: i64) {
-        match &mut self.token_info {
-            Some(info) => info.fill_to_context_window(context_window),
-            None => {
-                self.token_info = Some(TokenUsageInfo::full_context_window(context_window));
-            }
-        }
-    }
 
     pub(crate) fn record_items<I>(&mut self, items: I, policy: TruncationPolicy)
     where
@@ -104,13 +96,7 @@ impl ContextManager {
         &self.items
     }
 
-    pub(crate) fn into_raw_items(self) -> Vec<ResponseItem> {
-        self.items
-    }
 
-    pub(crate) fn history_version(&self) -> u64 {
-        self.history_version
-    }
 
     pub(crate) fn estimate_token_count(&self, turn_context: &TurnContext) -> Option<i64> {
         let _model_info = &turn_context.model_info;
@@ -323,24 +309,6 @@ impl ContextManager {
         }
     }
 
-    fn trim_pre_turn_context_updates(
-        &mut self,
-        snapshot: &[ResponseItem],
-        first_instruction_turn_idx: usize,
-        mut cut_idx: usize,
-    ) -> usize {
-        while cut_idx > first_instruction_turn_idx {
-            match &snapshot[cut_idx - 1] {
-                ResponseItem::Message { role, content, .. }
-                    if role == "user" && is_contextual_user_message_content(content) =>
-                {
-                    cut_idx -= 1;
-                }
-                _ => break,
-            }
-        }
-        cut_idx
-    }
 }
 
 pub(crate) fn truncate_function_output_payload(

@@ -4,8 +4,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-use crate::compact;
-use crate::config::ManagedFeatures;
 use crate::context::ContextualUserFragment;
 use crate::path_utils::normalize_for_native_workdir;
 use crate::turn_metadata::TurnMetadataState;
@@ -98,7 +96,6 @@ use self::handlers::submission_dispatch_span;
 use self::handlers::submission_loop;
 pub(crate) use self::input_queue::TurnInput;
 pub(crate) use self::input_queue::TurnInputQueue;
-use self::session::AppServerClientMetadata;
 use self::session::Session;
 use self::session::SessionConfiguration;
 pub(crate) use self::session::SessionSettingsUpdate;
@@ -517,16 +514,6 @@ async fn thread_title_from_thread_store(
 }
 
 impl Session {
-    pub(crate) async fn app_server_client_metadata(&self) -> AppServerClientMetadata {
-        let state = self.state.lock().await;
-        AppServerClientMetadata {
-            client_name: state.session_configuration.app_server_client_name.clone(),
-            client_version: state
-                .session_configuration
-                .app_server_client_version
-                .clone(),
-        }
-    }
 
     #[cfg(test)]
     pub(crate) async fn codex_home(&self) -> AbsolutePathBuf {
@@ -534,9 +521,6 @@ impl Session {
         state.session_configuration.codex_home().clone()
     }
 
-    pub(crate) fn get_tx_event(&self) -> Sender<Event> {
-        self.tx_event.clone()
-    }
 
     pub(crate) fn state_db(&self) -> Option<state_db::StateDbHandle> {
         self.services.state_db.clone()
@@ -1250,13 +1234,6 @@ impl Session {
         .await;
     }
 
-    pub(crate) async fn turn_context_for_sub_id(&self, sub_id: &str) -> Option<Arc<TurnContext>> {
-        let active = self.active_turn.lock().await;
-        active
-            .as_ref()
-            .and_then(|turn| turn.tasks.get(sub_id))
-            .map(|task| Arc::clone(&task.turn_context))
-    }
 
     async fn active_turn_context_and_cancellation_token(
         &self,
@@ -1274,14 +1251,6 @@ impl Session {
         clippy::await_holding_invalid_type,
         reason = "active turn checks and turn state updates must remain atomic"
     )]
-    pub async fn inject_response_items(
-        &self,
-        input: Vec<ResponseInputItem>,
-    ) -> Result<(), Vec<ResponseInputItem>> {
-        self.input_queue
-            .inject_response_items(&self.active_turn, input)
-            .await
-    }
 
     pub async fn steer_input(
         self: &Arc<Self>,
@@ -1420,11 +1389,5 @@ impl Session {
         Arc::clone(&self.services.user_shell)
     }
 
-    pub(crate) async fn current_rollout_path(&self) -> anyhow::Result<Option<PathBuf>> {
-        let Some(live_thread) = self.live_thread() else {
-            return Ok(None);
-        };
-        live_thread.local_rollout_path().await.map_err(Into::into)
-    }
 
 }

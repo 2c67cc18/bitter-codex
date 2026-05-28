@@ -63,11 +63,6 @@ impl SessionState {
         self.next_turn_is_first = value;
     }
 
-    pub(crate) fn take_next_turn_is_first(&mut self) -> bool {
-        let is_first_turn = self.next_turn_is_first;
-        self.next_turn_is_first = false;
-        is_first_turn
-    }
 
     pub(crate) fn clone_history(&self) -> ContextManager {
         self.history.clone()
@@ -141,9 +136,6 @@ impl SessionState {
         (self.token_info(), self.latest_rate_limits.clone())
     }
 
-    pub(crate) fn set_token_usage_full(&mut self, context_window: i64) {
-        self.history.set_token_usage_full(context_window);
-    }
 
     pub(crate) fn get_total_token_usage(&self, server_reasoning_included: bool) -> i64 {
         self.history

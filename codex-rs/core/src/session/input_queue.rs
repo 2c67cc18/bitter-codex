@@ -26,13 +26,6 @@ impl InputQueue {
         }
     }
 
-    pub(crate) async fn queue_response_items_for_next_turn(&self, items: Vec<ResponseInputItem>) {
-        if items.is_empty() {
-            return;
-        }
-
-        self.idle_pending_input.lock().await.extend(items);
-    }
 
     pub(crate) async fn take_queued_response_items_for_next_turn(&self) -> Vec<ResponseInputItem> {
         std::mem::take(&mut *self.idle_pending_input.lock().await)
@@ -67,27 +60,6 @@ impl InputQueue {
         clippy::await_holding_invalid_type,
         reason = "active turn checks and turn state updates must remain atomic"
     )]
-    pub(crate) async fn inject_response_items(
-        &self,
-        active_turn: &Mutex<Option<ActiveTurn>>,
-        input: Vec<ResponseInputItem>,
-    ) -> Result<(), Vec<ResponseInputItem>> {
-        let mut active = active_turn.lock().await;
-        match active.as_mut() {
-            Some(active_turn) => {
-                self.extend_pending_input_for_turn_state(
-                    active_turn.turn_state.as_ref(),
-                    input
-                        .into_iter()
-                        .map(TurnInput::ResponseInputItem)
-                        .collect(),
-                )
-                .await;
-                Ok(())
-            }
-            None => Err(input),
-        }
-    }
 
     #[expect(
         clippy::await_holding_invalid_type,

@@ -9,8 +9,13 @@ fn custom_tool_calls_should_roundtrip_as_custom_outputs() {
     let payload = ToolPayload::Custom {
         input: "patch".to_string(),
     };
-    let response = FunctionToolOutput::from_text("patched".to_string(), Some(true))
-        .to_response_item("call-42", &payload);
+    let response = FunctionToolOutput::from_content(
+        vec![FunctionCallOutputContentItem::InputText {
+            text: "patched".to_string(),
+        }],
+        Some(true),
+    )
+    .to_response_item("call-42", &payload);
 
     match response {
         ResponseInputItem::CustomToolCallOutput {
@@ -30,8 +35,13 @@ fn function_payloads_remain_function_outputs() {
     let payload = ToolPayload::Function {
         arguments: "{}".to_string(),
     };
-    let response = FunctionToolOutput::from_text("ok".to_string(), Some(true))
-        .to_response_item("fn-1", &payload);
+    let response = FunctionToolOutput::from_content(
+        vec![FunctionCallOutputContentItem::InputText {
+            text: "ok".to_string(),
+        }],
+        Some(true),
+    )
+    .to_response_item("fn-1", &payload);
 
     match response {
         ResponseInputItem::FunctionCallOutput { call_id, output } => {
