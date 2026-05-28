@@ -1280,3 +1280,19 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   remaining `codex_rollout_trace` lib error is now in
   `core/src/session/handlers.rs` completion tracing and should be handled with
   the broader session/rollout simplification, not by restoring the trace crate.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/local-exec-runtime-trim` as
+  merge commit `Merge local exec runtime trim`. The slice simplified the
+  retained local exec and `/shell` path to direct process execution through
+  `spawn_child_async`, removed owned-file dependencies on deleted
+  `codex_network_proxy`, `codex_sandboxing`, `crate::sandboxing`, sandbox
+  transforms, network proxy env setup, Windows sandbox override plumbing, and
+  sandbox permission fields, and adjusted unified-exec process tests for the
+  retained no-sandbox startup signature. The worker reached terminal
+  `completed` normally with a clean branch, and `git diff --check` passed.
+  Root reran `cargo-modal --repo codex-rs --dirty check -p codex-core
+  --no-default-features --lib`; it still failed at 142 broader errors with no
+  owned-file diagnostics. All-target test constructors in `core/src/exec_tests`
+  and `core/tests/suite/{exec,windows_sandbox}.rs` still mention removed
+  `ExecParams` fields and belong to the later tests-rebuild/all-targets phase
+  after source surfaces settle.
