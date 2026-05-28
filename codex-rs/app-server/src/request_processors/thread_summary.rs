@@ -179,13 +179,14 @@ pub(crate) fn thread_response_sandbox_policy(
     permission_profile: &codex_protocol::models::PermissionProfile,
     cwd: &Path,
 ) -> codex_app_server_protocol::SandboxPolicy {
-    let file_system_policy = permission_profile.file_system_sandbox_policy();
-    let sandbox_policy = codex_sandboxing::compatibility_sandbox_policy_for_permission_profile(
-        permission_profile,
-        &file_system_policy,
-        permission_profile.network_sandbox_policy(),
-        cwd,
-    );
+    let sandbox_policy =
+        permission_profile
+            .to_legacy_sandbox_policy(cwd)
+            .unwrap_or_else(|_| {
+                codex_protocol::protocol::SandboxPolicy::ReadOnly {
+                    network_access: permission_profile.network_sandbox_policy().is_enabled(),
+                }
+            });
     sandbox_policy.into()
 }
 
