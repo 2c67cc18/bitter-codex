@@ -21,6 +21,7 @@ use crate::tools::runtimes::build_sandbox_command;
 use crate::tools::runtimes::disable_powershell_profile_for_elevated_windows_sandbox;
 use crate::tools::runtimes::exec_env_for_sandbox_permissions;
 use crate::tools::runtimes::maybe_wrap_shell_lc_with_snapshot;
+use crate::tools::runtimes::ToolError;
 use crate::tools::runtimes::shell::zsh_fork_backend;
 use crate::tools::sandboxing::Approvable;
 use crate::tools::sandboxing::ApprovalCtx;
@@ -29,7 +30,6 @@ use crate::tools::sandboxing::PermissionRequestPayload;
 use crate::tools::sandboxing::SandboxAttempt;
 use crate::tools::sandboxing::Sandboxable;
 use crate::tools::sandboxing::ToolCtx;
-use crate::tools::sandboxing::ToolError;
 use crate::tools::sandboxing::ToolRuntime;
 use crate::tools::sandboxing::managed_network_for_sandbox_permissions;
 use crate::tools::sandboxing::with_cached_approval;
@@ -370,7 +370,6 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 mod tests {
     use super::*;
     use crate::exec::DEFAULT_EXEC_COMMAND_TIMEOUT_MS;
-    use crate::tools::sandboxing::ToolRuntime;
     use codex_exec_server::Environment;
     use std::time::Duration;
     use tempfile::tempdir;
