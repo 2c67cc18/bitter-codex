@@ -1,43 +1,3 @@
-//! In-process app-server runtime host for local embedders.
-//!
-//! This module runs the existing [`MessageProcessor`] and outbound routing logic
-//! on Tokio tasks, but replaces socket/stdio transports with bounded in-memory
-//! channels. The intent is to preserve app-server semantics while avoiding a
-//! process boundary for CLI surfaces that run in the same process.
-//!
-//! # Lifecycle
-//!
-//! 1. Construct runtime state with [`InProcessStartArgs`].
-//! 2. Call [`start`], which performs the `initialize` / `initialized` handshake
-//!    internally and returns a ready-to-use [`InProcessClientHandle`].
-//! 3. Send requests via [`InProcessClientHandle::request`], notifications via
-//!    [`InProcessClientHandle::notify`], and consume events via
-//!    [`InProcessClientHandle::next_event`].
-//! 4. Terminate with [`InProcessClientHandle::shutdown`].
-//!
-//! # Transport model
-//!
-//! The runtime is transport-local but not protocol-free. Incoming requests are
-//! typed [`ClientRequest`] values, yet responses still come back through the
-//! same JSON-RPC result envelope that `MessageProcessor` uses for stdio and
-//! websocket transports. This keeps in-process behavior aligned with
-//! app-server rather than creating a second execution contract.
-//!
-//! # Backpressure
-//!
-//! Command submission uses `try_send` and can return `WouldBlock`, while event
-//! fanout may drop notifications under saturation. Server requests are never
-//! silently abandoned: if they cannot be queued they are failed back into
-//! `MessageProcessor` with overload or internal errors so approval flows do
-//! not hang indefinitely.
-//!
-//! # Relationship to `codex-app-server-client`
-//!
-//! This module provides the low-level runtime handle ([`InProcessClientHandle`]).
-//! Higher-level callers (TUI, exec) should go through `codex-app-server-client`,
-//! which wraps this module behind a worker task with async request/response
-//! helpers, surface-specific startup policy, and bounded shutdown.
-
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::hash_map::Entry;
@@ -47,7 +7,6 @@ use std::io::Result as IoResult;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::config_manager::ConfigManager;
@@ -75,13 +34,10 @@ use codex_app_server_protocol::Result;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
 use codex_arg0::Arg0DispatchPaths;
-use codex_config::CloudRequirementsLoader;
 use codex_config::LoaderOverrides;
 use codex_config::ThreadConfigLoader;
 use codex_core::config::Config;
 use codex_core::resolve_installation_id;
-use codex_exec_server::EnvironmentManager;
-use codex_feedback::CodexFeedback;
 use codex_login::AuthManager;
 use codex_protocol::protocol::SessionSource;
 pub use codex_rollout::StateDbHandle;
@@ -94,7 +50,7 @@ use tracing::warn;
 
 const IN_PROCESS_CONNECTION_ID: ConnectionId = ConnectionId(0);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
-/// Default bounded channel capacity for in-process runtime queues.
+
 pub const DEFAULT_IN_PROCESS_CHANNEL_CAPACITY: usize = CHANNEL_CAPACITY;
 
 type PendingClientRequestResponse = std::result::Result<Result, JSONRPCErrorError>;
@@ -106,65 +62,44 @@ fn server_notification_requires_delivery(notification: &ServerNotification) -> b
     )
 }
 
-/// Input needed to start an in-process app-server runtime.
-///
-/// These fields mirror the pieces of ambient process state that stdio and
-/// websocket transports normally assemble before `MessageProcessor` starts.
 #[derive(Clone)]
 pub struct InProcessStartArgs {
-    /// Resolved argv0 dispatch paths used by command execution internals.
     pub arg0_paths: Arg0DispatchPaths,
-    /// Shared base config used to initialize core components.
+
     pub config: Arc<Config>,
-    /// CLI config overrides that are already parsed into TOML values.
+
     pub cli_overrides: Vec<(String, TomlValue)>,
-    /// Loader override knobs used by config API paths.
+
     pub loader_overrides: LoaderOverrides,
-    /// Whether config API paths should reject unknown config fields.
+
     pub strict_config: bool,
-    /// Preloaded cloud requirements provider.
-    pub cloud_requirements: CloudRequirementsLoader,
-    /// Loader used to fetch typed thread config sources before a thread starts.
+
     pub thread_config_loader: Arc<dyn ThreadConfigLoader>,
-    /// Feedback sink used by app-server/core telemetry and logs.
-    pub feedback: CodexFeedback,
-    /// SQLite tracing layer used to flush recently emitted logs before feedback upload.
+
     pub log_db: Option<LogDbLayer>,
-    /// Process-wide SQLite state handle shared with embedded app-server consumers.
+
     pub state_db: Option<StateDbHandle>,
-    /// Environment manager used by core execution and filesystem operations.
-    pub environment_manager: Arc<EnvironmentManager>,
-    /// Startup warnings emitted after initialize succeeds.
+
     pub config_warnings: Vec<ConfigWarningNotification>,
-    /// Session source stamped into thread/session metadata.
+
     pub session_source: SessionSource,
-    /// Whether auth loading should honor the `CODEX_API_KEY` environment variable.
+
     pub enable_codex_api_key_env: bool,
-    /// Initialize params used for initial handshake.
+
     pub initialize: InitializeParams,
-    /// Capacity used for all runtime queues (clamped to at least 1).
+
     pub channel_capacity: usize,
 }
 
-/// Event emitted from the app-server to the in-process client.
-///
-/// [`Lagged`](Self::Lagged) is a transport health marker, not an application
-/// event — it signals that the consumer fell behind and some events were dropped.
 #[derive(Debug, Clone)]
 pub enum InProcessServerEvent {
-    /// Server request that requires client response/rejection.
     ServerRequest(ServerRequest),
-    /// App-server notification directed to the embedded client.
+
     ServerNotification(ServerNotification),
-    /// Indicates one or more events were dropped due to backpressure.
+
     Lagged { skipped: usize },
 }
 
-/// Internal message sent from [`InProcessClientHandle`] methods to the runtime task.
-///
-/// Requests carry a oneshot sender for the response; notifications and server-request
-/// replies are fire-and-forget from the caller's perspective (transport errors are
-/// caught by `try_send` on the outer channel).
 enum InProcessClientMessage {
     Request {
         request: Box<ClientRequest>,
@@ -248,11 +183,6 @@ impl InProcessClientSender {
     }
 }
 
-/// Handle used by an in-process client to call app-server and consume events.
-///
-/// This is the low-level runtime handle. Higher-level callers should usually go
-/// through `codex-app-server-client`, which adds worker-task buffering,
-/// request/response helpers, and surface-specific startup policy.
 pub struct InProcessClientHandle {
     client: InProcessClientSender,
     event_rx: mpsc::Receiver<InProcessServerEvent>,
@@ -262,38 +192,18 @@ pub struct InProcessClientHandle {
 }
 
 impl InProcessClientHandle {
-    /// Sends a typed client request into the in-process runtime.
-    ///
-    /// The returned value is a transport-level `IoResult` containing either a
-    /// JSON-RPC success payload or JSON-RPC error payload. Callers must keep
-    /// request IDs unique among concurrent requests; reusing an in-flight ID
-    /// produces an `INVALID_REQUEST` response and can make request routing
-    /// ambiguous in the caller.
     pub async fn request(&self, request: ClientRequest) -> IoResult<PendingClientRequestResponse> {
         self.client.request(request).await
     }
 
-    /// Sends a typed client notification into the in-process runtime.
-    ///
-    /// Notifications do not have an application-level response. Transport
-    /// errors indicate queue saturation or closed runtime.
     pub fn notify(&self, notification: ClientNotification) -> IoResult<()> {
         self.client.notify(notification)
     }
 
-    /// Resolves a pending [`ServerRequest`](InProcessServerEvent::ServerRequest).
-    ///
-    /// This should be used only with request IDs received from the current
-    /// runtime event stream; sending arbitrary IDs has no effect on app-server
-    /// state and can mask a stuck approval flow in the caller.
     pub fn respond_to_server_request(&self, request_id: RequestId, result: Result) -> IoResult<()> {
         self.client.respond_to_server_request(request_id, result)
     }
 
-    /// Rejects a pending [`ServerRequest`](InProcessServerEvent::ServerRequest).
-    ///
-    /// Use this when the embedder cannot satisfy a server request; leaving
-    /// requests unanswered can stall turn progress.
     pub fn fail_server_request(
         &self,
         request_id: RequestId,
@@ -302,18 +212,10 @@ impl InProcessClientHandle {
         self.client.fail_server_request(request_id, error)
     }
 
-    /// Receives the next server event from the in-process runtime.
-    ///
-    /// Returns `None` when the runtime task exits and no more events are
-    /// available.
     pub async fn next_event(&mut self) -> Option<InProcessServerEvent> {
         self.event_rx.recv().await
     }
 
-    /// Requests runtime shutdown and waits for worker termination.
-    ///
-    /// Shutdown is bounded by internal timeouts and may abort background tasks
-    /// if graceful drain does not complete in time.
     pub async fn shutdown(self) -> IoResult<()> {
         let mut runtime_handle = self.runtime_handle;
         let (done_tx, done_rx) = oneshot::channel();
@@ -340,11 +242,6 @@ impl InProcessClientHandle {
     }
 }
 
-/// Starts an in-process app-server runtime and performs initialize handshake.
-///
-/// This function sends `initialize` followed by `initialized` before returning
-/// the handle, so callers receive a ready-to-use runtime. If initialize fails,
-/// the runtime is shut down and an `InvalidData` error is returned.
 pub async fn start(args: InProcessStartArgs) -> IoResult<InProcessClientHandle> {
     let initialize = args.initialize.clone();
     let client = start_uninitialized(args).await?;
@@ -382,7 +279,6 @@ async fn start_uninitialized(args: InProcessStartArgs) -> IoResult<InProcessClie
 
         let (writer_tx, mut writer_rx) = mpsc::channel::<QueuedOutgoingMessage>(channel_capacity);
         let outbound_initialized = Arc::new(AtomicBool::new(false));
-        let outbound_experimental_api_enabled = Arc::new(AtomicBool::new(false));
         let outbound_opted_out_notification_methods = Arc::new(RwLock::new(HashSet::new()));
 
         let mut outbound_connections = HashMap::<ConnectionId, OutboundConnectionState>::new();
@@ -391,9 +287,8 @@ async fn start_uninitialized(args: InProcessStartArgs) -> IoResult<InProcessClie
             OutboundConnectionState::new(
                 writer_tx,
                 Arc::clone(&outbound_initialized),
-                Arc::clone(&outbound_experimental_api_enabled),
                 Arc::clone(&outbound_opted_out_notification_methods),
-                /*disconnect_sender*/ None,
+                None,
             ),
         );
         let mut outbound_handle = tokio::spawn(async move {
@@ -408,7 +303,6 @@ async fn start_uninitialized(args: InProcessStartArgs) -> IoResult<InProcessClie
             args.cli_overrides,
             args.loader_overrides,
             args.strict_config,
-            args.cloud_requirements,
             args.arg0_paths.clone(),
             args.thread_config_loader,
         );
@@ -419,16 +313,11 @@ async fn start_uninitialized(args: InProcessStartArgs) -> IoResult<InProcessClie
                 arg0_paths: args.arg0_paths,
                 config: args.config,
                 config_manager,
-                environment_manager: args.environment_manager,
-                feedback: args.feedback,
-                log_db: args.log_db,
                 state_db: args.state_db,
                 config_warnings: args.config_warnings,
                 session_source: args.session_source,
                 auth_manager,
                 installation_id,
-                remote_control_handle: None,
-                plugin_startup_tasks: crate::PluginStartupTasks::Start,
             }));
             let mut thread_created_rx = processor.thread_created_receiver();
             let session = Arc::new(ConnectionSessionState::new());
@@ -450,8 +339,6 @@ async fn start_uninitialized(args: InProcessStartArgs) -> IoResult<InProcessClie
                                     .await;
                                 let opted_out_notification_methods_snapshot =
                                     session.opted_out_notification_methods();
-                                let experimental_api_enabled =
-                                    session.experimental_api_enabled();
                                 let is_initialized = session.initialized();
                                 if let Ok(mut opted_out_notification_methods) =
                                     outbound_opted_out_notification_methods.write()
@@ -461,10 +348,6 @@ async fn start_uninitialized(args: InProcessStartArgs) -> IoResult<InProcessClie
                                 } else {
                                     warn!("failed to update outbound opted-out notifications");
                                 }
-                                outbound_experimental_api_enabled.store(
-                                    experimental_api_enabled,
-                                    Ordering::Release,
-                                );
                                 if !was_initialized && is_initialized {
                                     processor.send_initialize_notifications().await;
                                 }
@@ -615,8 +498,8 @@ async fn start_uninitialized(args: InProcessStartArgs) -> IoResult<InProcessClie
                             }
                         }
                         OutgoingMessage::Request(request) => {
-                            // Send directly to avoid cloning; on failure the
-                            // original value is returned inside the error.
+
+
                             if let Err(send_error) = event_tx
                                 .try_send(InProcessServerEvent::ServerRequest(request))
                             {
@@ -683,8 +566,7 @@ async fn start_uninitialized(args: InProcessStartArgs) -> IoResult<InProcessClie
                 "in-process app-server runtime is shutting down",
             )))
             .await;
-        // Drop the runtime's last sender before awaiting the router task so
-        // `outgoing_rx.recv()` can observe channel closure and exit cleanly.
+
         drop(outgoing_message_sender);
         for (_, response_tx) in pending_request_responses {
             let _ = response_tx.send(Err(internal_error(
@@ -719,7 +601,6 @@ async fn start_uninitialized(args: InProcessStartArgs) -> IoResult<InProcessClie
 mod tests {
     use super::*;
     use codex_app_server_protocol::ClientInfo;
-    use codex_app_server_protocol::ConfigRequirementsReadResponse;
     use codex_app_server_protocol::SessionSource as ApiSessionSource;
     use codex_app_server_protocol::ThreadStartParams;
     use codex_app_server_protocol::ThreadStartResponse;
@@ -763,12 +644,9 @@ mod tests {
             cli_overrides: Vec::new(),
             loader_overrides: LoaderOverrides::default(),
             strict_config: false,
-            cloud_requirements: CloudRequirementsLoader::default(),
             thread_config_loader: Arc::new(codex_config::NoopThreadConfigLoader),
-            feedback: CodexFeedback::new(),
             log_db: None,
             state_db: Some(state_db),
-            environment_manager: Arc::new(EnvironmentManager::default_for_tests()),
             config_warnings: Vec::new(),
             session_source,
             enable_codex_api_key_env: false,
@@ -789,27 +667,6 @@ mod tests {
 
     async fn start_test_client(session_source: SessionSource) -> InProcessClientHandle {
         start_test_client_with_capacity(session_source, DEFAULT_IN_PROCESS_CHANNEL_CAPACITY).await
-    }
-
-    #[tokio::test]
-    async fn in_process_start_initializes_and_handles_typed_v2_request() {
-        let client = start_test_client(SessionSource::Cli).await;
-        let response = client
-            .request(ClientRequest::ConfigRequirementsRead {
-                request_id: RequestId::Integer(1),
-                params: None,
-            })
-            .await
-            .expect("request transport should work")
-            .expect("request should succeed");
-        assert!(response.is_object());
-
-        let _parsed: ConfigRequirementsReadResponse =
-            serde_json::from_value(response).expect("response should match v2 schema");
-        client
-            .shutdown()
-            .await
-            .expect("in-process runtime should shutdown cleanly");
     }
 
     #[tokio::test]
@@ -842,13 +699,15 @@ mod tests {
 
     #[tokio::test]
     async fn in_process_start_clamps_zero_channel_capacity() {
-        let client =
-            start_test_client_with_capacity(SessionSource::Cli, /*channel_capacity*/ 0).await;
+        let client = start_test_client_with_capacity(SessionSource::Cli, 0).await;
         let response = loop {
             match client
-                .request(ClientRequest::ConfigRequirementsRead {
+                .request(ClientRequest::ThreadStart {
                     request_id: RequestId::Integer(4),
-                    params: None,
+                    params: ThreadStartParams {
+                        ephemeral: Some(true),
+                        ..ThreadStartParams::default()
+                    },
                 })
                 .await
             {
@@ -859,8 +718,8 @@ mod tests {
                 Err(err) => panic!("request transport should work: {err}"),
             }
         };
-        let _parsed: ConfigRequirementsReadResponse =
-            serde_json::from_value(response).expect("response should match v2 schema");
+        let _parsed: ThreadStartResponse =
+            serde_json::from_value(response).expect("thread/start response should parse");
         client
             .shutdown()
             .await

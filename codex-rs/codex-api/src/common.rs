@@ -8,7 +8,6 @@ use codex_protocol::protocol::RateLimitSnapshot;
 use codex_protocol::protocol::TokenUsage;
 use codex_protocol::protocol::W3cTraceContext;
 use futures::Stream;
-use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -20,7 +19,6 @@ use tokio::sync::mpsc;
 pub const WS_REQUEST_HEADER_TRACEPARENT_CLIENT_METADATA_KEY: &str = "ws_request_header_traceparent";
 pub const WS_REQUEST_HEADER_TRACESTATE_CLIENT_METADATA_KEY: &str = "ws_request_header_tracestate";
 
-/// Canonical input payload for the compaction endpoint.
 #[derive(Debug, Clone, Serialize)]
 pub struct CompactionInput<'a> {
     pub model: &'a str,
@@ -39,54 +37,21 @@ pub struct CompactionInput<'a> {
     pub text: Option<TextControls>,
 }
 
-/// Canonical input payload for the memory summarize endpoint.
-#[derive(Debug, Clone, Serialize)]
-pub struct MemorySummarizeInput {
-    pub model: String,
-    #[serde(rename = "traces")]
-    pub raw_memories: Vec<RawMemory>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning: Option<Reasoning>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct RawMemory {
-    pub id: String,
-    pub metadata: RawMemoryMetadata,
-    pub items: Vec<Value>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct RawMemoryMetadata {
-    pub source_path: String,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub struct MemorySummarizeOutput {
-    #[serde(rename = "trace_summary", alias = "raw_memory")]
-    pub raw_memory: String,
-    pub memory_summary: String,
-}
-
 #[derive(Debug)]
 pub enum ResponseEvent {
     Created,
     OutputItemDone(ResponseItem),
     OutputItemAdded(ResponseItem),
-    /// Emitted when the server includes `OpenAI-Model` on the stream response.
-    /// This can differ from the requested model when backend safety routing applies.
+
     ServerModel(String),
-    /// Emitted when the server recommends additional account verification.
+
     ModelVerifications(Vec<ModelVerification>),
-    /// Emitted when `X-Reasoning-Included: true` is present on the response,
-    /// meaning the server already accounted for past reasoning tokens and the
-    /// client should not re-estimate them.
+
     ServerReasoningIncluded(bool),
     Completed {
         response_id: String,
         token_usage: Option<TokenUsage>,
-        /// Did the model affirmatively end its turn? Some providers do not set this,
-        /// so we rely on fallback logic when this is `None`.
+
         end_turn: Option<bool>,
     },
     OutputTextDelta(String),
@@ -127,18 +92,15 @@ pub enum TextFormatType {
 
 #[derive(Debug, Serialize, Default, Clone, PartialEq)]
 pub struct TextFormat {
-    /// Format type used by the OpenAI text controls.
     pub r#type: TextFormatType,
-    /// When true, the server is expected to strictly validate responses.
+
     pub strict: bool,
-    /// JSON schema for the desired output.
+
     pub schema: Value,
-    /// Friendly name for the format, used in telemetry/debugging.
+
     pub name: String,
 }
 
-/// Controls the `text` field for the Responses API, combining verbosity and
-/// optional JSON schema output formatting.
 #[derive(Debug, Serialize, Default, Clone, PartialEq)]
 pub struct TextControls {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -298,7 +260,7 @@ pub fn create_text_param_for_request(
 
 pub struct ResponseStream {
     pub rx_event: mpsc::Receiver<Result<ResponseEvent, ApiError>>,
-    /// Server-assigned `x-request-id` response header, when present.
+
     pub upstream_request_id: Option<String>,
 }
 

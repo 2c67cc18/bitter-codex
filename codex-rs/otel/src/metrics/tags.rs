@@ -14,9 +14,7 @@ const OTHER_ORIGINATOR_TAG_VALUE: &str = "other";
 const KNOWN_ORIGINATOR_TAG_VALUES: &[&str] = &[
     "codex_desktop",
     "codex-app-server",
-    "codex_mcp_server",
     "codex_cli_rs",
-    "codex-tui",
     "codex_vscode",
     "none",
     "codex_exec",
@@ -25,7 +23,6 @@ const KNOWN_ORIGINATOR_TAG_VALUES: &[&str] = &[
     "codex-app-server-sdk",
 ];
 
-/// Return a known low-cardinality originator tag value, or `other`.
 pub fn bounded_originator_tag_value(originator: &str) -> &'static str {
     let sanitized = sanitize_metric_tag_value(originator);
     KNOWN_ORIGINATOR_TAG_VALUES

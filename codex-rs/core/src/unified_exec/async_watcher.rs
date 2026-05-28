@@ -26,17 +26,8 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 
 pub(crate) const TRAILING_OUTPUT_GRACE: Duration = Duration::from_millis(100);
 
-/// Upper bound for a single ExecCommandOutputDelta chunk emitted by unified exec.
-///
-/// The unified exec output buffer already caps *retained* output (see
-/// `UNIFIED_EXEC_OUTPUT_MAX_BYTES`), but we also cap per-event payload size so
-/// downstream event consumers (especially app-server JSON-RPC) don't have to
-/// process arbitrarily large delta payloads.
 const UNIFIED_EXEC_OUTPUT_DELTA_MAX_BYTES: usize = 8192;
 
-/// Spawn a background task that continuously reads from the PTY, appends to the
-/// shared transcript, and emits ExecCommandOutputDelta events on UTF‑8
-/// boundaries.
 pub(crate) fn start_streaming_output(
     process: &UnifiedExecProcess,
     context: &UnifiedExecContext,
@@ -101,8 +92,6 @@ pub(crate) fn start_streaming_output(
     });
 }
 
-/// Spawn a background watcher that waits for the PTY to exit and then emits a
-/// single ExecCommandEnd event with the aggregated transcript.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_exit_watcher(
     process: Arc<UnifiedExecProcess>,
@@ -188,9 +177,6 @@ async fn process_chunk(
     }
 }
 
-/// Emit an ExecCommandEnd event for a unified exec session, using the transcript
-/// as the primary source of aggregated_output and falling back to the provided
-/// text when the transcript is empty.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn emit_exec_end_for_unified_exec(
     session_ref: Arc<Session>,
@@ -213,12 +199,7 @@ pub(crate) async fn emit_exec_end_for_unified_exec(
         duration,
         timed_out: false,
     };
-    let event_ctx = ToolEventCtx::new(
-        session_ref.as_ref(),
-        turn_ref.as_ref(),
-        &call_id,
-        /*turn_diff_tracker*/ None,
-    );
+    let event_ctx = ToolEventCtx::new(session_ref.as_ref(), turn_ref.as_ref(), &call_id, None);
     let emitter = ToolEmitter::unified_exec(
         &command,
         cwd,
@@ -226,13 +207,7 @@ pub(crate) async fn emit_exec_end_for_unified_exec(
         process_id,
     );
     emitter
-        .emit(
-            event_ctx,
-            ToolEventStage::Success {
-                output,
-                applied_patch_delta: None,
-            },
-        )
+        .emit(event_ctx, ToolEventStage::Success { output })
         .await;
 }
 
@@ -267,12 +242,7 @@ pub(crate) async fn emit_failed_exec_end_for_unified_exec(
         duration,
         timed_out: false,
     };
-    let event_ctx = ToolEventCtx::new(
-        session_ref.as_ref(),
-        turn_ref.as_ref(),
-        &call_id,
-        /*turn_diff_tracker*/ None,
-    );
+    let event_ctx = ToolEventCtx::new(session_ref.as_ref(), turn_ref.as_ref(), &call_id, None);
     let emitter = ToolEmitter::unified_exec(
         &command,
         cwd,
@@ -311,8 +281,6 @@ fn split_valid_utf8_prefix_with_max(buffer: &mut Vec<u8>, max_bytes: usize) -> O
         split -= 1;
     }
 
-    // If no valid UTF-8 prefix was found, emit the first byte so the stream
-    // keeps making progress and the transcript reflects all bytes.
     let byte = buffer.drain(..1).collect();
     Some(byte)
 }

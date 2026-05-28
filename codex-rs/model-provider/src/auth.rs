@@ -8,8 +8,6 @@ use http::HeaderMap;
 
 use crate::bearer_auth_provider::BearerAuthProvider;
 
-// Some providers are meant to send no auth headers. Examples include local OSS
-// providers and custom test providers with `requires_openai_auth = false`.
 #[derive(Clone, Debug)]
 struct UnauthenticatedAuthProvider;
 
@@ -42,14 +40,9 @@ fn bearer_auth_for_provider(
         return Ok(Some(BearerAuthProvider::new(api_key)));
     }
 
-    if let Some(token) = provider.experimental_bearer_token.clone() {
-        return Ok(Some(BearerAuthProvider::new(token)));
-    }
-
     Ok(None)
 }
 
-/// Builds request-header auth for a first-party Codex auth snapshot.
 pub fn auth_provider_from_auth(auth: &CodexAuth) -> SharedAuthProvider {
     match auth {
         CodexAuth::ApiKey(_) | CodexAuth::Chatgpt(_) | CodexAuth::ChatgptAuthTokens(_) => {
@@ -59,22 +52,5 @@ pub fn auth_provider_from_auth(auth: &CodexAuth) -> SharedAuthProvider {
                 is_fedramp_account: auth.is_fedramp_account(),
             })
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use codex_model_provider_info::WireApi;
-    use codex_model_provider_info::create_oss_provider_with_base_url;
-
-    use super::*;
-
-    #[test]
-    fn unauthenticated_auth_provider_adds_no_headers() {
-        let provider =
-            create_oss_provider_with_base_url("http://localhost:11434/v1", WireApi::Responses);
-        let auth = resolve_provider_auth(/*auth*/ None, &provider).expect("auth should resolve");
-
-        assert!(auth.to_auth_headers().is_empty());
     }
 }

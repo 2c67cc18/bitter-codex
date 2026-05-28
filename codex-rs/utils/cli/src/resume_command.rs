@@ -1,5 +1,3 @@
-//! Shared formatting for user-facing `codex resume` command hints.
-
 use codex_protocol::ThreadId;
 
 pub fn resume_command(thread_name: Option<&str>, thread_id: Option<ThreadId>) -> Option<String> {
@@ -24,7 +22,7 @@ pub fn resume_hint(thread_name: Option<&str>, thread_id: Option<ThreadId>) -> Op
         Some(thread_name) => Some(format!(
             "codex resume, then select {thread_name} ({thread_id})"
         )),
-        None => resume_command(/*thread_name*/ None, Some(thread_id)),
+        None => resume_command(None, Some(thread_id)),
     }
 }
 
@@ -67,7 +65,7 @@ mod tests {
     #[test]
     fn formats_thread_id_when_name_is_missing() {
         let thread_id = ThreadId::from_string("123e4567-e89b-12d3-a456-426614174000").unwrap();
-        let command = resume_command(/*thread_name*/ None, Some(thread_id));
+        let command = resume_command(None, Some(thread_id));
         assert_eq!(
             command,
             Some("codex resume 123e4567-e89b-12d3-a456-426614174000".to_string())
@@ -76,28 +74,25 @@ mod tests {
 
     #[test]
     fn returns_none_without_a_resume_target() {
-        let command = resume_command(/*thread_name*/ None, /*thread_id*/ None);
+        let command = resume_command(None, None);
         assert_eq!(command, None);
     }
 
     #[test]
     fn quotes_thread_names_when_needed() {
-        let command = resume_command(Some("-starts-with-dash"), /*thread_id*/ None);
+        let command = resume_command(Some("-starts-with-dash"), None);
         assert_eq!(
             command,
             Some("codex resume -- -starts-with-dash".to_string())
         );
 
-        let command = resume_command(Some("two words"), /*thread_id*/ None);
+        let command = resume_command(Some("two words"), None);
         assert_eq!(command, Some("codex resume 'two words'".to_string()));
 
-        let command = resume_command(Some("quote'case"), /*thread_id*/ None);
-        assert_eq!(
-            command,
-            Some("codex resume 'quote'\"'\"'case'".to_string())
-        );
+        let command = resume_command(Some("quote'case"), None);
+        assert_eq!(command, Some("codex resume 'quote'\"'\"'case'".to_string()));
 
-        let command = resume_command(Some("$(echo bad)`x`"), /*thread_id*/ None);
+        let command = resume_command(Some("$(echo bad)`x`"), None);
         assert_eq!(command, Some("codex resume '$(echo bad)`x`'".to_string()));
     }
 
@@ -122,7 +117,7 @@ mod tests {
     #[test]
     fn resume_hint_uses_direct_id_command_without_name() {
         let thread_id = ThreadId::from_string("123e4567-e89b-12d3-a456-426614174000").unwrap();
-        let hint = resume_hint(/*thread_name*/ None, Some(thread_id));
+        let hint = resume_hint(None, Some(thread_id));
         assert_eq!(
             hint,
             Some("codex resume 123e4567-e89b-12d3-a456-426614174000".to_string())
@@ -131,7 +126,7 @@ mod tests {
 
     #[test]
     fn resume_hint_requires_thread_id() {
-        let hint = resume_hint(Some("my-thread"), /*thread_id*/ None);
+        let hint = resume_hint(Some("my-thread"), None);
         assert_eq!(hint, None);
     }
 }

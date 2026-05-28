@@ -1,8 +1,5 @@
-use crate::SkillsManager;
 use crate::codex_thread::CodexThread;
 use crate::config::Config;
-use crate::config::ThreadStoreConfig;
-use crate::mcp::McpManager;
 use crate::rollout::truncation;
 use crate::session::Codex;
 use crate::session::CodexSpawnArgs;
@@ -14,8 +11,6 @@ use crate::tasks::InterruptedTurnHistoryMarker;
 use crate::tasks::interrupted_turn_history_marker;
 use codex_app_server_protocol::ThreadHistoryBuilder;
 use codex_app_server_protocol::TurnStatus;
-use codex_core_plugins::PluginsManager;
-use codex_exec_server::EnvironmentManager;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_model_provider::create_model_provider;
@@ -23,9 +18,8 @@ use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_models_manager::manager::SharedModelsManager;
-use codex_protocol::ThreadId;
 use codex_protocol::SessionId;
-use codex_protocol::config_types::CollaborationModeMask;
+use codex_protocol::ThreadId;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
 #[cfg(test)]
@@ -39,15 +33,11 @@ use codex_protocol::protocol::ResumedHistory;
 use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::SessionConfiguredEvent;
 use codex_protocol::protocol::SessionSource;
-use codex_protocol::protocol::SubAgentSource;
-use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnAbortReason;
 use codex_protocol::protocol::TurnAbortedEvent;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::protocol::W3cTraceContext;
 use codex_rollout::state_db::StateDbHandle;
-use codex_state::DirectionalThreadSpawnEdgeStatus;
-use codex_thread_store::InMemoryThreadStore;
 use codex_thread_store::LocalThreadStore;
 use codex_thread_store::LocalThreadStoreConfig;
 use codex_thread_store::ReadThreadByRolloutPathParams;
@@ -61,7 +51,6 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -72,11 +61,7 @@ use tokio::sync::broadcast;
 use tracing::warn;
 
 const THREAD_CREATED_CHANNEL_CAPACITY: usize = 1024;
-/// Test-only override for enabling thread-manager behaviors used by integration
-/// tests.
-///
-/// In production builds this value should remain at its default (`false`) and
-/// must not be toggled.
+
 static FORCE_TEST_THREAD_MANAGER_BEHAVIOR: AtomicBool = AtomicBool::new(false);
 
 type CapturedOps = Vec<(ThreadId, Op)>;
@@ -100,47 +85,19 @@ impl Drop for TempCodexHomeGuard {
     }
 }
 
-/// Represents a newly created Codex thread (formerly called a conversation), including the first event
-/// (which is [`EventMsg::SessionConfigured`]).
 pub struct NewThread {
     pub thread_id: ThreadId,
     pub thread: Arc<CodexThread>,
     pub session_configured: SessionConfiguredEvent,
 }
 
-// TODO(ccunningham): Add an explicit non-interrupting live-turn snapshot once
-// core can represent sampling boundaries directly instead of relying on
-// whichever items happened to be persisted mid-turn.
-//
-// Two likely future variants:
-// - `TruncateToLastSamplingBoundary` for callers that want a coherent fork from
-//   the last stable model boundary without synthesizing an interrupt.
-// - `WaitUntilNextSamplingBoundary` (or similar) for callers that prefer to
-//   fork after the next sampling boundary rather than interrupting immediately.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ForkSnapshot {
-    /// Fork a committed prefix ending strictly before the nth user message.
-    ///
-    /// When `n` is within range, this cuts before that 0-based user-message
-    /// boundary. When `n` is out of range and the source thread is currently
-    /// mid-turn, this instead cuts before the active turn's opening boundary
-    /// so the fork drops the unfinished turn suffix. When `n` is out of range
-    /// and the source thread is already at a turn boundary, this returns the
-    /// full committed history unchanged.
     TruncateBeforeNthUserMessage(usize),
 
-    /// Fork the current persisted history as if the source thread had been
-    /// interrupted now.
-    ///
-    /// If the persisted snapshot ends mid-turn, this appends the same
-    /// `<turn_aborted>` marker produced by a real interrupt. If the snapshot is
-    /// already at a turn boundary, this returns the current persisted history
-    /// unchanged.
     Interrupted,
 }
 
-/// Preserve legacy `fork_thread(usize, ...)` callsites by mapping them to the
-/// existing truncate-before-nth-user-message snapshot mode.
 impl From<usize> for ForkSnapshot {
     fn from(value: usize) -> Self {
         Self::TruncateBeforeNthUserMessage(value)
@@ -160,8 +117,6 @@ enum ShutdownOutcome {
     TimedOut,
 }
 
-/// [`ThreadManager`] is responsible for creating threads and maintaining
-/// them in memory.
 pub struct ThreadManager {
     state: Arc<ThreadManagerState>,
     _test_codex_home_guard: Option<TempCodexHomeGuard>,
@@ -171,7 +126,6 @@ pub struct StartThreadOptions {
     pub config: Config,
     pub initial_history: InitialHistory,
     pub session_source: Option<SessionSource>,
-    pub thread_source: Option<ThreadSource>,
     pub dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
     pub persist_extended_history: bool,
     pub metrics_service_name: Option<String>,
@@ -185,24 +139,18 @@ pub(crate) struct ResumeThreadWithHistoryOptions {
     pub(crate) parent_session_id: Option<SessionId>,
     pub(crate) session_source: SessionSource,
     pub(crate) inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
-    pub(crate) inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
 }
 
-/// Shared, `Arc`-owned state for [`ThreadManager`].
 pub(crate) struct ThreadManagerState {
     threads: Arc<RwLock<HashMap<ThreadId, Arc<CodexThread>>>>,
     thread_created_tx: broadcast::Sender<ThreadId>,
     auth_manager: Arc<AuthManager>,
     models_manager: SharedModelsManager,
-    environment_manager: Arc<EnvironmentManager>,
-    skills_manager: Arc<SkillsManager>,
-    plugins_manager: Arc<PluginsManager>,
-    mcp_manager: Arc<McpManager>,
     thread_store: Arc<dyn ThreadStore>,
     session_source: SessionSource,
     installation_id: String,
     state_db: Option<StateDbHandle>,
-    // Captures submitted ops for testing purpose when test mode is enabled.
+
     ops_log: Option<SharedCapturedOps>,
 }
 
@@ -221,13 +169,10 @@ pub fn thread_store_from_config(
     config: &Config,
     state_db: Option<StateDbHandle>,
 ) -> Arc<dyn ThreadStore> {
-    match &config.experimental_thread_store {
-        ThreadStoreConfig::Local => Arc::new(LocalThreadStore::new(
-            LocalThreadStoreConfig::from_config(config),
-            state_db,
-        )),
-        ThreadStoreConfig::InMemory { id } => InMemoryThreadStore::for_id(id),
-    }
+    Arc::new(LocalThreadStore::new(
+        LocalThreadStoreConfig::from_config(config),
+        state_db,
+    ))
 }
 
 impl ThreadManager {
@@ -236,33 +181,16 @@ impl ThreadManager {
         config: &Config,
         auth_manager: Arc<AuthManager>,
         session_source: SessionSource,
-        environment_manager: Arc<EnvironmentManager>,
         thread_store: Arc<dyn ThreadStore>,
         state_db: Option<StateDbHandle>,
         installation_id: String,
     ) -> Self {
-        let codex_home = config.codex_home.clone();
-        let restriction_product = session_source.restriction_product();
         let (thread_created_tx, _) = broadcast::channel(THREAD_CREATED_CHANNEL_CAPACITY);
-        let plugins_manager = Arc::new(PluginsManager::new_with_restriction_product(
-            codex_home.to_path_buf(),
-            restriction_product,
-        ));
-        let mcp_manager = Arc::new(McpManager::new(Arc::clone(&plugins_manager)));
-        let skills_manager = Arc::new(SkillsManager::new_with_restriction_product(
-            codex_home,
-            config.bundled_skills_enabled(),
-            restriction_product,
-        ));
         Self {
             state: Arc::new(ThreadManagerState {
                 threads: Arc::new(RwLock::new(HashMap::new())),
                 thread_created_tx,
                 models_manager: build_models_manager(config, auth_manager.clone()),
-                environment_manager,
-                skills_manager,
-                plugins_manager,
-                mcp_manager,
                 thread_store,
                 auth_manager,
                 session_source,
@@ -275,74 +203,41 @@ impl ThreadManager {
         }
     }
 
-    /// Construct with a dummy AuthManager containing the provided CodexAuth.
-    /// Used for integration tests: should not be used by ordinary business logic.
     pub(crate) fn with_models_provider_for_tests(
         auth: CodexAuth,
         provider: ModelProviderInfo,
     ) -> Self {
-        set_thread_manager_test_mode_for_tests(/*enabled*/ true);
+        set_thread_manager_test_mode_for_tests(true);
         let codex_home = std::env::temp_dir().join(format!(
             "codex-thread-manager-test-{}",
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&codex_home)
             .unwrap_or_else(|err| panic!("temp codex home dir create failed: {err}"));
-        let mut manager = Self::with_models_provider_and_home_for_tests(
-            auth,
-            provider,
-            codex_home.clone(),
-            Arc::new(EnvironmentManager::default_for_tests()),
-        );
+        let mut manager =
+            Self::with_models_provider_and_home_for_tests(auth, provider, codex_home.clone());
         manager._test_codex_home_guard = Some(TempCodexHomeGuard { path: codex_home });
         manager
     }
 
-    /// Construct with a dummy AuthManager containing the provided CodexAuth and codex home.
-    /// Used for integration tests: should not be used by ordinary business logic.
     pub(crate) fn with_models_provider_and_home_for_tests(
         auth: CodexAuth,
         provider: ModelProviderInfo,
         codex_home: PathBuf,
-        environment_manager: Arc<EnvironmentManager>,
     ) -> Self {
-        Self::with_models_provider_home_and_state_for_tests(
-            auth,
-            provider,
-            codex_home,
-            environment_manager,
-            /*state_db*/ None,
-        )
+        Self::with_models_provider_home_and_state_for_tests(auth, provider, codex_home, None)
     }
 
     pub(crate) fn with_models_provider_home_and_state_for_tests(
         auth: CodexAuth,
         provider: ModelProviderInfo,
         codex_home: PathBuf,
-        environment_manager: Arc<EnvironmentManager>,
         state_db: Option<StateDbHandle>,
     ) -> Self {
-        set_thread_manager_test_mode_for_tests(/*enabled*/ true);
+        set_thread_manager_test_mode_for_tests(true);
         let auth_manager = AuthManager::from_auth_for_testing(auth);
         let installation_id = uuid::Uuid::new_v4().to_string();
-        let skills_codex_home = match AbsolutePathBuf::from_absolute_path_checked(&codex_home) {
-            Ok(codex_home) => codex_home,
-            Err(err) => panic!("test codex_home should be absolute: {err}"),
-        };
         let (thread_created_tx, _) = broadcast::channel(THREAD_CREATED_CHANNEL_CAPACITY);
-        let restriction_product = SessionSource::Exec.restriction_product();
-        let plugins_manager = Arc::new(PluginsManager::new_with_restriction_product(
-            codex_home.clone(),
-            restriction_product,
-        ));
-        let mcp_manager = Arc::new(McpManager::new(Arc::clone(&plugins_manager)));
-        let skills_manager = Arc::new(SkillsManager::new_with_restriction_product(
-            skills_codex_home,
-            /*bundled_skills_enabled*/ true,
-            restriction_product,
-        ));
-        // This test constructor has no Config input. Tests that need a non-local
-        // process store should construct ThreadManager::new with an explicit store.
         let thread_store: Arc<dyn ThreadStore> = Arc::new(LocalThreadStore::new(
             LocalThreadStoreConfig {
                 codex_home: codex_home.clone(),
@@ -356,11 +251,7 @@ impl ThreadManager {
                 threads: Arc::new(RwLock::new(HashMap::new())),
                 thread_created_tx,
                 models_manager: create_model_provider(provider, Some(auth_manager.clone()))
-                    .models_manager(codex_home, /*config_model_catalog*/ None),
-                environment_manager,
-                skills_manager,
-                plugins_manager,
-                mcp_manager,
+                    .models_manager(codex_home, None),
                 thread_store,
                 auth_manager,
                 session_source: SessionSource::Exec,
@@ -379,22 +270,6 @@ impl ThreadManager {
 
     pub fn auth_manager(&self) -> Arc<AuthManager> {
         self.state.auth_manager.clone()
-    }
-
-    pub fn skills_manager(&self) -> Arc<SkillsManager> {
-        self.state.skills_manager.clone()
-    }
-
-    pub fn plugins_manager(&self) -> Arc<PluginsManager> {
-        self.state.plugins_manager.clone()
-    }
-
-    pub fn mcp_manager(&self) -> Arc<McpManager> {
-        self.state.mcp_manager.clone()
-    }
-
-    pub fn environment_manager(&self) -> Arc<EnvironmentManager> {
-        self.state.environment_manager.clone()
     }
 
     pub fn default_environment_selections(
@@ -422,10 +297,6 @@ impl ThreadManager {
             .await
     }
 
-    pub fn list_collaboration_modes(&self) -> Vec<CollaborationModeMask> {
-        self.state.models_manager.list_collaboration_modes()
-    }
-
     pub async fn list_thread_ids(&self) -> Vec<ThreadId> {
         self.state.list_thread_ids().await
     }
@@ -438,11 +309,6 @@ impl ThreadManager {
         self.state.get_thread(thread_id).await
     }
 
-    /// Updates metadata for loaded and cold threads through one entrypoint.
-    ///
-    /// Loaded threads route through `CodexThread`/`LiveThread`, so metadata changes stay ordered
-    /// with live rollout writes. Cold threads go directly to the store, which owns unloaded JSONL
-    /// compatibility and SQLite metadata updates.
     pub async fn update_thread_metadata(
         &self,
         thread_id: ThreadId,
@@ -475,50 +341,8 @@ impl ThreadManager {
                 err => thread_store_metadata_update_error(thread_id, err),
             })
     }
-
-    /// List `thread_id` plus all known descendants in its spawn subtree.
-    pub async fn list_agent_subtree_thread_ids(
-        &self,
-        thread_id: ThreadId,
-    ) -> CodexResult<Vec<ThreadId>> {
-        let thread = self.state.get_thread(thread_id).await?;
-
-        let mut subtree_thread_ids = Vec::new();
-        let mut seen_thread_ids = HashSet::new();
-        subtree_thread_ids.push(thread_id);
-        seen_thread_ids.insert(thread_id);
-
-        if let Some(state_db_ctx) = thread.state_db() {
-            for status in [
-                DirectionalThreadSpawnEdgeStatus::Open,
-                DirectionalThreadSpawnEdgeStatus::Closed,
-            ] {
-                for descendant_id in state_db_ctx
-                    .list_thread_spawn_descendants_with_status(thread_id, status)
-                    .await
-                    .map_err(|err| {
-                        CodexErr::Fatal(format!("failed to load thread-spawn descendants: {err}"))
-                    })?
-                {
-                    if seen_thread_ids.insert(descendant_id) {
-                        subtree_thread_ids.push(descendant_id);
-                    }
-                }
-            }
-        }
-
-        Ok(subtree_thread_ids)
-    }
-
     pub async fn start_thread(&self, config: Config) -> CodexResult<NewThread> {
-        // Box delegated thread-spawn futures so these convenience wrappers do
-        // not inline the full spawn path into every caller's async state.
-        Box::pin(self.start_thread_with_tools(
-            config,
-            Vec::new(),
-            /*persist_extended_history*/ false,
-        ))
-        .await
+        Box::pin(self.start_thread_with_tools(config, Vec::new(), false)).await
     }
 
     pub async fn start_thread_with_tools(
@@ -532,7 +356,6 @@ impl ThreadManager {
             config,
             initial_history: InitialHistory::New,
             session_source: None,
-            thread_source: None,
             dynamic_tools,
             persist_extended_history,
             metrics_service_name: None,
@@ -549,58 +372,22 @@ impl ThreadManager {
         let session_source = options
             .session_source
             .unwrap_or_else(|| self.state.session_source.clone());
-        let thread_source = options
-            .thread_source
-            .or_else(|| options.initial_history.get_resumed_thread_source());
         Box::pin(self.state.spawn_thread_with_source(
             options.config,
             options.initial_history,
             Arc::clone(&self.state.auth_manager),
             None,
             session_source,
-            thread_source,
             options.dynamic_tools,
             options.persist_extended_history,
             options.metrics_service_name,
-            /*inherited_shell_snapshot*/ None,
-            /*inherited_exec_policy*/ None,
+            None,
             options.parent_trace,
             options.environments,
-            /*user_shell_override*/ None,
+            None,
         ))
         .await
     }
-
-    // TODO(jif) merge with fork_agent
-    /// Spawn a subagent by forking persisted history from `forked_from_thread_id`.
-    pub async fn spawn_subagent(
-        &self,
-        forked_from_thread_id: ThreadId,
-        mut options: StartThreadOptions,
-    ) -> CodexResult<NewThread> {
-        let fork_source = self.get_thread(forked_from_thread_id).await?;
-        // Persist queued rollout updates before reading the fork snapshot.
-        fork_source.ensure_rollout_materialized().await;
-        fork_source.flush_rollout().await?;
-        let stored_thread = fork_source
-            .read_thread(
-                /*include_archived*/ true, /*include_history*/ true,
-            )
-            .await
-            .map_err(|err| {
-                CodexErr::Fatal(format!(
-                    "failed to read subagent fork source {forked_from_thread_id}: {err}"
-                ))
-            })?;
-        let history = stored_thread_to_initial_history(stored_thread, fork_source.rollout_path())?;
-        options.initial_history = fork_history_from_snapshot(
-            ForkSnapshot::Interrupted,
-            history,
-            InterruptedTurnHistoryMarker::from_config(&options.config),
-        );
-        self.start_thread_with_options(options).await
-    }
-
     pub async fn resume_thread_from_rollout(
         &self,
         config: Config,
@@ -613,7 +400,7 @@ impl ThreadManager {
             config,
             initial_history,
             auth_manager,
-            /*persist_extended_history*/ false,
+            false,
             parent_trace,
         ))
         .await
@@ -628,19 +415,17 @@ impl ThreadManager {
         parent_trace: Option<W3cTraceContext>,
     ) -> CodexResult<NewThread> {
         let environments = Vec::new();
-        let thread_source = initial_history.get_resumed_thread_source();
         Box::pin(self.state.spawn_thread(
             config,
             initial_history,
             auth_manager,
             None,
-            thread_source,
             Vec::new(),
             persist_extended_history,
-            /*metrics_service_name*/ None,
+            None,
             parent_trace,
             environments,
-            /*user_shell_override*/ None,
+            None,
         ))
         .await
     }
@@ -656,13 +441,12 @@ impl ThreadManager {
             InitialHistory::New,
             Arc::clone(&self.state.auth_manager),
             None,
-            /*thread_source*/ None,
             Vec::new(),
-            /*persist_extended_history*/ false,
-            /*metrics_service_name*/ None,
-            /*parent_trace*/ None,
+            false,
+            None,
+            None,
             environments,
-            /*user_shell_override*/ Some(user_shell_override),
+            Some(user_shell_override),
         ))
         .await
     }
@@ -676,33 +460,25 @@ impl ThreadManager {
     ) -> CodexResult<NewThread> {
         let initial_history = self.initial_history_from_rollout_path(rollout_path).await?;
         let environments = Vec::new();
-        let thread_source = initial_history.get_resumed_thread_source();
         Box::pin(self.state.spawn_thread(
             config,
             initial_history,
             auth_manager,
             None,
-            thread_source,
             Vec::new(),
-            /*persist_extended_history*/ false,
-            /*metrics_service_name*/ None,
-            /*parent_trace*/ None,
+            false,
+            None,
+            None,
             environments,
-            /*user_shell_override*/ Some(user_shell_override),
+            Some(user_shell_override),
         ))
         .await
     }
 
-    /// Removes the thread from the manager's internal map, though the thread is stored
-    /// as `Arc<CodexThread>`, it is possible that other references to it exist elsewhere.
-    /// Returns the thread if the thread was found and removed.
     pub async fn remove_thread(&self, thread_id: &ThreadId) -> Option<Arc<CodexThread>> {
         self.state.threads.write().await.remove(thread_id)
     }
 
-    /// Tries to shut down all tracked threads concurrently within the provided timeout.
-    /// Threads that complete shutdown are removed from the manager; incomplete shutdowns
-    /// remain tracked so callers can retry or inspect them later.
     pub async fn shutdown_all_threads_bounded(&self, timeout: Duration) -> ThreadShutdownReport {
         let threads = {
             let threads = self.state.threads.read().await;
@@ -751,16 +527,11 @@ impl ThreadManager {
         report
     }
 
-    /// Fork an existing thread by snapshotting rollout history according to
-    /// `snapshot` and starting a new thread with identical configuration
-    /// (unless overridden by the caller's `config`). The new thread will have
-    /// a fresh id.
     pub async fn fork_thread<S>(
         &self,
         snapshot: S,
         config: Config,
         path: PathBuf,
-        thread_source: Option<ThreadSource>,
         persist_extended_history: bool,
         parent_trace: Option<W3cTraceContext>,
     ) -> CodexResult<NewThread>
@@ -773,7 +544,6 @@ impl ThreadManager {
             snapshot,
             config,
             history,
-            thread_source,
             persist_extended_history,
             parent_trace,
         )
@@ -798,13 +568,11 @@ impl ThreadManager {
         stored_thread_to_initial_history(stored_thread, Some(requested_rollout_path))
     }
 
-    /// Fork an existing thread from already-loaded store history.
     pub async fn fork_thread_from_history<S>(
         &self,
         snapshot: S,
         config: Config,
         history: InitialHistory,
-        thread_source: Option<ThreadSource>,
         persist_extended_history: bool,
         parent_trace: Option<W3cTraceContext>,
     ) -> CodexResult<NewThread>
@@ -815,7 +583,6 @@ impl ThreadManager {
             snapshot.into(),
             config,
             history,
-            thread_source,
             persist_extended_history,
             parent_trace,
         )
@@ -827,11 +594,10 @@ impl ThreadManager {
         snapshot: ForkSnapshot,
         config: Config,
         history: InitialHistory,
-        thread_source: Option<ThreadSource>,
         persist_extended_history: bool,
         parent_trace: Option<W3cTraceContext>,
     ) -> CodexResult<NewThread> {
-        let interrupted_marker = InterruptedTurnHistoryMarker::from_config(&config);
+        let interrupted_marker = InterruptedTurnHistoryMarker::from_config();
         let history = fork_history_from_snapshot(snapshot, history, interrupted_marker);
         let environments = Vec::new();
         Box::pin(self.state.spawn_thread(
@@ -839,13 +605,12 @@ impl ThreadManager {
             history,
             Arc::clone(&self.state.auth_manager),
             None,
-            thread_source,
             Vec::new(),
             persist_extended_history,
-            /*metrics_service_name*/ None,
+            None,
             parent_trace,
             environments,
-            /*user_shell_override*/ None,
+            None,
         ))
         .await
     }
@@ -870,40 +635,16 @@ impl ThreadManagerState {
             .read()
             .await
             .iter()
-            .filter_map(|(thread_id, thread)| {
-                (!thread.session_source.is_internal()).then_some(*thread_id)
-            })
+            .map(|(thread_id, _)| *thread_id)
             .collect()
     }
 
-    /// List parent-child edges for currently loaded thread-spawn agents.
-    pub(crate) async fn list_live_thread_spawn_edges(&self) -> Vec<(ThreadId, ThreadId)> {
-        self.threads
-            .read()
-            .await
-            .iter()
-            .filter_map(|(thread_id, thread)| {
-                if thread.session_source.is_internal() {
-                    return None;
-                }
-                match &thread.session_source {
-                    SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-                        parent_thread_id,
-                        ..
-                    }) => Some((*parent_thread_id, *thread_id)),
-                    _ => None,
-                }
-            })
-            .collect()
-    }
-
-    /// Fetch a thread by ID or return ThreadNotFound.
     pub(crate) async fn get_thread(&self, thread_id: ThreadId) -> CodexResult<Arc<CodexThread>> {
         let threads = self.threads.read().await;
-        match threads.get(&thread_id) {
-            Some(thread) if !thread.session_source.is_internal() => Ok(thread.clone()),
-            Some(_) | None => Err(CodexErr::ThreadNotFound(thread_id)),
-        }
+        threads
+            .get(&thread_id)
+            .cloned()
+            .ok_or(CodexErr::ThreadNotFound(thread_id))
     }
 
     pub(crate) async fn read_stored_thread(
@@ -931,7 +672,6 @@ impl ThreadManagerState {
             })
     }
 
-    /// Send an operation to a thread by ID.
     pub(crate) async fn send_op(&self, thread_id: ThreadId, op: Op) -> CodexResult<String> {
         let thread = self.get_thread(thread_id).await?;
         if let Some(ops_log) = &self.ops_log
@@ -943,7 +683,7 @@ impl ThreadManagerState {
     }
 
     #[cfg(test)]
-    /// Append a prebuilt message to a thread by ID outside the normal user-input path.
+
     pub(crate) async fn append_message(
         &self,
         thread_id: ThreadId,
@@ -953,12 +693,10 @@ impl ThreadManagerState {
         thread.append_message(message).await
     }
 
-    /// Remove a thread from the manager by ID, returning it when present.
     pub(crate) async fn remove_thread(&self, thread_id: &ThreadId) -> Option<Arc<CodexThread>> {
         self.threads.write().await.remove(thread_id)
     }
 
-    /// Spawn a new thread with no history using a provided config.
     pub(crate) async fn spawn_new_thread(
         &self,
         config: Config,
@@ -968,12 +706,11 @@ impl ThreadManagerState {
             config,
             parent_session_id,
             self.session_source.clone(),
-            /*thread_source*/ None,
-            /*persist_extended_history*/ false,
-            /*metrics_service_name*/ None,
-            /*inherited_shell_snapshot*/ None,
-            /*inherited_exec_policy*/ None,
-            /*environments*/ None,
+            Vec::new(),
+            false,
+            None,
+            None,
+            None,
         ))
         .await
     }
@@ -984,11 +721,10 @@ impl ThreadManagerState {
         config: Config,
         parent_session_id: Option<SessionId>,
         session_source: SessionSource,
-        thread_source: Option<ThreadSource>,
+        dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
         persist_extended_history: bool,
         metrics_service_name: Option<String>,
         inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
-        inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
         environments: Option<Vec<TurnEnvironmentSelection>>,
     ) -> CodexResult<NewThread> {
         let environments = environments.unwrap_or_default();
@@ -998,15 +734,13 @@ impl ThreadManagerState {
             Arc::clone(&self.auth_manager),
             parent_session_id,
             session_source,
-            thread_source,
-            Vec::new(),
+            dynamic_tools,
             persist_extended_history,
             metrics_service_name,
             inherited_shell_snapshot,
-            inherited_exec_policy,
-            /*parent_trace*/ None,
+            None,
             environments,
-            /*user_shell_override*/ None,
+            None,
         ))
         .await
     }
@@ -1021,25 +755,21 @@ impl ThreadManagerState {
             parent_session_id,
             session_source,
             inherited_shell_snapshot,
-            inherited_exec_policy,
         } = options;
         let environments = Vec::new();
-        let thread_source = initial_history.get_resumed_thread_source();
         Box::pin(self.spawn_thread_with_source(
             config,
             initial_history,
             Arc::clone(&self.auth_manager),
             parent_session_id,
             session_source,
-            thread_source,
             Vec::new(),
-            /*persist_extended_history*/ false,
-            /*metrics_service_name*/ None,
+            false,
+            None,
             inherited_shell_snapshot,
-            inherited_exec_policy,
-            /*parent_trace*/ None,
+            None,
             environments,
-            /*user_shell_override*/ None,
+            None,
         ))
         .await
     }
@@ -1051,10 +781,8 @@ impl ThreadManagerState {
         initial_history: InitialHistory,
         parent_session_id: Option<SessionId>,
         session_source: SessionSource,
-        thread_source: Option<ThreadSource>,
         persist_extended_history: bool,
         inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
-        inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
         environments: Option<Vec<TurnEnvironmentSelection>>,
     ) -> CodexResult<NewThread> {
         let environments = environments.unwrap_or_default();
@@ -1064,20 +792,17 @@ impl ThreadManagerState {
             Arc::clone(&self.auth_manager),
             parent_session_id,
             session_source,
-            thread_source,
             Vec::new(),
             persist_extended_history,
-            /*metrics_service_name*/ None,
+            None,
             inherited_shell_snapshot,
-            inherited_exec_policy,
-            /*parent_trace*/ None,
+            None,
             environments,
-            /*user_shell_override*/ None,
+            None,
         ))
         .await
     }
 
-    /// Spawn a new thread with optional history and register it with the manager.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn spawn_thread(
         &self,
@@ -1085,7 +810,6 @@ impl ThreadManagerState {
         initial_history: InitialHistory,
         auth_manager: Arc<AuthManager>,
         parent_session_id: Option<SessionId>,
-        thread_source: Option<ThreadSource>,
         dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
         persist_extended_history: bool,
         metrics_service_name: Option<String>,
@@ -1099,12 +823,10 @@ impl ThreadManagerState {
             auth_manager,
             parent_session_id,
             self.session_source.clone(),
-            thread_source,
             dynamic_tools,
             persist_extended_history,
             metrics_service_name,
-            /*inherited_shell_snapshot*/ None,
-            /*inherited_exec_policy*/ None,
+            None,
             parent_trace,
             environments,
             user_shell_override,
@@ -1118,19 +840,17 @@ impl ThreadManagerState {
         config: Config,
         initial_history: InitialHistory,
         auth_manager: Arc<AuthManager>,
-        mut parent_session_id: Option<SessionId>,
+        parent_session_id: Option<SessionId>,
         session_source: SessionSource,
-        thread_source: Option<ThreadSource>,
         dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
         persist_extended_history: bool,
         metrics_service_name: Option<String>,
         inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
-        inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
         parent_trace: Option<W3cTraceContext>,
         environments: Vec<TurnEnvironmentSelection>,
         user_shell_override: Option<crate::shell::Shell>,
     ) -> CodexResult<NewThread> {
-        let is_resumed_thread = matches!(&initial_history, InitialHistory::Resumed(_));
+        let _is_resumed_thread = matches!(&initial_history, InitialHistory::Resumed(_));
         if let InitialHistory::Resumed(resumed) = &initial_history {
             let mut threads = self.threads.write().await;
             if let Some(thread) = threads.get(&resumed.conversation_id).cloned() {
@@ -1153,32 +873,8 @@ impl ThreadManagerState {
             }
         }
         let environment_selections = ResolvedTurnEnvironments::from_selections(environments);
-        // Fresh thread-spawn children inherit their parent's rollout trace
-        // context. Other starts use the disabled/default context so this file
-        // does not depend on the removed rollout-trace crate directly.
-        let parent_rollout_thread_trace = match &session_source {
-            SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-                parent_thread_id, ..
-            }) if !matches!(initial_history, InitialHistory::Resumed(_)) => self
-                .get_thread(*parent_thread_id)
-                .await
-                .ok()
-                .map(|thread| thread.codex.session.services.rollout_thread_trace.clone())
-                .unwrap_or_default(),
-            _ => Default::default(),
-        };
+
         let tracked_session_source = session_source.clone();
-        if parent_session_id.is_none()
-            && let SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-                parent_thread_id, ..
-            }) = &session_source
-        {
-            parent_session_id = self
-                .get_thread(*parent_thread_id)
-                .await
-                .ok()
-                .map(|thread| thread.codex.session.session_id());
-        }
         let CodexSpawnOk {
             codex, thread_id, ..
         } = Codex::spawn(CodexSpawnArgs {
@@ -1186,20 +882,13 @@ impl ThreadManagerState {
             installation_id: self.installation_id.clone(),
             auth_manager,
             models_manager: Arc::clone(&self.models_manager),
-            environment_manager: Arc::clone(&self.environment_manager),
-            skills_manager: Arc::clone(&self.skills_manager),
-            plugins_manager: Arc::clone(&self.plugins_manager),
-            mcp_manager: Arc::clone(&self.mcp_manager),
             conversation_history: initial_history,
             session_source,
-            thread_source,
-            parent_session_id,
             dynamic_tools,
+            parent_session_id,
             persist_extended_history,
             metrics_service_name,
             inherited_shell_snapshot,
-            inherited_exec_policy,
-            parent_rollout_thread_trace,
             user_shell_override,
             parent_trace,
             environment_selections,
@@ -1209,11 +898,6 @@ impl ThreadManagerState {
         let new_thread = self
             .finalize_thread_spawn(codex, thread_id, tracked_session_source)
             .await?;
-        if is_resumed_thread {
-            if let Err(err) = new_thread.thread.apply_goal_resume_runtime_effects().await {
-                warn!("failed to apply goal resume runtime effects: {err}");
-            }
-        }
         Ok(new_thread)
     }
 
@@ -1263,7 +947,6 @@ impl ThreadManagerState {
     pub(crate) fn notify_thread_created(&self, thread_id: ThreadId) {
         let _ = self.thread_created_tx.send(thread_id);
     }
-
 }
 
 fn stored_thread_to_initial_history(
@@ -1304,12 +987,6 @@ fn thread_store_metadata_update_error(thread_id: ThreadId, err: ThreadStoreError
     }
 }
 
-/// Return a fork snapshot cut strictly before the nth user message (0-based).
-///
-/// Out-of-range values keep the full committed history at a turn boundary, but
-/// when the source thread is currently mid-turn they fall back to cutting
-/// before the active turn's opening boundary so the fork omits the unfinished
-/// suffix entirely.
 fn truncate_before_nth_user_message(
     history: InitialHistory,
     n: usize,
@@ -1382,9 +1059,6 @@ fn snapshot_turn_state(history: &InitialHistory) -> SnapshotTurnState {
         };
     };
 
-    // Synthetic fork/resume histories can contain user/assistant response items
-    // without explicit turn lifecycle events. If the persisted snapshot has no
-    // terminating boundary after its last user message, treat it as mid-turn.
     SnapshotTurnState {
         ends_mid_turn: !rollout_items[last_user_position + 1..].iter().any(|item| {
             matches!(
@@ -1427,9 +1101,6 @@ fn fork_history_from_snapshot(
     }
 }
 
-/// Append the same persisted interrupt boundary used by the live interrupt path
-/// to an existing fork snapshot after the source thread has been confirmed to
-/// be mid-turn.
 fn append_interrupted_boundary(
     history: InitialHistory,
     turn_id: Option<String>,
@@ -1467,7 +1138,3 @@ fn append_interrupted_boundary(
         }
     }
 }
-
-#[cfg(test)]
-#[path = "thread_manager_tests.rs"]
-mod tests;

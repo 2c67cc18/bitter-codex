@@ -1,8 +1,3 @@
-//! Line-based tag block parsing for streamed text.
-//!
-//! The parser buffers each line until it can disprove that the line is a tag,
-//! which is required for tags that must appear alone on a line.
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TagSpec<T> {
     pub(crate) open: &'static str,
@@ -18,7 +13,6 @@ pub(crate) enum TaggedLineSegment<T> {
     TagEnd(T),
 }
 
-/// Stateful line parser that splits input into normal text vs tag blocks.
 #[derive(Debug, Default)]
 pub(crate) struct TaggedLineParser<T>
 where

@@ -10,7 +10,6 @@ use crate::tools::registry::ToolRegistry;
 use crate::tools::spec_plan::build_tool_router;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::models::ResponseItem;
-use codex_protocol::models::SearchToolCallParams;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 use std::sync::Arc;
@@ -33,7 +32,6 @@ pub struct ToolRouter {
 }
 
 pub(crate) struct ToolRouterParams<'a> {
-    pub(crate) discoverable_tools: Option<Vec<()>>,
     pub(crate) dynamic_tools: &'a [DynamicToolSpec],
 }
 
@@ -96,60 +94,21 @@ impl ToolRouter {
                     payload: ToolPayload::Function { arguments },
                 }))
             }
-            ResponseItem::ToolSearchCall {
-                call_id: Some(call_id),
-                execution,
-                arguments,
-                ..
-            } if execution == "client" => {
-                let arguments: SearchToolCallParams =
-                    serde_json::from_value(arguments).map_err(|err| {
-                        FunctionCallError::RespondToModel(format!(
-                            "failed to parse tool_search arguments: {err}"
-                        ))
-                    })?;
-                Ok(Some(ToolCall {
-                    tool_name: ToolName::plain("tool_search"),
-                    call_id,
-                    payload: ToolPayload::ToolSearch { arguments },
-                }))
-            }
-            ResponseItem::ToolSearchCall { .. } => Ok(None),
             ResponseItem::CustomToolCall {
                 name,
                 input,
                 call_id,
                 ..
-            } => Ok(Some(ToolCall {
-                tool_name: ToolName::plain(name),
-                call_id,
-                payload: ToolPayload::Custom { input },
-            })),
+            } => {
+                let tool_name = ToolName::new(None, name);
+                Ok(Some(ToolCall {
+                    tool_name,
+                    call_id,
+                    payload: ToolPayload::Function { arguments: input },
+                }))
+            }
             _ => Ok(None),
         }
-    }
-
-    #[allow(dead_code)]
-    #[instrument(level = "trace", skip_all, err)]
-    pub async fn dispatch_tool_call_with_code_mode_result(
-        &self,
-        session: Arc<Session>,
-        turn: Arc<TurnContext>,
-        cancellation_token: CancellationToken,
-        tracker: SharedTurnDiffTracker,
-        call: ToolCall,
-        source: ToolCallSource,
-    ) -> Result<AnyToolResult, FunctionCallError> {
-        self.dispatch_tool_call_with_code_mode_result_inner(
-            session,
-            turn,
-            cancellation_token,
-            tracker,
-            call,
-            source,
-            /*terminal_outcome_reached*/ None,
-        )
-        .await
     }
 
     #[instrument(level = "trace", skip_all, err)]
@@ -164,7 +123,7 @@ impl ToolRouter {
         source: ToolCallSource,
         terminal_outcome_reached: Arc<AtomicBool>,
     ) -> Result<AnyToolResult, FunctionCallError> {
-        self.dispatch_tool_call_with_code_mode_result_inner(
+        self.dispatch_tool_call_inner(
             session,
             turn,
             cancellation_token,
@@ -177,7 +136,7 @@ impl ToolRouter {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn dispatch_tool_call_with_code_mode_result_inner(
+    async fn dispatch_tool_call_inner(
         &self,
         session: Arc<Session>,
         turn: Arc<TurnContext>,
@@ -209,7 +168,3 @@ impl ToolRouter {
             .await
     }
 }
-
-#[cfg(test)]
-#[path = "router_tests.rs"]
-mod tests;

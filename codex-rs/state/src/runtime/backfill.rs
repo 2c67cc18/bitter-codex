@@ -15,11 +15,6 @@ WHERE id = 1
         crate::BackfillState::try_from_row(&row)
     }
 
-    /// Attempt to claim ownership of rollout metadata backfill.
-    ///
-    /// Returns `true` when this runtime claimed the backfill worker slot.
-    /// Returns `false` if backfill is already complete or currently owned by a
-    /// non-expired worker.
     pub async fn try_claim_backfill(&self, lease_seconds: i64) -> anyhow::Result<bool> {
         self.ensure_backfill_state_row().await?;
         let now = Utc::now().timestamp();
@@ -43,7 +38,6 @@ WHERE id = 1
         Ok(result.rows_affected() == 1)
     }
 
-    /// Mark rollout metadata backfill as running.
     pub async fn mark_backfill_running(&self) -> anyhow::Result<()> {
         self.ensure_backfill_state_row().await?;
         sqlx::query(
@@ -60,7 +54,6 @@ WHERE id = 1
         Ok(())
     }
 
-    /// Persist rollout metadata backfill progress.
     pub async fn checkpoint_backfill(&self, watermark: &str) -> anyhow::Result<()> {
         self.ensure_backfill_state_row().await?;
         sqlx::query(
@@ -78,7 +71,6 @@ WHERE id = 1
         Ok(())
     }
 
-    /// Mark rollout metadata backfill as complete.
     pub async fn mark_backfill_complete(&self, last_watermark: Option<&str>) -> anyhow::Result<()> {
         self.ensure_backfill_state_row().await?;
         let now = Utc::now().timestamp();
@@ -175,13 +167,13 @@ mod tests {
             .expect("initialize runtime");
 
         let claimed = runtime
-            .try_claim_backfill(/*lease_seconds*/ 3600)
+            .try_claim_backfill(3600)
             .await
             .expect("initial backfill claim");
         assert_eq!(claimed, true);
 
         let duplicate_claim = runtime
-            .try_claim_backfill(/*lease_seconds*/ 3600)
+            .try_claim_backfill(3600)
             .await
             .expect("duplicate backfill claim");
         assert_eq!(duplicate_claim, false);
@@ -201,17 +193,17 @@ WHERE id = 1
         .expect("force stale backfill lease");
 
         let stale_claim = runtime
-            .try_claim_backfill(/*lease_seconds*/ 10)
+            .try_claim_backfill(10)
             .await
             .expect("stale backfill claim");
         assert_eq!(stale_claim, true);
 
         runtime
-            .mark_backfill_complete(/*last_watermark*/ None)
+            .mark_backfill_complete(None)
             .await
             .expect("mark complete");
         let claim_after_complete = runtime
-            .try_claim_backfill(/*lease_seconds*/ 3600)
+            .try_claim_backfill(3600)
             .await
             .expect("claim after complete");
         assert_eq!(claim_after_complete, false);

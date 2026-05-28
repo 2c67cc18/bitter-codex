@@ -10,9 +10,6 @@ use codex_otel::OtelSettings;
 use codex_otel::OtelTlsConfig as OtelTlsSettings;
 use std::error::Error;
 
-/// Build an OpenTelemetry provider from the app Config.
-///
-/// Returns `None` when OTEL export is disabled.
 pub fn build_provider(
     config: &Config,
     service_version: &str,
@@ -86,8 +83,6 @@ pub fn build_provider(
     })
 }
 
-/// Filter predicate for exporting only Codex-owned events via OTEL.
-/// Keeps events that originated from codex_otel module
 pub fn codex_export_filter(meta: &tracing::Metadata<'_>) -> bool {
     meta.target().starts_with("codex_otel")
 }

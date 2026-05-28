@@ -20,10 +20,8 @@ use crate::spawn::StdioPolicy;
 use crate::spawn::spawn_child_async;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result;
-use codex_protocol::error::SandboxErr;
 use codex_protocol::exec_output::ExecToolCallOutput;
 use codex_protocol::exec_output::StreamOutput;
-use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::ExecCommandOutputDeltaEvent;
@@ -34,35 +32,17 @@ use codex_utils_pty::process_group::kill_child_process_group;
 
 pub const DEFAULT_EXEC_COMMAND_TIMEOUT_MS: u64 = 10_000;
 
-// Hardcode these since it does not seem worth including the libc crate just
-// for these.
 const SIGKILL_CODE: i32 = 9;
 const TIMEOUT_CODE: i32 = 64;
-const EXIT_CODE_SIGNAL_BASE: i32 = 128; // conventional shell: 128 + signal
-const EXEC_TIMEOUT_EXIT_CODE: i32 = 124; // conventional timeout exit code
+const EXIT_CODE_SIGNAL_BASE: i32 = 128;
+const EXEC_TIMEOUT_EXIT_CODE: i32 = 124;
 
-// I/O buffer sizing
-const READ_CHUNK_SIZE: usize = 8192; // bytes per read
-const AGGREGATE_BUFFER_INITIAL_CAPACITY: usize = 8 * 1024; // 8 KiB
-
-/// Hard cap on bytes retained from exec stdout/stderr/aggregated output.
-///
-/// This mirrors unified exec's output cap so a single runaway command cannot
-/// OOM the process by dumping huge amounts of data to stdout/stderr.
+const READ_CHUNK_SIZE: usize = 8192;
+const AGGREGATE_BUFFER_INITIAL_CAPACITY: usize = 8 * 1024;
 const EXEC_OUTPUT_MAX_BYTES: usize = DEFAULT_OUTPUT_BYTES_CAP;
 
-/// Limit the number of ExecCommandOutputDelta events emitted per exec call.
-/// Aggregation still collects full output; only the live event stream is capped.
 pub(crate) const MAX_EXEC_OUTPUT_DELTAS_PER_CALL: usize = 10_000;
-
-// Wait for the stdout/stderr collection tasks but guard against them
-// hanging forever. In the normal case, both pipes are closed once the child
-// terminates so the tasks exit quickly. However, if the child process
-// spawned grandchildren that inherited its stdout/stderr file descriptors
-// those pipes may stay open after we `kill` the direct child on timeout.
-// That would cause the `read_capped` tasks to block on `read()`
-// indefinitely, effectively hanging the whole agent.
-pub const IO_DRAIN_TIMEOUT_MS: u64 = 2_000; // 2 s should be plenty for local pipes
+pub const IO_DRAIN_TIMEOUT_MS: u64 = 2_000;
 
 #[derive(Debug)]
 pub struct ExecParams {
@@ -87,15 +67,12 @@ pub struct ExecRequest {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ExecCapturePolicy {
-    /// Shell-like execs keep the historical output cap and timeout behavior.
     #[default]
     ShellTool,
-    /// Trusted internal helpers can buffer the full child output in memory
-    /// without the shell-oriented output cap or exec-expiration behavior.
+
     FullBuffer,
 }
 
-/// Mechanism to terminate an exec invocation before it finishes naturally.
 #[derive(Clone, Debug)]
 pub enum ExecExpiration {
     Timeout(Duration),
@@ -107,12 +84,10 @@ pub enum ExecExpiration {
     },
 }
 
-/// Why an `ExecExpiration` completed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExecExpirationOutcome {
-    /// The configured timeout elapsed.
     TimedOut,
-    /// The cancellation token was cancelled.
+
     Cancelled,
 }
 
@@ -123,7 +98,6 @@ impl From<Option<u64>> for ExecExpiration {
         })
     }
 }
-
 impl From<u64> for ExecExpiration {
     fn from(timeout_ms: u64) -> Self {
         ExecExpiration::Timeout(Duration::from_millis(timeout_ms))
@@ -131,7 +105,6 @@ impl From<u64> for ExecExpiration {
 }
 
 impl ExecExpiration {
-    /// Waits for this expiration and reports whether it timed out or was cancelled.
     pub async fn wait_with_outcome(self) -> ExecExpirationOutcome {
         match self {
             ExecExpiration::Timeout(duration) => {
@@ -159,7 +132,6 @@ impl ExecExpiration {
         }
     }
 
-    /// If ExecExpiration is a timeout, returns the timeout in milliseconds.
     pub(crate) fn timeout_ms(&self) -> Option<u64> {
         match self {
             ExecExpiration::Timeout(duration) => Some(duration.as_millis() as u64),
@@ -241,26 +213,15 @@ pub struct StdoutStream {
 #[allow(clippy::too_many_arguments)]
 pub async fn process_exec_tool_call(
     params: ExecParams,
-    _permission_profile: &PermissionProfile,
-    _sandbox_cwd: &AbsolutePathBuf,
-    _codex_linux_sandbox_exe: &Option<PathBuf>,
-    _use_legacy_landlock: bool,
     stdout_stream: Option<StdoutStream>,
 ) -> Result<ExecToolCallOutput> {
     let start = Instant::now();
-    let raw_output_result = exec(params, stdout_stream, /*after_spawn*/ None).await;
+    let raw_output_result = exec(params, stdout_stream, None).await;
     let duration = start.elapsed();
     finalize_exec_result(raw_output_result, duration)
 }
 
-/// Transform a portable exec request into the direct local argv/env.
-pub fn build_exec_request(
-    params: ExecParams,
-    _permission_profile: &PermissionProfile,
-    _sandbox_cwd: &AbsolutePathBuf,
-    _codex_linux_sandbox_exe: &Option<PathBuf>,
-    _use_legacy_landlock: bool,
-) -> Result<ExecRequest> {
+pub fn build_exec_request(params: ExecParams) -> Result<ExecRequest> {
     let ExecParams {
         command,
         cwd,
@@ -370,7 +331,9 @@ fn finalize_exec_result(
                     if signal == TIMEOUT_CODE {
                         timed_out = true;
                     } else {
-                        return Err(CodexErr::Sandbox(SandboxErr::Signal(signal)));
+                        return Err(CodexErr::Fatal(format!(
+                            "process terminated by signal {signal}"
+                        )));
                     }
                 }
             }
@@ -391,12 +354,6 @@ fn finalize_exec_result(
                 duration,
                 timed_out,
             };
-
-            if timed_out {
-                return Err(CodexErr::Sandbox(SandboxErr::Timeout {
-                    output: Box::new(exec_output),
-                }));
-            }
 
             Ok(exec_output)
         }
@@ -454,7 +411,6 @@ fn aggregate_output(
         };
     }
 
-    // Under contention, reserve 1/3 for stdout and 2/3 for stderr; rebalance unused stderr to stdout.
     let want_stdout = stdout.text.len().min(max_bytes / 3);
     let want_stderr = stderr.text.len();
     let stderr_take = want_stderr.min(max_bytes.saturating_sub(want_stdout));
@@ -470,18 +426,12 @@ fn aggregate_output(
     }
 }
 
-/// Consumes the output of a child process according to the configured capture
-/// policy.
 async fn consume_output(
     mut child: Child,
     expiration: ExecExpiration,
     capture_policy: ExecCapturePolicy,
     stdout_stream: Option<StdoutStream>,
 ) -> Result<RawExecToolCallOutput> {
-    // Both stdout and stderr were configured with `Stdio::piped()`
-    // above, therefore `take()` should normally return `Some`.  If it doesn't
-    // we treat it as an exceptional I/O error
-
     let stdout_reader = child.stdout.take().ok_or_else(|| {
         CodexErr::Io(io::Error::other(
             "stdout pipe was unexpectedly not available",
@@ -497,13 +447,13 @@ async fn consume_output(
     let stdout_handle = tokio::spawn(read_output(
         BufReader::new(stdout_reader),
         stdout_stream.clone(),
-        /*is_stderr*/ false,
+        false,
         retained_bytes_cap,
     ));
     let stderr_handle = tokio::spawn(read_output(
         BufReader::new(stderr_reader),
         stdout_stream.clone(),
-        /*is_stderr*/ true,
+        true,
         retained_bytes_cap,
     ));
 
@@ -527,18 +477,17 @@ async fn consume_output(
             let exit_status = if timed_out {
                 synthetic_exit_status(EXIT_CODE_SIGNAL_BASE + TIMEOUT_CODE)
             } else {
-                synthetic_exit_status_for_code(/*code*/ 1)
+                synthetic_exit_status(1)
             };
             (exit_status, timed_out)
         }
         _ = tokio::signal::ctrl_c() => {
             kill_child_process_group(&mut child)?;
             child.start_kill()?;
-            (synthetic_exit_status(EXIT_CODE_SIGNAL_BASE + SIGKILL_CODE), false)
+            (synthetic_exit_status(1), false)
         }
     };
 
-    // We need mutable bindings so we can `abort()` them on timeout.
     use tokio::task::JoinHandle;
 
     async fn await_output(
@@ -551,7 +500,6 @@ async fn consume_output(
                 Err(join_err) => Err(std::io::Error::other(join_err)),
             },
             Err(_elapsed) => {
-                // Timeout: abort the task to avoid hanging on open pipes.
                 handle.abort();
                 Ok(StreamOutput {
                     text: Vec::new(),
@@ -566,7 +514,7 @@ async fn consume_output(
 
     let stdout = await_output(&mut stdout_handle, capture_policy.io_drain_timeout()).await?;
     let stderr = await_output(&mut stderr_handle, capture_policy.io_drain_timeout()).await?;
-    let aggregated_output = aggregate_output(&stdout, &stderr, retained_bytes_cap);
+    let aggregated_output = aggregate_output(&stdout, &stderr, Some(EXEC_OUTPUT_MAX_BYTES));
 
     Ok(RawExecToolCallOutput {
         exit_status,
@@ -624,7 +572,6 @@ async fn read_output<R: AsyncRead + Unpin + Send + 'static>(
         } else {
             buf.extend_from_slice(&tmp[..n]);
         }
-        // Continue reading to EOF to avoid back-pressure
     }
 
     Ok(StreamOutput {
@@ -633,31 +580,7 @@ async fn read_output<R: AsyncRead + Unpin + Send + 'static>(
     })
 }
 
-#[cfg(unix)]
 fn synthetic_exit_status(code: i32) -> ExitStatus {
-    use std::os::unix::process::ExitStatusExt;
-    std::process::ExitStatus::from_raw(code)
-}
-
-#[cfg(unix)]
-fn synthetic_exit_status_for_code(code: i32) -> ExitStatus {
     use std::os::unix::process::ExitStatusExt;
     std::process::ExitStatus::from_raw(code << 8)
 }
-
-#[cfg(windows)]
-fn synthetic_exit_status(code: i32) -> ExitStatus {
-    use std::os::windows::process::ExitStatusExt;
-    // On Windows the raw status is a u32. Use a direct cast to avoid
-    // panicking on negative i32 values produced by prior narrowing casts.
-    std::process::ExitStatus::from_raw(code as u32)
-}
-
-#[cfg(windows)]
-fn synthetic_exit_status_for_code(code: i32) -> ExitStatus {
-    synthetic_exit_status(code)
-}
-
-#[cfg(test)]
-#[path = "exec_tests.rs"]
-mod tests;

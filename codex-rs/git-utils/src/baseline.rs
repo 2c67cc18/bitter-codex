@@ -17,7 +17,6 @@ use crate::operations::run_git_for_status;
 const BASELINE_COMMIT_MESSAGE: &str =
     "Initialize Codex git baseline\n\nCo-authored-by: Codex <noreply@openai.com>";
 
-/// File-level change status between a git baseline and the current directory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GitBaselineChangeStatus {
     Added,
@@ -26,7 +25,6 @@ pub enum GitBaselineChangeStatus {
 }
 
 impl GitBaselineChangeStatus {
-    /// Returns the short git-style status label for this change.
     pub fn label(self) -> &'static str {
         match self {
             GitBaselineChangeStatus::Added => "A",
@@ -36,14 +34,12 @@ impl GitBaselineChangeStatus {
     }
 }
 
-/// One changed file between a git baseline and the current directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitBaselineChange {
     pub status: GitBaselineChangeStatus,
     pub path: String,
 }
 
-/// Structured diff from the latest git baseline reset to the current directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitBaselineDiff {
     pub changes: Vec<GitBaselineChange>,
@@ -62,19 +58,11 @@ struct GitBaselineFileEntry {
     mode: EntryMode,
 }
 
-/// Replaces any existing `.git` metadata in `root` with a fresh one-commit baseline.
-///
-/// This is intentionally destructive for `root/.git`. It is meant for internal directories where
-/// git is used only as a baseline/diff implementation detail, not for user repositories.
 pub async fn reset_git_repository(root: &Path) -> anyhow::Result<()> {
     let root = root.to_path_buf();
     task::spawn_blocking(move || reset_git_repository_sync(&root)).await?
 }
 
-/// Ensures `root` has a usable git baseline repository.
-///
-/// Existing usable `.git/` metadata is preserved. Missing or unusable metadata is replaced with a
-/// fresh one-commit baseline.
 pub async fn ensure_git_baseline_repository(root: &Path) -> anyhow::Result<()> {
     let root = root.to_path_buf();
     task::spawn_blocking(move || {
@@ -101,7 +89,6 @@ fn reset_git_repository_sync(root: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Returns the diff between the latest baseline reset and the current directory contents.
 pub async fn diff_since_latest_init(root: &Path) -> anyhow::Result<GitBaselineDiff> {
     let root = root.to_path_buf();
     task::spawn_blocking(move || {
@@ -155,7 +142,7 @@ fn commit_current_tree(repo: &gix::Repository, message: &str) -> anyhow::Result<
 }
 
 fn write_index_from_head(root: &Path) -> anyhow::Result<()> {
-    run_git_for_status(root, ["read-tree", "--reset", "HEAD"], /*env*/ None)
+    run_git_for_status(root, ["read-tree", "--reset", "HEAD"], None)
         .context("write git baseline index from HEAD")
 }
 
@@ -553,7 +540,7 @@ mod tests {
         let home = TempDir::new().expect("tempdir");
         let root = home.path().join("repo");
         fs::create_dir_all(&root).expect("create root");
-        fs::write(root.join("MEMORY.md"), "baseline").expect("write memory");
+        fs::write(root.join("NOTE.md"), "baseline").expect("write note");
 
         reset_git_repository(&root).await.expect("reset repo");
 
@@ -563,7 +550,7 @@ mod tests {
         assert!(!diff.has_changes());
         assert_eq!(diff.unified_diff, "");
         assert_eq!(git_stdout(&root, &["status", "--porcelain"]), "");
-        assert_eq!(git_stdout(&root, &["ls-files"]), "MEMORY.md\n");
+        assert_eq!(git_stdout(&root, &["ls-files"]), "NOTE.md\n");
     }
 
     #[tokio::test]
@@ -571,7 +558,7 @@ mod tests {
         let home = TempDir::new().expect("tempdir");
         let root = home.path().join("repo");
         fs::create_dir_all(&root).expect("create root");
-        fs::write(root.join("MEMORY.md"), "memory").expect("write memory");
+        fs::write(root.join("NOTE.md"), "note").expect("write note");
         gix::init(&root).expect("init git repo without baseline commit");
 
         ensure_git_baseline_repository(&root)
@@ -581,7 +568,7 @@ mod tests {
         let diff = diff_since_latest_init(&root).await.expect("diff");
         assert!(!diff.has_changes());
         assert_eq!(git_stdout(&root, &["status", "--porcelain"]), "");
-        assert_eq!(git_stdout(&root, &["ls-files"]), "MEMORY.md\n");
+        assert_eq!(git_stdout(&root, &["ls-files"]), "NOTE.md\n");
     }
 
     #[cfg(unix)]
@@ -596,7 +583,7 @@ mod tests {
         let hook_path = hooks_dir.join("post-index-change");
 
         fs::create_dir_all(&root).expect("create root");
-        fs::write(root.join("MEMORY.md"), "baseline").expect("write memory");
+        fs::write(root.join("NOTE.md"), "baseline").expect("write note");
         reset_git_repository(&root).await.expect("reset repo");
         fs::create_dir_all(&hooks_dir).expect("create hook dir");
         fs::write(
@@ -634,7 +621,7 @@ mod tests {
         let home = TempDir::new().expect("tempdir");
         let root = home.path().join("repo");
         fs::create_dir_all(root.join("rollout_summaries")).expect("create rollout summaries");
-        fs::write(root.join("MEMORY.md"), "old").expect("write memory");
+        fs::write(root.join("NOTE.md"), "old").expect("write note");
         fs::write(
             root.join("rollout_summaries/deleted.md"),
             "thread_id: 00000000-0000-4000-8000-000000000001\nimportant stale evidence\n",
@@ -642,7 +629,7 @@ mod tests {
         .expect("write rollout summary");
         reset_git_repository(&root).await.expect("reset repo");
 
-        fs::write(root.join("MEMORY.md"), "new").expect("update memory");
+        fs::write(root.join("NOTE.md"), "new").expect("update note");
         fs::write(root.join("memory_summary.md"), "summary").expect("write summary");
         fs::remove_file(root.join("rollout_summaries/deleted.md")).expect("delete summary");
 
@@ -652,7 +639,7 @@ mod tests {
             vec![
                 GitBaselineChange {
                     status: GitBaselineChangeStatus::Modified,
-                    path: "MEMORY.md".to_string(),
+                    path: "NOTE.md".to_string(),
                 },
                 GitBaselineChange {
                     status: GitBaselineChangeStatus::Added,
@@ -664,10 +651,7 @@ mod tests {
                 },
             ]
         );
-        assert!(
-            diff.unified_diff
-                .contains("diff --git a/MEMORY.md b/MEMORY.md")
-        );
+        assert!(diff.unified_diff.contains("diff --git a/NOTE.md b/NOTE.md"));
         assert!(diff.unified_diff.contains("-old"));
         assert!(diff.unified_diff.contains("+new"));
         assert!(
@@ -693,10 +677,10 @@ mod tests {
         let home = TempDir::new().expect("tempdir");
         let root = home.path().join("repo");
         fs::create_dir_all(&root).expect("create root");
-        fs::write(root.join("MEMORY.md"), "old").expect("write memory");
+        fs::write(root.join("NOTE.md"), "old").expect("write note");
         reset_git_repository(&root).await.expect("reset repo");
 
-        fs::write(root.join("MEMORY.md"), "new").expect("update memory");
+        fs::write(root.join("NOTE.md"), "new").expect("update note");
         reset_git_repository(&root).await.expect("reset repo again");
 
         let repo = gix::open(&root).expect("open repo");
@@ -713,8 +697,8 @@ mod tests {
         let root = home.path().join("repo");
         fs::create_dir_all(&root).expect("create root");
         reset_git_repository(&root).await.expect("reset repo");
-        let added_content = b"new uncommitted memory";
-        fs::write(root.join("MEMORY.md"), added_content).expect("write memory");
+        let added_content = b"new uncommitted note";
+        fs::write(root.join("NOTE.md"), added_content).expect("write note");
 
         let diff = diff_since_latest_init(&root).await.expect("diff");
         assert!(diff.has_changes());
@@ -735,19 +719,19 @@ mod tests {
         let home = TempDir::new().expect("tempdir");
         let root = home.path().join("repo");
         fs::create_dir_all(&root).expect("create root");
-        let path = root.join("MEMORY.md");
-        fs::write(&path, "same content").expect("write memory");
+        let path = root.join("NOTE.md");
+        fs::write(&path, "same content").expect("write note");
         reset_git_repository(&root).await.expect("reset repo");
-        let mut permissions = fs::metadata(&path).expect("stat memory").permissions();
+        let mut permissions = fs::metadata(&path).expect("stat note").permissions();
         permissions.set_mode(permissions.mode() | 0o111);
-        fs::set_permissions(&path, permissions).expect("chmod memory");
+        fs::set_permissions(&path, permissions).expect("chmod note");
 
         let diff = diff_since_latest_init(&root).await.expect("diff");
         assert_eq!(
             diff.changes,
             vec![GitBaselineChange {
                 status: GitBaselineChangeStatus::Modified,
-                path: "MEMORY.md".to_string(),
+                path: "NOTE.md".to_string(),
             }]
         );
         assert!(diff.unified_diff.contains("old mode 100644"));

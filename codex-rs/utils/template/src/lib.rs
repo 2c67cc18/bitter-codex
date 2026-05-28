@@ -1,10 +1,3 @@
-//! Minimal strict templating for prompt and text assets.
-//!
-//! Supported syntax:
-//! - `{{ name }}` placeholder interpolation
-//! - `{{{{` for a literal `{{`
-//! - `}}}}` for a literal `}}`
-
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::error::Error;

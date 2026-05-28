@@ -7,11 +7,9 @@ use std::time::SystemTime;
 
 use chrono::DateTime;
 use chrono::Utc;
-use codex_git_utils::GitSha;
 use codex_protocol::ThreadId;
-use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::GitInfo;
-use codex_protocol::protocol::SandboxPolicy;
+use codex_protocol::protocol::GitSha;
 use codex_protocol::protocol::SessionSource;
 use codex_rollout::ARCHIVED_SESSIONS_SUBDIR;
 use codex_rollout::ThreadItem;
@@ -134,13 +132,7 @@ pub(super) fn stored_thread_from_rollout_item(
         cwd: item.cwd.unwrap_or_default(),
         cli_version: item.cli_version.unwrap_or_default(),
         source,
-        thread_source: None,
-        agent_nickname: item.agent_nickname,
-        agent_role: item.agent_role,
-        agent_path: None,
         git_info,
-        approval_mode: AskForApproval::OnRequest,
-        sandbox_policy: SandboxPolicy::new_read_only_policy(),
         token_usage: None,
         first_user_message: item.first_user_message,
         history: None,
@@ -178,7 +170,7 @@ pub(super) fn git_info_from_parts(
         return None;
     }
     Some(GitInfo {
-        commit_hash: sha.as_deref().map(GitSha::new),
+        commit_hash: sha.as_ref().map(|sha| GitSha(sha.clone())),
         branch,
         repository_url: origin_url,
     })

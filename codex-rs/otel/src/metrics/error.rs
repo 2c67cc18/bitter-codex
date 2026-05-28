@@ -4,7 +4,6 @@ pub type Result<T> = std::result::Result<T, MetricsError>;
 
 #[derive(Debug, Error)]
 pub enum MetricsError {
-    // Metrics.
     #[error("metric name cannot be empty")]
     EmptyMetricName,
     #[error("metric name contains invalid characters: {name}")]

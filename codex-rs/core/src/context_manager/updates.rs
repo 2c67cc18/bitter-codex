@@ -1,15 +1,9 @@
-use crate::context::CollaborationModeInstructions;
 use crate::context::ContextualUserFragment;
 use crate::context::EnvironmentContext;
 use crate::context::ModelSwitchInstructions;
-use crate::context::PersonalitySpecInstructions;
-use crate::context::RealtimeEndInstructions;
-use crate::context::RealtimeStartInstructions;
-use crate::context::RealtimeStartWithInstructions;
 use crate::session::PreviousTurnSettings;
 use crate::session::turn_context::TurnContext;
 use crate::shell::Shell;
-use codex_protocol::config_types::Personality;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelInfo;
@@ -36,116 +30,12 @@ fn build_environment_update_item(
     ))
 }
 
-fn build_permissions_update_item(
-    previous: Option<&TurnContextItem>,
-    next: &TurnContext,
-    next_permissions_instructions: Option<&str>,
-) -> Option<String> {
-    if !next.config.include_permissions_instructions {
-        return None;
-    }
-
-    let prev = previous?;
-    if prev.permission_profile() == next.permission_profile()
-        && prev.approval_policy == next.approval_policy.value()
-    {
-        return None;
-    }
-
-    next_permissions_instructions.map(ToOwned::to_owned)
-}
-
-fn build_collaboration_mode_update_item(
-    previous: Option<&TurnContextItem>,
-    next: &TurnContext,
-) -> Option<String> {
-    if !next.config.include_collaboration_mode_instructions {
-        return None;
-    }
-
-    let prev = previous?;
-    if prev.collaboration_mode.as_ref() != Some(&next.collaboration_mode) {
-        // If the next mode has empty developer instructions, this returns None and we emit no
-        // update, so prior collaboration instructions remain in the prompt history.
-        Some(
-            CollaborationModeInstructions::from_collaboration_mode(&next.collaboration_mode)?
-                .render(),
-        )
-    } else {
-        None
-    }
-}
-
-pub(crate) fn build_realtime_update_item(
-    previous: Option<&TurnContextItem>,
-    previous_turn_settings: Option<&PreviousTurnSettings>,
-    next: &TurnContext,
-) -> Option<String> {
-    match (
-        previous.and_then(|item| item.realtime_active),
-        next.realtime_active,
-    ) {
-        (Some(true), false) => Some(RealtimeEndInstructions::new("inactive").render()),
-        (Some(false), true) | (None, true) => Some(
-            if let Some(instructions) = next
-                .config
-                .experimental_realtime_start_instructions
-                .as_deref()
-            {
-                RealtimeStartWithInstructions::new(instructions).render()
-            } else {
-                RealtimeStartInstructions.render()
-            },
-        ),
-        (Some(true), true) | (Some(false), false) => None,
-        (None, false) => previous_turn_settings
-            .and_then(|settings| settings.realtime_active)
-            .filter(|realtime_active| *realtime_active)
-            .map(|_| RealtimeEndInstructions::new("inactive").render()),
-    }
-}
-
-pub(crate) fn build_initial_realtime_item(
-    previous: Option<&TurnContextItem>,
-    previous_turn_settings: Option<&PreviousTurnSettings>,
-    next: &TurnContext,
-) -> Option<String> {
-    build_realtime_update_item(previous, previous_turn_settings, next)
-}
-
-fn build_personality_update_item(
-    previous: Option<&TurnContextItem>,
-    next: &TurnContext,
-    personality_feature_enabled: bool,
-) -> Option<String> {
-    if !personality_feature_enabled {
-        return None;
-    }
-    let previous = previous?;
-    if next.model_info.slug != previous.model {
-        return None;
-    }
-
-    if let Some(personality) = next.personality
-        && next.personality != previous.personality
-    {
-        let model_info = &next.model_info;
-        let personality_message = personality_message_for(model_info, personality);
-        personality_message.map(|message| PersonalitySpecInstructions::new(message).render())
-    } else {
-        None
-    }
-}
-
-pub(crate) fn personality_message_for(
-    model_info: &ModelInfo,
-    personality: Personality,
-) -> Option<String> {
+fn model_instructions_from_info(model_info: &ModelInfo) -> Option<String> {
     model_info
         .model_messages
         .as_ref()
-        .and_then(|spec| spec.get_personality_message(Some(personality)))
         .filter(|message| !message.is_empty())
+        .map(|_| model_info.get_model_instructions())
 }
 
 pub(crate) fn build_model_instructions_update_item(
@@ -156,8 +46,8 @@ pub(crate) fn build_model_instructions_update_item(
     if previous_turn_settings.model == next.model_info.slug {
         return None;
     }
+    let model_instructions = model_instructions_from_info(&next.model_info)?;
 
-    let model_instructions = next.model_info.get_model_instructions(next.personality);
     if model_instructions.is_empty() {
         return None;
     }
@@ -196,23 +86,12 @@ pub(crate) fn build_settings_update_items(
     previous_turn_settings: Option<&PreviousTurnSettings>,
     next: &TurnContext,
     shell: &Shell,
-    next_permissions_instructions: Option<&str>,
-    personality_feature_enabled: bool,
 ) -> Vec<ResponseItem> {
-    // TODO(ccunningham): build_settings_update_items still does not cover every
-    // model-visible item emitted by build_initial_context. Persist the remaining
-    // inputs or add explicit replay events so fork/resume can diff everything
-    // deterministically.
     let contextual_user_message = build_environment_update_item(previous, next, shell);
-    let developer_update_sections = [
-        // Keep model-switch instructions first so model-specific guidance is read before
-        // any other context diffs on this turn.
-        build_model_instructions_update_item(previous_turn_settings, next),
-        build_permissions_update_item(previous, next, next_permissions_instructions),
-        build_collaboration_mode_update_item(previous, next),
-        build_realtime_update_item(previous, previous_turn_settings, next),
-        build_personality_update_item(previous, next, personality_feature_enabled),
-    ]
+    let developer_update_sections = [build_model_instructions_update_item(
+        previous_turn_settings,
+        next,
+    )]
     .into_iter()
     .flatten()
     .collect();

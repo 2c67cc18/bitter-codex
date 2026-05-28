@@ -4,7 +4,6 @@ use codex_arg0::Arg0DispatchPaths;
 use codex_config::ConfigLayerStackOrdering;
 use codex_config::LoaderOverrides;
 use codex_config::NoopThreadConfigLoader;
-use codex_config::RemoteThreadConfigLoader;
 use codex_config::ThreadConfigLoader;
 use codex_core::config::Config;
 use codex_core::resolve_installation_id;
@@ -28,36 +27,24 @@ use crate::outgoing_message::QueuedOutgoingMessage;
 use crate::transport::CHANNEL_CAPACITY;
 use crate::transport::ConnectionState;
 use crate::transport::OutboundConnectionState;
-use crate::transport::RemoteControlStartConfig;
 use crate::transport::TransportEvent;
 use crate::transport::acquire_app_server_startup_lock;
 use crate::transport::app_server_startup_lock_path;
-use crate::transport::auth::policy_from_settings;
 use crate::transport::prepare_control_socket_path;
 use crate::transport::route_outgoing_envelope;
 use crate::transport::start_control_socket_acceptor;
-use crate::transport::start_remote_control;
-use crate::transport::start_stdio_connection;
-use crate::transport::start_websocket_acceptor;
 use codex_app_server_protocol::ConfigLayerSource;
 use codex_app_server_protocol::ConfigWarningNotification;
 use codex_app_server_protocol::JSONRPCMessage;
-use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::TextPosition as AppTextPosition;
 use codex_app_server_protocol::TextRange as AppTextRange;
 use codex_config::ConfigLoadError;
 use codex_config::TextRange as CoreTextRange;
-use codex_core::ExecPolicyError;
-use codex_core::check_execpolicy_for_warnings;
 use codex_core::config::find_codex_home;
-use codex_exec_server::EnvironmentManager;
-use codex_exec_server::ExecServerRuntimePaths;
-use codex_feedback::CodexFeedback;
 use codex_protocol::protocol::SessionSource;
 use codex_rollout::state_db as rollout_state_db;
 use codex_state::log_db;
 use tokio::sync::mpsc;
-use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
@@ -72,27 +59,18 @@ use tracing_subscriber::registry::Registry;
 use tracing_subscriber::util::SubscriberInitExt;
 
 mod app_server_tracing;
-mod attestation;
 mod bespoke_event_handling;
-mod command_exec;
-mod config;
 mod config_manager;
 mod config_manager_service;
 mod connection_rpc_gate;
-mod dynamic_tools;
 mod error_code;
-mod filters;
-mod fs_watch;
-mod fuzzy_file_search;
 pub mod in_process;
-mod mcp_refresh;
 mod message_processor;
 mod models;
 mod outgoing_message;
 mod request_processors;
 mod request_serialization;
 mod server_request_error;
-mod skills_watcher;
 mod thread_state;
 mod thread_status;
 mod transport;
@@ -101,9 +79,6 @@ pub use crate::error_code::INPUT_TOO_LARGE_ERROR_CODE;
 pub use crate::error_code::INVALID_PARAMS_ERROR_CODE;
 pub use crate::transport::AppServerTransport;
 pub use crate::transport::app_server_control_socket_path;
-pub use crate::transport::auth::AppServerWebsocketAuthArgs;
-pub use crate::transport::auth::AppServerWebsocketAuthSettings;
-pub use crate::transport::auth::WebsocketAuthCliMode;
 
 const LOG_FORMAT_ENV_VAR: &str = "LOG_FORMAT";
 const OTEL_SERVICE_NAME: &str = "codex-app-server";
@@ -116,35 +91,23 @@ enum LogFormat {
 
 type StderrLogLayer = Box<dyn Layer<Registry> + Send + Sync + 'static>;
 
-fn configured_thread_config_loader(config: &Config) -> Arc<dyn ThreadConfigLoader> {
-    match config.experimental_thread_config_endpoint.as_deref() {
-        Some(endpoint) => Arc::new(RemoteThreadConfigLoader::new(endpoint)),
-        None => Arc::new(NoopThreadConfigLoader),
-    }
+fn configured_thread_config_loader() -> Arc<dyn ThreadConfigLoader> {
+    Arc::new(NoopThreadConfigLoader)
 }
 
-/// Control-plane messages from the processor/transport side to the outbound router task.
-///
-/// `run_main_with_transport_options` uses two loops/tasks:
-/// - processor loop: handles incoming JSON-RPC and request dispatch
-/// - outbound loop: performs potentially slow writes to per-connection writers
-///
-/// `OutboundControlEvent` keeps those loops coordinated without sharing mutable
-/// connection state directly. In particular, the outbound loop needs to know
-/// when a connection opens/closes so it can route messages correctly.
 enum OutboundControlEvent {
-    /// Register a new writer for an opened connection.
     Opened {
         connection_id: ConnectionId,
         writer: mpsc::Sender<QueuedOutgoingMessage>,
         disconnect_sender: Option<CancellationToken>,
         initialized: Arc<AtomicBool>,
-        experimental_api_enabled: Arc<AtomicBool>,
         opted_out_notification_methods: Arc<RwLock<HashSet<String>>>,
     },
-    /// Remove state for a closed/disconnected connection.
-    Closed { connection_id: ConnectionId },
-    /// Disconnect all connection-oriented clients during graceful restart.
+
+    Closed {
+        connection_id: ConnectionId,
+    },
+
     DisconnectAll,
 }
 
@@ -277,28 +240,6 @@ fn config_error_location(err: &std::io::Error) -> Option<(String, AppTextRange)>
         })
 }
 
-fn exec_policy_warning_location(err: &ExecPolicyError) -> (Option<String>, Option<AppTextRange>) {
-    match err {
-        ExecPolicyError::ParsePolicy { path, source } => {
-            if let Some(location) = source.location() {
-                let range = AppTextRange {
-                    start: AppTextPosition {
-                        line: location.range.start.line,
-                        column: location.range.start.column,
-                    },
-                    end: AppTextPosition {
-                        line: location.range.end.line,
-                        column: location.range.end.column,
-                    },
-                };
-                return (Some(location.path), Some(range));
-            }
-            (Some(path.clone()), None)
-        }
-        _ => (None, None),
-    }
-}
-
 fn app_text_range(range: &CoreTextRange) -> AppTextRange {
     AppTextRange {
         start: AppTextPosition {
@@ -315,10 +256,10 @@ fn app_text_range(range: &CoreTextRange) -> AppTextRange {
 fn project_config_warning(config: &Config) -> Option<ConfigWarningNotification> {
     let mut disabled_folders = Vec::new();
 
-    for layer in config.config_layer_stack.get_layers(
-        ConfigLayerStackOrdering::LowestPrecedenceFirst,
-        /*include_disabled*/ true,
-    ) {
+    for layer in config
+        .config_layer_stack
+        .get_layers(ConfigLayerStackOrdering::LowestPrecedenceFirst, true)
+    {
         let ConfigLayerSource::Project { dot_codex_folder } = &layer.name else {
             continue;
         };
@@ -337,7 +278,7 @@ fn project_config_warning(config: &Config) -> Option<ConfigWarningNotification> 
 
     let mut message = concat!(
         "Project-local config and exec policies are disabled in the following folders ",
-        "until the project is trusted, but skills still load.\n",
+        "until the project is trusted.\n",
     )
     .to_string();
     for (index, (folder, reason)) in disabled_folders.iter().enumerate() {
@@ -379,32 +320,22 @@ pub async fn run_main(
         cli_config_overrides,
         loader_overrides,
         strict_config,
-        AppServerTransport::Stdio,
+        AppServerTransport::from_listen_url(AppServerTransport::DEFAULT_LISTEN_URL)
+            .map_err(|err| std::io::Error::new(ErrorKind::InvalidInput, err.to_string()))?,
         SessionSource::VSCode,
-        AppServerWebsocketAuthSettings::default(),
         AppServerRuntimeOptions::default(),
     )
     .await
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PluginStartupTasks {
-    Start,
-    Skip,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppServerRuntimeOptions {
-    pub plugin_startup_tasks: PluginStartupTasks,
-    pub remote_control_enabled: bool,
     pub install_shutdown_signal_handler: bool,
 }
 
 impl Default for AppServerRuntimeOptions {
     fn default() -> Self {
         Self {
-            plugin_startup_tasks: PluginStartupTasks::Start,
-            remote_control_enabled: false,
             install_shutdown_signal_handler: true,
         }
     }
@@ -418,7 +349,6 @@ pub async fn run_main_with_transport_options(
     strict_config: bool,
     transport: AppServerTransport,
     session_source: SessionSource,
-    auth: AppServerWebsocketAuthSettings,
     runtime_options: AppServerRuntimeOptions,
 ) -> IoResult<()> {
     let (transport_event_tx, mut transport_event_rx) =
@@ -427,8 +357,6 @@ pub async fn run_main_with_transport_options(
     let (outbound_control_tx, mut outbound_control_rx) =
         mpsc::channel::<OutboundControlEvent>(CHANNEL_CAPACITY);
 
-    // Parse CLI overrides once and derive the base Config eagerly so later
-    // components do not need to work with raw TOML values.
     let cli_kv_overrides = cli_config_overrides.parse_overrides().map_err(|e| {
         std::io::Error::new(
             ErrorKind::InvalidInput,
@@ -436,48 +364,26 @@ pub async fn run_main_with_transport_options(
         )
     })?;
     let codex_home = find_codex_home()?;
-    let local_runtime_paths = ExecServerRuntimePaths::from_optional_paths(
-        arg0_paths.codex_self_exe.clone(),
-        arg0_paths.codex_linux_sandbox_exe.clone(),
-    )?;
-    let environment_manager = if loader_overrides.ignore_user_config {
-        EnvironmentManager::from_env(Some(local_runtime_paths)).await
-    } else {
-        EnvironmentManager::from_codex_home(codex_home.clone(), Some(local_runtime_paths)).await
-    }
-    .map(Arc::new)
-    .map_err(std::io::Error::other)?;
     let config_manager = ConfigManager::new(
         codex_home.to_path_buf(),
         cli_kv_overrides.clone(),
         loader_overrides,
         strict_config,
-        Default::default(),
         arg0_paths.clone(),
         Arc::new(NoopThreadConfigLoader),
     );
-    match config_manager
-        .load_latest_config(/*fallback_cwd*/ None)
-        .await
-    {
-        Ok(config) => {
-            let discovered_thread_config_loader = configured_thread_config_loader(&config);
+    match config_manager.load_latest_config(None).await {
+        Ok(_config) => {
+            let discovered_thread_config_loader = configured_thread_config_loader();
             config_manager
                 .replace_thread_config_loader(Arc::clone(&discovered_thread_config_loader));
-            let auth_manager =
-                AuthManager::shared_from_config(&config, /*enable_codex_api_key_env*/ false).await;
-            config_manager.replace_cloud_requirements_loader(auth_manager, config.chatgpt_base_url);
         }
         Err(err) => {
-            warn!(error = %err, "Failed to preload config for cloud requirements");
-            // TODO(gt): Make cloud requirements preload failures blocking once we can fail-closed.
+            warn!(error = %err, "Failed to preload config");
         }
     };
     let mut config_warnings = Vec::new();
-    let (mut config, should_run_personality_migration) = match config_manager
-        .load_latest_config(/*fallback_cwd*/ None)
-        .await
-    {
+    let (config, _loaded_from_user_config) = match config_manager.load_latest_config(None).await {
         Ok(config) => (config, true),
         Err(err) => {
             if strict_config {
@@ -529,58 +435,6 @@ pub async fn run_main_with_transport_options(
             )));
         }
     };
-
-    if should_run_personality_migration {
-        let effective_toml = config.config_layer_stack.effective_config();
-        match effective_toml.try_into() {
-            Ok(config_toml) => {
-                match codex_core::personality_migration::maybe_migrate_personality(
-                    &config.codex_home,
-                    &config_toml,
-                    state_db.clone(),
-                )
-                .await
-                {
-                    Ok(codex_core::personality_migration::PersonalityMigrationStatus::Applied) => {
-                        config = config_manager
-                            .load_latest_config(/*fallback_cwd*/ None)
-                            .await
-                            .map_err(|err| {
-                                std::io::Error::new(
-                                    ErrorKind::InvalidData,
-                                    format!(
-                                        "error reloading config after personality migration: {err}"
-                                    ),
-                                )
-                            })?;
-                    }
-                    Ok(
-                        codex_core::personality_migration::PersonalityMigrationStatus::SkippedMarker
-                        | codex_core::personality_migration::PersonalityMigrationStatus::SkippedExplicitPersonality
-                        | codex_core::personality_migration::PersonalityMigrationStatus::SkippedNoSessions,
-                    ) => {}
-                    Err(err) => {
-                        warn!(error = %err, "Failed to run personality migration");
-                    }
-                }
-            }
-            Err(err) => {
-                warn!(error = %err, "Failed to deserialize config for personality migration");
-            }
-        }
-    }
-
-    if let Ok(Some(err)) = check_execpolicy_for_warnings(&config.config_layer_stack).await {
-        let (path, range) = exec_policy_warning_location(&err);
-        let message = ConfigWarningNotification {
-            summary: "Error parsing rules; custom rules not applied.".to_string(),
-            details: Some(err.to_string()),
-            path,
-            range,
-        };
-        config_warnings.push(message);
-    }
-
     if let Some(warning) = project_config_warning(&config) {
         config_warnings.push(warning);
     }
@@ -592,22 +446,7 @@ pub async fn run_main_with_transport_options(
             range: None,
         });
     }
-    if let Some(warning) =
-        codex_core::config::system_bwrap_warning(config.permissions.permission_profile())
-    {
-        config_warnings.push(ConfigWarningNotification {
-            summary: warning,
-            details: None,
-            path: None,
-            range: None,
-        });
-    }
 
-    let feedback = CodexFeedback::new();
-
-    // Install a simple subscriber so `tracing` output is visible. Users can
-    // control the log level with `RUST_LOG` and switch to JSON logs with
-    // `LOG_FORMAT=json`.
     let stderr_fmt: StderrLogLayer = match log_format_from_env() {
         LogFormat::Json => tracing_subscriber::fmt::layer()
             .json()
@@ -622,8 +461,6 @@ pub async fn run_main_with_transport_options(
             .boxed(),
     };
 
-    let feedback_layer = feedback.logger_layer();
-    let feedback_metadata_layer = feedback.metadata_layer();
     let log_db = state_db.clone().map(log_db::start);
     let log_db_layer = log_db
         .clone()
@@ -632,8 +469,6 @@ pub async fn run_main_with_transport_options(
     let otel_tracing_layer = otel.as_ref().and_then(|o| o.tracing_layer());
     let _ = tracing_subscriber::registry()
         .with(stderr_fmt)
-        .with(feedback_layer)
-        .with(feedback_metadata_layer)
         .with(log_db_layer)
         .with(otel_logger_layer)
         .with(otel_tracing_layer)
@@ -648,23 +483,11 @@ pub async fn run_main_with_transport_options(
     let transport_shutdown_token = CancellationToken::new();
     let mut transport_accept_handles = Vec::<JoinHandle<()>>::new();
 
-    let single_client_mode = matches!(&transport, AppServerTransport::Stdio);
+    let single_client_mode = false;
     let shutdown_when_no_connections = single_client_mode;
     let graceful_signal_restart_enabled =
         runtime_options.install_shutdown_signal_handler && !single_client_mode;
-    let mut app_server_client_name_rx = None;
-
     match &transport {
-        AppServerTransport::Stdio => {
-            let (stdio_client_name_tx, stdio_client_name_rx) = oneshot::channel::<String>();
-            app_server_client_name_rx = Some(stdio_client_name_rx);
-            start_stdio_connection(
-                transport_event_tx.clone(),
-                &mut transport_accept_handles,
-                stdio_client_name_tx,
-            )
-            .await?;
-        }
         AppServerTransport::UnixSocket { socket_path } => {
             let accept_handle = start_control_socket_acceptor(
                 socket_path.clone(),
@@ -674,53 +497,11 @@ pub async fn run_main_with_transport_options(
             .await?;
             transport_accept_handles.push(accept_handle);
         }
-        AppServerTransport::WebSocket { bind_address } => {
-            let accept_handle = start_websocket_acceptor(
-                *bind_address,
-                transport_event_tx.clone(),
-                transport_shutdown_token.clone(),
-                policy_from_settings(&auth)?,
-            )
-            .await?;
-            transport_accept_handles.push(accept_handle);
-        }
         AppServerTransport::Off => {}
     }
     drop(unix_socket_startup_lock);
 
-    let auth_manager =
-        AuthManager::shared_from_config(&config, /*enable_codex_api_key_env*/ false).await;
-
-    let remote_control_requested = runtime_options.remote_control_enabled;
-    let remote_control_enabled = remote_control_requested && state_db.is_some();
-    if remote_control_requested && state_db.is_none() {
-        error!("remote control disabled because sqlite state db is unavailable");
-    }
-    if transport_accept_handles.is_empty() && !remote_control_enabled {
-        return Err(std::io::Error::new(
-            ErrorKind::InvalidInput,
-            if remote_control_requested && state_db.is_none() {
-                "no transport configured; remote control disabled because sqlite state db is unavailable"
-            } else {
-                "no transport configured; use --listen or enable remote control"
-            },
-        ));
-    }
-
-    let (remote_control_accept_handle, remote_control_handle) = start_remote_control(
-        RemoteControlStartConfig {
-            remote_control_url: config.chatgpt_base_url.clone(),
-            installation_id: installation_id.clone(),
-        },
-        state_db.clone(),
-        auth_manager.clone(),
-        transport_event_tx.clone(),
-        transport_shutdown_token.clone(),
-        app_server_client_name_rx,
-        remote_control_enabled,
-    )
-    .await?;
-    transport_accept_handles.push(remote_control_accept_handle);
+    let auth_manager = AuthManager::shared_from_config(&config, false).await;
 
     let outbound_handle = tokio::spawn(async move {
         let mut outbound_connections = HashMap::<ConnectionId, OutboundConnectionState>::new();
@@ -737,7 +518,6 @@ pub async fn run_main_with_transport_options(
                                 writer,
                                 disconnect_sender,
                                 initialized,
-                                experimental_api_enabled,
                                 opted_out_notification_methods,
                             } => {
                                 outbound_connections.insert(
@@ -745,7 +525,6 @@ pub async fn run_main_with_transport_options(
                                     OutboundConnectionState::new(
                                         writer,
                                         initialized,
-                                        experimental_api_enabled,
                                         opted_out_notification_methods,
                                         disconnect_sender,
                                     ),
@@ -779,30 +558,22 @@ pub async fn run_main_with_transport_options(
 
     let processor_handle = tokio::spawn({
         let auth_manager = Arc::clone(&auth_manager);
-    let outgoing_message_sender = Arc::new(OutgoingMessageSender::new(outgoing_tx));
-        let initialize_notification_sender = outgoing_message_sender.clone();
+        let outgoing_message_sender = Arc::new(OutgoingMessageSender::new(outgoing_tx));
         let outbound_control_tx = outbound_control_tx;
         let processor = Arc::new(MessageProcessor::new(MessageProcessorArgs {
             outgoing: outgoing_message_sender,
             arg0_paths,
             config: Arc::new(config),
             config_manager,
-            environment_manager,
-            feedback: feedback.clone(),
-            log_db,
             state_db: state_db.clone(),
             config_warnings,
             session_source,
             auth_manager,
             installation_id,
-            remote_control_handle: Some(remote_control_handle.clone()),
-            plugin_startup_tasks: runtime_options.plugin_startup_tasks,
         }));
         let mut thread_created_rx = processor.thread_created_receiver();
         let mut running_turn_count_rx = processor.subscribe_running_assistant_turn_count();
         let mut connections = HashMap::<ConnectionId, ConnectionState>::new();
-        let mut remote_control_status_rx = remote_control_handle.status_receiver();
-        let mut remote_control_status = remote_control_status_rx.borrow().clone();
         let transport_shutdown_token = transport_shutdown_token.clone();
         async move {
             let mut listen_for_threads = true;
@@ -852,8 +623,6 @@ pub async fn run_main_with_transport_options(
                                 disconnect_sender,
                             } => {
                                 let outbound_initialized = Arc::new(AtomicBool::new(false));
-                                let outbound_experimental_api_enabled =
-                                    Arc::new(AtomicBool::new(false));
                                 let outbound_opted_out_notification_methods =
                                     Arc::new(RwLock::new(HashSet::new()));
                                 if outbound_control_tx
@@ -862,9 +631,6 @@ pub async fn run_main_with_transport_options(
                                         writer,
                                         disconnect_sender,
                                         initialized: Arc::clone(&outbound_initialized),
-                                        experimental_api_enabled: Arc::clone(
-                                            &outbound_experimental_api_enabled,
-                                        ),
                                         opted_out_notification_methods: Arc::clone(
                                             &outbound_opted_out_notification_methods,
                                         ),
@@ -879,7 +645,6 @@ pub async fn run_main_with_transport_options(
                                     ConnectionState::new(
                                         origin,
                                         outbound_initialized,
-                                        outbound_experimental_api_enabled,
                                         outbound_opted_out_notification_methods,
                                     ),
                                 );
@@ -920,8 +685,6 @@ pub async fn run_main_with_transport_options(
                                         let opted_out_notification_methods_snapshot = connection_state
                                             .session
                                             .opted_out_notification_methods();
-                                        let experimental_api_enabled =
-                                            connection_state.session.experimental_api_enabled();
                                         let is_initialized = connection_state.session.initialized();
                                         if let Ok(mut opted_out_notification_methods) = connection_state
                                             .outbound_opted_out_notification_methods
@@ -934,33 +697,14 @@ pub async fn run_main_with_transport_options(
                                                 "failed to update outbound opted-out notifications"
                                             );
                                         }
-                                        connection_state
-                                            .outbound_experimental_api_enabled
-                                            .store(
-                                                experimental_api_enabled,
-                                                std::sync::atomic::Ordering::Release,
-                                            );
                                         if !was_initialized && is_initialized {
                                             processor
                                                 .send_initialize_notifications_to_connection(
                                                     connection_id,
                                                 )
                                                 .await;
-                                            initialize_notification_sender
-                                                .send_server_notification_to_connections(
-                                                    &[connection_id],
-                                                    ServerNotification::RemoteControlStatusChanged(
-                                                        remote_control_status.clone(),
-                                                    ),
-                                                )
-                                                .await;
                                             processor
-                                                .connection_initialized(
-                                                    connection_id,
-                                                    connection_state
-                                                        .session
-                                                        .request_attestation(),
-                                                )
+                                                .connection_initialized(connection_id)
                                                 .await;
                                             connection_state
                                                 .outbound_initialized
@@ -992,20 +736,6 @@ pub async fn run_main_with_transport_options(
                             }
                         }
                     }
-                    changed = remote_control_status_rx.changed() => {
-                        if changed.is_err() {
-                            continue;
-                        }
-                        let status = remote_control_status_rx.borrow().clone();
-                        if remote_control_status == status {
-                            continue;
-                        }
-                        remote_control_status = status.clone();
-                        let notification = ServerNotification::RemoteControlStatusChanged(status);
-                        initialize_notification_sender
-                            .send_server_notification(notification)
-                            .await;
-                    }
                     created = thread_created_rx.recv(), if listen_for_threads => {
                         match created {
                             Ok(thread_id) => {
@@ -1023,10 +753,10 @@ pub async fn run_main_with_transport_options(
                                     .await;
                             }
                             Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                                // TODO(jif) handle lag.
-                                // Assumes thread creation volume is low enough that lag never happens.
-                                // If it does, we log and continue without resyncing to avoid attaching
-                                // listeners for threads that should remain unsubscribed.
+
+
+
+
                                 warn!("thread_created receiver lagged; skipping resync");
                             }
                             Err(tokio::sync::broadcast::error::RecvError::Closed) => {
@@ -1082,10 +812,7 @@ mod tests {
 
     #[test]
     fn log_format_from_env_value_defaults_for_non_json_values() {
-        assert_eq!(
-            LogFormat::from_env_value(/*value*/ None),
-            LogFormat::Default
-        );
+        assert_eq!(LogFormat::from_env_value(None), LogFormat::Default);
         assert_eq!(LogFormat::from_env_value(Some("")), LogFormat::Default);
         assert_eq!(LogFormat::from_env_value(Some("text")), LogFormat::Default);
         assert_eq!(LogFormat::from_env_value(Some("jsonl")), LogFormat::Default);

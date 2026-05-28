@@ -3,10 +3,6 @@ use dns_lookup::AddrInfoHints;
 #[cfg(unix)]
 use dns_lookup::getaddrinfo;
 use std::sync::LazyLock;
-#[cfg(windows)]
-use winapi_util::sysinfo::ComputerNameKind;
-#[cfg(windows)]
-use winapi_util::sysinfo::get_computer_name;
 
 static HOST_NAME: LazyLock<Option<String>> = LazyLock::new(compute_host_name);
 
@@ -18,16 +14,10 @@ fn compute_host_name() -> Option<String> {
     let kernel_hostname = gethostname::gethostname();
     let kernel_hostname = normalize_host_name(&kernel_hostname.to_string_lossy())?;
 
-    // Remote sandbox requirements are meant to target remote hosts by DNS name,
-    // so prefer the canonical FQDN when the local resolver can provide one.
-    // This is best-effort host classification, not authenticated device proof.
     if let Some(fqdn) = local_fqdn_for_hostname(&kernel_hostname) {
         return Some(fqdn);
     }
 
-    // Some machines have only a short local hostname or resolver setup that
-    // does not return AI_CANONNAME. Keep matching behavior best-effort by
-    // falling back to the cleaned kernel hostname instead of returning None.
     Some(kernel_hostname)
 }
 
@@ -43,24 +33,14 @@ fn local_fqdn_for_hostname(hostname: &str) -> Option<String> {
         ..AddrInfoHints::default()
     };
 
-    getaddrinfo(Some(hostname), /*service*/ None, Some(hints))
+    getaddrinfo(Some(hostname), None, Some(hints))
         .ok()?
         .filter_map(Result::ok)
         .filter_map(|addr| addr.canonname)
-        // getaddrinfo may return the short hostname as canonname when no FQDN
-        // is available. Treat only DNS-qualified names as an FQDN result.
         .find_map(|hostname| normalize_fqdn_candidate(&hostname))
 }
 
-#[cfg(windows)]
-fn local_fqdn_for_hostname(_hostname: &str) -> Option<String> {
-    get_computer_name(ComputerNameKind::PhysicalDnsFullyQualified)
-        .ok()
-        .and_then(|hostname| hostname.into_string().ok())
-        .and_then(|hostname| normalize_fqdn_candidate(&hostname))
-}
-
-#[cfg(not(any(unix, windows)))]
+#[cfg(not(unix))]
 fn local_fqdn_for_hostname(_hostname: &str) -> Option<String> {
     None
 }

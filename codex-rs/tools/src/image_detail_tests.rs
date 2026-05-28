@@ -24,7 +24,6 @@ fn model_info() -> ModelInfo {
         "default_reasoning_summary": "auto",
         "support_verbosity": false,
         "default_verbosity": null,
-        "apply_patch_tool_type": null,
         "truncation_policy": {
             "mode": "bytes",
             "limit": 10000
@@ -50,10 +49,7 @@ fn explicit_original_is_allowed_when_model_supports_it() {
         normalize_output_image_detail(&model_info, Some(ImageDetail::Original)),
         Some(ImageDetail::Original)
     );
-    assert_eq!(
-        normalize_output_image_detail(&model_info, /*detail*/ None),
-        None
-    );
+    assert_eq!(normalize_output_image_detail(&model_info, None), None);
 }
 
 #[test]
@@ -92,7 +88,7 @@ fn sanitize_original_falls_back_to_high_without_support() {
         },
     ];
 
-    sanitize_original_image_detail(/*can_request_original_image_detail*/ false, &mut items);
+    sanitize_original_image_detail(false, &mut items);
 
     assert_eq!(
         items,

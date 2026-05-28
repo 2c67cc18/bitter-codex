@@ -1,6 +1,3 @@
-//! Functions for environment detection that need to be shared across crates.
-
-/// Returns true if the current process is running under Windows Subsystem for Linux.
 pub fn is_wsl() -> bool {
     #[cfg(target_os = "linux")]
     {

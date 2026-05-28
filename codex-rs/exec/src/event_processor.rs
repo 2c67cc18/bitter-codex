@@ -11,7 +11,6 @@ pub enum CodexStatus {
 }
 
 pub(crate) trait EventProcessor {
-    /// Print summary of effective configuration and user prompt.
     fn print_config_summary(
         &mut self,
         config: &Config,
@@ -19,10 +18,8 @@ pub(crate) trait EventProcessor {
         session_configured: &SessionConfiguredEvent,
     );
 
-    /// Handle a single typed app-server notification emitted by the agent.
     fn process_server_notification(&mut self, notification: ServerNotification) -> CodexStatus;
 
-    /// Handle a local exec warning that is not represented as an app-server notification.
     fn process_warning(&mut self, message: String) -> CodexStatus;
 
     fn print_final_output(&mut self) {}

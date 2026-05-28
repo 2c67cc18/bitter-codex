@@ -81,7 +81,7 @@ mod tests {
     #[tokio::test]
     async fn archive_thread_moves_rollout_to_archived_collection() {
         let home = TempDir::new().expect("temp dir");
-        let store = LocalThreadStore::new(test_config(home.path()), /*state_db*/ None);
+        let store = LocalThreadStore::new(test_config(home.path()), None);
         let uuid = Uuid::from_u128(201);
         let thread_id = ThreadId::from_string(&uuid.to_string()).expect("valid thread id");
         let active_path =
@@ -139,7 +139,7 @@ mod tests {
         .expect("state db should initialize");
         let store = LocalThreadStore::new(config.clone(), Some(runtime.clone()));
         runtime
-            .mark_backfill_complete(/*last_watermark*/ None)
+            .mark_backfill_complete(None)
             .await
             .expect("backfill should be complete");
         let mut builder = codex_state::ThreadMetadataBuilder::new(

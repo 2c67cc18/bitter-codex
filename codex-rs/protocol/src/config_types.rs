@@ -2,38 +2,22 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::fmt;
 use std::num::NonZeroU64;
-use std::ops::Deref;
-use std::str::FromStr;
 use std::time::Duration;
 use strum_macros::Display;
-use strum_macros::EnumIter;
 use wildmatch::WildMatchPattern;
 
-use crate::openai_models::ReasoningEffort;
-
-/// Selects which part of the active context is charged against
-/// `model_auto_compact_token_limit`.
-#[derive(
-    Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, Display,
-)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, Display)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum AutoCompactTokenLimitScope {
-    /// Count the full active context against the limit.
     #[default]
     Total,
-    /// Count sampled output and later growth after the carried window prefix.
+
     BodyAfterPrefix,
 }
 
-/// A summary of the reasoning performed by the model. This can be useful for
-/// debugging and understanding the model's reasoning process.
-/// See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#reasoning-summaries
-#[derive(
-    Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, Display,
-)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum ReasoningSummary {
@@ -41,24 +25,11 @@ pub enum ReasoningSummary {
     Auto,
     Concise,
     Detailed,
-    /// Option to disable reasoning summaries.
+
     None,
 }
 
-/// Controls output length/detail on GPT-5 models via the Responses API.
-/// Serialized with lowercase values to match the OpenAI API.
-#[derive(
-    Hash,
-    Debug,
-    Serialize,
-    Deserialize,
-    Default,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Display,
-)]
+#[derive(Hash, Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum Verbosity {
@@ -68,143 +39,29 @@ pub enum Verbosity {
     High,
 }
 
-#[derive(
-    Deserialize, Debug, Clone, Copy, PartialEq, Default, Serialize, Display,
-)]
-#[serde(rename_all = "kebab-case")]
-#[strum(serialize_all = "kebab-case")]
-pub enum SandboxMode {
-    #[serde(rename = "read-only")]
-    #[default]
-    ReadOnly,
-
-    #[serde(rename = "workspace-write")]
-    WorkspaceWrite,
-
-    #[serde(rename = "danger-full-access")]
-    DangerFullAccess,
-}
-
-/// Validated plain profile-v2 name used to select `$CODEX_HOME/<name>.config.toml`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProfileV2Name(String);
-
-impl ProfileV2Name {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct ProfileV2NameParseError {
-    value: String,
-}
-
-impl fmt::Display for ProfileV2NameParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "invalid --profile value `{}`; pass a plain name such as `work`",
-            self.value
-        )
-    }
-}
-
-impl std::error::Error for ProfileV2NameParseError {}
-
-impl FromStr for ProfileV2Name {
-    type Err = ProfileV2NameParseError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        if value.is_empty()
-            || !value
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-        {
-            return Err(ProfileV2NameParseError {
-                value: value.to_string(),
-            });
-        }
-
-        Ok(Self(value.to_string()))
-    }
-}
-
-impl Deref for ProfileV2Name {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        self.as_str()
-    }
-}
-
-impl fmt::Display for ProfileV2Name {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Display)]
-#[strum(serialize_all = "snake_case")]
-/// Configures who approval requests are routed to for review. Examples
-/// include sandbox escapes, blocked network access, MCP approval prompts, and
-/// ARC escalations. Defaults to `user`. `auto_review` uses a carefully
-/// prompted subagent to gather relevant context and apply a risk-based
-/// decision framework before approving or denying the request.
-pub enum ApprovalsReviewer {
-    #[default]
-    #[serde(rename = "user")]
-    User,
-    #[serde(rename = "guardian_subagent", alias = "auto_review")]
-    #[strum(serialize = "guardian_subagent")]
-    AutoReview,
-}
-
-
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum ShellEnvironmentPolicyInherit {
-    /// "Core" environment variables for the platform. On UNIX, this would
-    /// include HOME, LOGNAME, PATH, SHELL, and USER, among others.
     Core,
 
-    /// Inherits the full environment from the parent process.
     #[default]
     All,
 
-    /// Do not inherit any environment variables from the parent process.
     None,
 }
 
 pub type EnvironmentVariablePattern = WildMatchPattern<'*', '?'>;
 
-/// Deriving the `env` based on this policy works as follows:
-/// 1. Create an initial map based on the `inherit` policy.
-/// 2. If `ignore_default_excludes` is false, filter the map using the default
-///    exclude pattern(s), which are: `"*KEY*"`, `"*SECRET*"`, and `"*TOKEN*"`.
-/// 3. If `exclude` is not empty, filter the map using the provided patterns.
-/// 4. Insert any entries from `r#set` into the map.
-/// 5. If non-empty, filter the map using the `include_only` patterns.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShellEnvironmentPolicy {
-    /// Starting point when building the environment.
     pub inherit: ShellEnvironmentPolicyInherit,
 
-    /// True to skip the check to exclude default environment variables that
-    /// contain "KEY", "SECRET", or "TOKEN" in their name. Defaults to true.
     pub ignore_default_excludes: bool,
 
-    /// Environment variable names to exclude from the environment.
     pub exclude: Vec<EnvironmentVariablePattern>,
 
-    /// (key, value) pairs to insert in the environment.
     pub r#set: HashMap<String, String>,
-
-    /// Environment variable names to retain in the environment.
     pub include_only: Vec<EnvironmentVariablePattern>,
-
-    /// If true, the shell profile will be used to run the command.
-    pub use_profile: bool,
 }
 
 impl Default for ShellEnvironmentPolicy {
@@ -215,47 +72,11 @@ impl Default for ShellEnvironmentPolicy {
             exclude: Vec::new(),
             r#set: HashMap::new(),
             include_only: Vec::new(),
-            use_profile: false,
         }
     }
 }
 
-#[derive(
-    Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Display,
-)]
-#[serde(rename_all = "kebab-case")]
-#[strum(serialize_all = "kebab-case")]
-pub enum WindowsSandboxLevel {
-    #[default]
-    Disabled,
-    RestrictedToken,
-    Elevated,
-}
-
-#[derive(
-    Debug,
-    Serialize,
-    Deserialize,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Display,
-    PartialOrd,
-    Ord,
-    EnumIter,
-)]
-#[serde(rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
-pub enum Personality {
-    None,
-    Friendly,
-    Pragmatic,
-}
-
-#[derive(
-    Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Display, Default,
-)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Display, Default)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum WebSearchMode {
@@ -323,9 +144,7 @@ pub struct WebSearchFilters {
     pub allowed_domains: Option<Vec<String>>,
 }
 
-#[derive(
-    Debug, Serialize, Deserialize, Clone, Copy, Default, PartialEq, Eq, Display,
-)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum WebSearchUserLocationType {
@@ -384,10 +203,6 @@ pub enum ServiceTier {
     Flex,
 }
 
-/// Request/config sentinel for explicit standard routing.
-///
-/// This is not a catalog service tier id. It means the user intentionally
-/// selected no service tier, so model catalog defaults should not apply.
 pub const SERVICE_TIER_DEFAULT_REQUEST_VALUE: &str = "default";
 
 impl ServiceTier {
@@ -418,26 +233,19 @@ pub enum ForcedLoginMethod {
 const DEFAULT_PROVIDER_AUTH_TIMEOUT_MS: u64 = 5_000;
 const DEFAULT_PROVIDER_AUTH_REFRESH_INTERVAL_MS: u64 = 300_000;
 
-/// Configuration for obtaining a provider bearer token from a command.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ModelProviderAuthInfo {
-    /// Command to execute. Bare names are resolved via `PATH`; paths are resolved against `cwd`.
     pub command: String,
 
-    /// Command arguments.
     #[serde(default)]
     pub args: Vec<String>,
 
-    /// Maximum time to wait for the token command to exit successfully.
     #[serde(default = "default_provider_auth_timeout_ms")]
     pub timeout_ms: NonZeroU64,
 
-    /// Maximum age for the cached token before rerunning the command.
-    /// Set to `0` to disable proactive refresh and only rerun after a 401 retry path.
     #[serde(default = "default_provider_auth_refresh_interval_ms")]
     pub refresh_interval_ms: u64,
 
-    /// Working directory used when running the token command.
     #[serde(default = "default_provider_auth_cwd")]
     pub cwd: AbsolutePathBuf,
 }
@@ -482,8 +290,6 @@ fn default_provider_auth_cwd() -> AbsolutePathBuf {
     }
 }
 
-/// Represents the trust level for a project directory.
-/// This determines the approval policy and sandbox mode applied.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
@@ -492,259 +298,22 @@ pub enum TrustLevel {
     Untrusted,
 }
 
-/// Controls whether the TUI uses the terminal's alternate screen buffer.
-///
-/// - `auto` (default): Use alternate screen mode.
-/// - `always`: Always use alternate screen mode.
-/// - `never`: Never use alternate screen mode. Runs in inline mode, preserving scrollback.
-///
-/// The CLI flag `--no-alt-screen` can override this setting at runtime.
-#[derive(
-    Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, Display,
-)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum AltScreenMode {
-    /// Use alternate screen mode.
     #[default]
     Auto,
-    /// Always use alternate screen mode.
+
     Always,
-    /// Never use alternate screen (inline mode only).
+
     Never,
-}
-
-/// Initial collaboration mode to use when the TUI starts.
-#[derive(
-    Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum ModeKind {
-    Plan,
-    #[default]
-    #[serde(
-        alias = "code",
-        alias = "pair_programming",
-        alias = "execute",
-        alias = "custom"
-    )]
-    Default,
-    #[doc(hidden)]
-    #[serde(skip_serializing, skip_deserializing)]
-    PairProgramming,
-    #[doc(hidden)]
-    #[serde(skip_serializing, skip_deserializing)]
-    Execute,
-}
-
-pub const TUI_VISIBLE_COLLABORATION_MODES: [ModeKind; 2] = [ModeKind::Default, ModeKind::Plan];
-
-impl ModeKind {
-    pub const fn display_name(self) -> &'static str {
-        match self {
-            Self::Plan => "Plan",
-            Self::Default => "Default",
-            Self::PairProgramming => "Pair Programming",
-            Self::Execute => "Execute",
-        }
-    }
-
-    pub const fn is_tui_visible(self) -> bool {
-        matches!(self, Self::Plan | Self::Default)
-    }
-
-    pub const fn allows_request_user_input(self) -> bool {
-        matches!(self, Self::Plan)
-    }
-}
-
-/// Collaboration mode for a Codex session.
-#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub struct CollaborationMode {
-    pub mode: ModeKind,
-    pub settings: Settings,
-}
-
-impl CollaborationMode {
-    /// Returns a reference to the settings.
-    fn settings_ref(&self) -> &Settings {
-        &self.settings
-    }
-
-    pub fn model(&self) -> &str {
-        self.settings_ref().model.as_str()
-    }
-
-    pub fn reasoning_effort(&self) -> Option<ReasoningEffort> {
-        self.settings_ref().reasoning_effort
-    }
-
-    /// Updates the collaboration mode with new model and/or effort values.
-    ///
-    /// - `model`: `Some(s)` to update the model, `None` to keep the current model
-    /// - `effort`: `Some(Some(e))` to set effort to `e`, `Some(None)` to clear effort, `None` to keep current effort
-    /// - `developer_instructions`: `Some(Some(s))` to set instructions, `Some(None)` to clear them, `None` to keep current
-    ///
-    /// Returns a new `CollaborationMode` with updated values, preserving the mode.
-    pub fn with_updates(
-        &self,
-        model: Option<String>,
-        effort: Option<Option<ReasoningEffort>>,
-        developer_instructions: Option<Option<String>>,
-    ) -> Self {
-        let settings = self.settings_ref();
-        let updated_settings = Settings {
-            model: model.unwrap_or_else(|| settings.model.clone()),
-            reasoning_effort: effort.unwrap_or(settings.reasoning_effort),
-            developer_instructions: developer_instructions
-                .unwrap_or_else(|| settings.developer_instructions.clone()),
-        };
-
-        CollaborationMode {
-            mode: self.mode,
-            settings: updated_settings,
-        }
-    }
-
-    /// Applies a mask to this collaboration mode, returning a new collaboration mode
-    /// with the mask values applied. Fields in the mask that are `Some` will override
-    /// the corresponding fields, while `None` values will preserve the original values.
-    ///
-    /// The `name` field in the mask is ignored as it's metadata for the mask itself.
-    pub fn apply_mask(&self, mask: &CollaborationModeMask) -> Self {
-        let settings = self.settings_ref();
-        CollaborationMode {
-            mode: mask.mode.unwrap_or(self.mode),
-            settings: Settings {
-                model: mask.model.clone().unwrap_or_else(|| settings.model.clone()),
-                reasoning_effort: mask.reasoning_effort.unwrap_or(settings.reasoning_effort),
-                developer_instructions: mask
-                    .developer_instructions
-                    .clone()
-                    .unwrap_or_else(|| settings.developer_instructions.clone()),
-            },
-        }
-    }
-}
-
-/// Settings for a collaboration mode.
-#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
-pub struct Settings {
-    pub model: String,
-    pub reasoning_effort: Option<ReasoningEffort>,
-    pub developer_instructions: Option<String>,
-}
-
-/// A mask for collaboration mode settings, allowing partial updates.
-/// All fields except `name` are optional, enabling selective updates.
-#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
-pub struct CollaborationModeMask {
-    pub name: String,
-    pub mode: Option<ModeKind>,
-    pub model: Option<String>,
-    pub reasoning_effort: Option<Option<ReasoningEffort>>,
-    pub developer_instructions: Option<Option<String>>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
-
-    #[test]
-    fn apply_mask_can_clear_optional_fields() {
-        let mode = CollaborationMode {
-            mode: ModeKind::Default,
-            settings: Settings {
-                model: "gpt-5.2-codex".to_string(),
-                reasoning_effort: Some(ReasoningEffort::High),
-                developer_instructions: Some("stay focused".to_string()),
-            },
-        };
-        let mask = CollaborationModeMask {
-            name: "Clear".to_string(),
-            mode: None,
-            model: None,
-            reasoning_effort: Some(None),
-            developer_instructions: Some(None),
-        };
-
-        let expected = CollaborationMode {
-            mode: ModeKind::Default,
-            settings: Settings {
-                model: "gpt-5.2-codex".to_string(),
-                reasoning_effort: None,
-                developer_instructions: None,
-            },
-        };
-        assert_eq!(expected, mode.apply_mask(&mask));
-    }
-
-    #[test]
-    fn mode_kind_deserializes_alias_values_to_default() {
-        for alias in ["code", "pair_programming", "execute", "custom"] {
-            let json = format!("\"{alias}\"");
-            let mode: ModeKind = serde_json::from_str(&json).expect("deserialize mode");
-            assert_eq!(ModeKind::Default, mode);
-        }
-    }
-
-    #[test]
-    fn approvals_reviewer_serializes_auto_review_and_accepts_legacy_guardian_subagent() {
-        assert_eq!(ApprovalsReviewer::User.to_string(), "user");
-        assert_eq!(
-            serde_json::to_string(&ApprovalsReviewer::User).expect("serialize reviewer"),
-            "\"user\""
-        );
-        assert_eq!(
-            serde_json::to_string(&ApprovalsReviewer::AutoReview).expect("serialize reviewer"),
-            "\"guardian_subagent\""
-        );
-
-        for value in ["user", "auto_review", "guardian_subagent"] {
-            let json = format!("\"{value}\"");
-            let reviewer: ApprovalsReviewer =
-                serde_json::from_str(&json).expect("deserialize reviewer");
-            let expected = if value == "user" {
-                ApprovalsReviewer::User
-            } else {
-                ApprovalsReviewer::AutoReview
-            };
-            assert_eq!(expected, reviewer);
-        }
-    }
-
-    #[test]
-    fn profile_v2_name_rejects_paths_and_empty_names() {
-        assert_eq!(
-            ProfileV2Name::from_str("../foo"),
-            Err(ProfileV2NameParseError {
-                value: "../foo".to_string(),
-            }),
-            "dots and slashes are disallowed to prevent reading arbitrary files"
-        );
-        assert_eq!(
-            ProfileV2Name::from_str(""),
-            Err(ProfileV2NameParseError {
-                value: String::new(),
-            }),
-            "profile name cannot be empty"
-        );
-    }
-
-    #[test]
-    fn tui_visible_collaboration_modes_match_mode_kind_visibility() {
-        let expected = [ModeKind::Default, ModeKind::Plan];
-        assert_eq!(expected, TUI_VISIBLE_COLLABORATION_MODES);
-
-        for mode in TUI_VISIBLE_COLLABORATION_MODES {
-            assert!(mode.is_tui_visible());
-        }
-
-        assert!(!ModeKind::PairProgramming.is_tui_visible());
-        assert!(!ModeKind::Execute.is_tui_visible());
-    }
 
     #[test]
     fn web_search_location_merge_prefers_overlay_values() {

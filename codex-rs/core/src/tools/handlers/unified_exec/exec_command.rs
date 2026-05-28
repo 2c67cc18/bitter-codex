@@ -1,5 +1,4 @@
 use crate::function_tool::FunctionCallError;
-use crate::tools::context::ExecCommandToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
@@ -9,25 +8,20 @@ use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
 use crate::unified_exec::ExecCommandRequest;
 use crate::unified_exec::UnifiedExecContext;
-use crate::unified_exec::UnifiedExecError;
 use crate::unified_exec::UnifiedExecProcessManager;
-use crate::unified_exec::generate_chunk_id;
 use codex_otel::SessionTelemetry;
 use codex_otel::TOOL_CALL_UNIFIED_EXEC_METRIC;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
-use codex_utils_output_truncation::approx_token_count;
 
 use super::super::shell_spec::CommandToolOptions;
-use super::super::shell_spec::create_exec_command_tool_with_environment_id;
+use super::super::shell_spec::create_exec_command_tool;
 use super::ExecCommandArgs;
-use super::ExecCommandEnvironmentArgs;
 use super::get_command;
 
 #[derive(Clone, Copy)]
 pub(crate) struct ExecCommandHandlerOptions {
     pub(crate) allow_login_shell: bool,
-    pub(crate) include_environment_id: bool,
 }
 
 pub struct ExecCommandHandler {
@@ -39,7 +33,6 @@ impl Default for ExecCommandHandler {
         Self {
             options: ExecCommandHandlerOptions {
                 allow_login_shell: false,
-                include_environment_id: false,
             },
         }
     }
@@ -58,12 +51,9 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
     }
 
     fn spec(&self) -> ToolSpec {
-        create_exec_command_tool_with_environment_id(
-            CommandToolOptions {
-                allow_login_shell: self.options.allow_login_shell,
-            },
-            self.options.include_environment_id,
-        )
+        create_exec_command_tool(CommandToolOptions {
+            allow_login_shell: self.options.allow_login_shell,
+        })
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
@@ -93,22 +83,13 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
 
         let manager: &UnifiedExecProcessManager = &session.services.unified_exec_manager;
         let context = UnifiedExecContext::new(session.clone(), turn.clone(), call_id.clone());
-        let environment_args: ExecCommandEnvironmentArgs = parse_arguments(&arguments)?;
-        if let Some(environment_id) = environment_args
-            .environment_id
-            .as_deref()
-            .filter(|environment_id| !environment_id.is_empty())
-        {
-            return Err(FunctionCallError::RespondToModel(format!(
-                "exec_command environment_id is no longer supported; requested `{environment_id}`"
-            )));
-        }
         let Some(turn_environment) = turn.environments.primary() else {
             return Err(FunctionCallError::RespondToModel(
                 "unified exec is unavailable in this session".to_string(),
             ));
         };
-        let cwd = environment_args
+        let cwd_args: ExecCommandArgs = parse_arguments(&arguments)?;
+        let cwd = cwd_args
             .workdir
             .as_deref()
             .filter(|workdir| !workdir.is_empty())
@@ -118,13 +99,9 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
             );
         let args: ExecCommandArgs = parse_arguments_with_base_path(&arguments, &cwd)?;
         let process_id = manager.allocate_process_id().await;
-        let resolved_command = get_command(
-            &args,
-            session.user_shell(),
-            &turn.unified_exec_shell_mode,
-            turn.config.permissions.allow_login_shell,
-        )
-        .map_err(FunctionCallError::RespondToModel)?;
+        let resolved_command =
+            get_command(&args, session.user_shell(), turn.config.allow_login_shell)
+                .map_err(FunctionCallError::RespondToModel)?;
         let command = resolved_command.command;
         let shell_type = resolved_command.shell_type;
         let command_for_display = command.join(" ");
@@ -142,7 +119,6 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
                 ExecCommandRequest {
                     command,
                     shell_type,
-                    hook_command: String::new(),
                     process_id,
                     yield_time_ms,
                     max_output_tokens,
@@ -153,28 +129,7 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
             )
             .await
         {
-            Ok(mut response) => {
-                response.hook_command = None;
-                Ok(boxed_tool_output(response))
-            }
-            Err(UnifiedExecError::SandboxDenied { output, .. }) => {
-                let output_text = output.aggregated_output.text;
-                let original_token_count = approx_token_count(&output_text);
-                Ok(boxed_tool_output(ExecCommandToolOutput {
-                    event_call_id: context.call_id.clone(),
-                    chunk_id: generate_chunk_id(),
-                    wall_time: output.duration,
-                    raw_output: output_text.into_bytes(),
-                    truncation_policy: turn.truncation_policy,
-                    max_output_tokens,
-                    // Sandbox denial is terminal, so there is no live
-                    // process for write_stdin to resume.
-                    process_id: None,
-                    exit_code: Some(output.exit_code),
-                    original_token_count: Some(original_token_count),
-                    hook_command: None,
-                }))
-            }
+            Ok(response) => Ok(boxed_tool_output(response)),
             Err(err) => Err(FunctionCallError::RespondToModel(format!(
                 "exec_command failed for `{command_for_display}`: {err:?}"
             ))),
@@ -191,7 +146,7 @@ impl CoreToolRuntime for ExecCommandHandler {
 fn emit_unified_exec_tty_metric(session_telemetry: &SessionTelemetry, tty: bool) {
     session_telemetry.counter(
         TOOL_CALL_UNIFIED_EXEC_METRIC,
-        /*inc*/ 1,
+        1,
         &[("tty", if tty { "true" } else { "false" })],
     );
 }

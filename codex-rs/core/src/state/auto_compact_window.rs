@@ -15,11 +15,7 @@ enum AutoCompactWindowPrefill {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct AutoCompactWindow {
     ordinal: u64,
-    /// Absolute input-token baseline for the current compaction window.
-    ///
-    /// `body_after_prefix` subtracts this from later active-context usage. It is
-    /// not the growth itself; server-observed usage replaces estimated
-    /// resume/recompute baselines when available.
+
     prefill_input_tokens: Option<AutoCompactWindowPrefill>,
 }
 
@@ -40,9 +36,6 @@ impl AutoCompactWindow {
         self.clear_prefill();
     }
 
-    /// Records the request-input side of the first server usage sample. The
-    /// sampled output from that response is body growth and should remain
-    /// counted against the scoped auto-compact budget.
     pub(super) fn ensure_server_observed_prefill_from_usage(&mut self, usage: &TokenUsage) {
         if matches!(
             self.prefill_input_tokens,
@@ -97,7 +90,7 @@ mod tests {
             }
         );
 
-        window.set_estimated_prefill(/*tokens*/ 150);
+        window.set_estimated_prefill(150);
         assert_eq!(
             window.snapshot(),
             AutoCompactWindowSnapshot {
@@ -124,7 +117,7 @@ mod tests {
             total_tokens: 180,
             ..Default::default()
         });
-        window.set_estimated_prefill(/*tokens*/ 90);
+        window.set_estimated_prefill(90);
         assert_eq!(
             window.snapshot(),
             AutoCompactWindowSnapshot {

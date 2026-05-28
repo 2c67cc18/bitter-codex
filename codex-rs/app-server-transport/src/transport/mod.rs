@@ -1,5 +1,3 @@
-pub mod auth;
-
 use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::OutgoingError;
 use crate::outgoing_message::OutgoingMessage;
@@ -8,7 +6,6 @@ use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::JSONRPCMessage;
 use codex_core::config::find_codex_home;
 use codex_utils_absolute_path::AbsolutePathBuf;
-use std::net::SocketAddr;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::atomic::AtomicU64;
@@ -18,28 +15,17 @@ use tokio_util::sync::CancellationToken;
 use tracing::error;
 use tracing::warn;
 
-/// Size of the bounded channels used to communicate between tasks. The value
-/// is a balance between throughput and memory usage - 128 messages should be
-/// plenty for an interactive CLI.
 pub const CHANNEL_CAPACITY: usize = 128;
 
-mod remote_control;
-mod stdio;
 mod unix_socket;
 #[cfg(test)]
 mod unix_socket_tests;
 mod websocket;
 
-pub use remote_control::RemoteControlHandle;
-pub use remote_control::RemoteControlStartConfig;
-pub use remote_control::RemoteControlUnavailable;
-pub use remote_control::start_remote_control;
-pub use stdio::start_stdio_connection;
 pub use unix_socket::AppServerStartupLock;
 pub use unix_socket::acquire_app_server_startup_lock;
 pub use unix_socket::prepare_control_socket_path;
 pub use unix_socket::start_control_socket_acceptor;
-pub use websocket::start_websocket_acceptor;
 
 const OVERLOADED_ERROR_CODE: i64 = -32001;
 
@@ -65,9 +51,7 @@ pub fn app_server_startup_lock_path(codex_home: &Path) -> std::io::Result<Absolu
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AppServerTransport {
-    Stdio,
     UnixSocket { socket_path: AbsolutePathBuf },
-    WebSocket { bind_address: SocketAddr },
     Off,
 }
 
@@ -75,7 +59,6 @@ pub enum AppServerTransport {
 pub enum AppServerTransportParseError {
     UnsupportedListenUrl(String),
     InvalidUnixSocketPath { listen_url: String, message: String },
-    InvalidWebSocketListenUrl(String),
 }
 
 impl std::fmt::Display for AppServerTransportParseError {
@@ -83,7 +66,7 @@ impl std::fmt::Display for AppServerTransportParseError {
         match self {
             AppServerTransportParseError::UnsupportedListenUrl(listen_url) => write!(
                 f,
-                "unsupported --listen URL `{listen_url}`; expected `stdio://`, `unix://`, `unix://PATH`, `ws://IP:PORT`, or `off`"
+                "unsupported --listen URL `{listen_url}`; expected `unix://`, `unix://PATH`, or `off`"
             ),
             AppServerTransportParseError::InvalidUnixSocketPath {
                 listen_url,
@@ -92,10 +75,6 @@ impl std::fmt::Display for AppServerTransportParseError {
                 f,
                 "invalid unix socket --listen URL `{listen_url}`; failed to resolve socket path: {message}"
             ),
-            AppServerTransportParseError::InvalidWebSocketListenUrl(listen_url) => write!(
-                f,
-                "invalid websocket --listen URL `{listen_url}`; expected `ws://IP:PORT`"
-            ),
         }
     }
 }
@@ -103,19 +82,15 @@ impl std::fmt::Display for AppServerTransportParseError {
 impl std::error::Error for AppServerTransportParseError {}
 
 impl AppServerTransport {
-    pub const DEFAULT_LISTEN_URL: &'static str = "stdio://";
+    pub const DEFAULT_LISTEN_URL: &'static str = "unix://";
 
     pub fn from_listen_url(listen_url: &str) -> Result<Self, AppServerTransportParseError> {
-        if listen_url == Self::DEFAULT_LISTEN_URL {
-            return Ok(Self::Stdio);
-        }
-
         if let Some(raw_socket_path) = listen_url.strip_prefix("unix://") {
             let socket_path = if raw_socket_path.is_empty() {
                 let codex_home = find_codex_home().map_err(|err| {
                     AppServerTransportParseError::InvalidUnixSocketPath {
                         listen_url: listen_url.to_string(),
-                        message: format!("failed to resolve CODEX_HOME: {err}"),
+                        message: format!("failed to resolve BITTER_CODEX_HOME: {err}"),
                     }
                 })?;
                 app_server_control_socket_path(&codex_home).map_err(|err| {
@@ -137,13 +112,6 @@ impl AppServerTransport {
 
         if listen_url == "off" {
             return Ok(Self::Off);
-        }
-
-        if let Some(socket_addr) = listen_url.strip_prefix("ws://") {
-            let bind_address = socket_addr.parse::<SocketAddr>().map_err(|_| {
-                AppServerTransportParseError::InvalidWebSocketListenUrl(listen_url.to_string())
-            })?;
-            return Ok(Self::WebSocket { bind_address });
         }
 
         Err(AppServerTransportParseError::UnsupportedListenUrl(
@@ -179,10 +147,8 @@ pub enum TransportEvent {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionOrigin {
-    Stdio,
     InProcess,
     WebSocket,
-    RemoteControl,
 }
 
 static CONNECTION_ID_COUNTER: AtomicU64 = AtomicU64::new(0);

@@ -31,7 +31,7 @@ pub struct ShellSnapshot {
 }
 
 const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(10);
-const SNAPSHOT_RETENTION: Duration = Duration::from_secs(60 * 60 * 24 * 3); // 3 days retention.
+const SNAPSHOT_RETENTION: Duration = Duration::from_secs(60 * 60 * 24 * 3);
 const SNAPSHOT_DIR: &str = "shell_snapshots";
 const EXCLUDED_EXPORT_VARS: &[&str] = &["PWD", "OLDPWD"];
 
@@ -109,7 +109,7 @@ impl ShellSnapshot {
                 if let Some(failure_reason) = snapshot.as_ref().err() {
                     counter_tags.push(("failure_reason", *failure_reason));
                 }
-                session_telemetry.counter("codex.shell_snapshot", /*inc*/ 1, &counter_tags);
+                session_telemetry.counter("codex.shell_snapshot", 1, &counter_tags);
                 let _ = shell_snapshot_tx.send(snapshot.ok());
             }
             .instrument(snapshot_span),
@@ -123,7 +123,6 @@ impl ShellSnapshot {
         shell: &Shell,
         state_db: Option<StateDbHandle>,
     ) -> std::result::Result<Self, &'static str> {
-        // File to store the snapshot
         let extension = match shell.shell_type {
             ShellType::PowerShell => "ps1",
             _ => "sh",
@@ -139,7 +138,6 @@ impl ShellSnapshot {
             .join(SNAPSHOT_DIR)
             .join(format!("{session_id}.tmp-{nonce}"));
 
-        // Clean the (unlikely) leaked snapshot files.
         let codex_home = codex_home.clone();
         let cleanup_session_id = session_id;
         tokio::spawn(async move {
@@ -150,7 +148,6 @@ impl ShellSnapshot {
             }
         });
 
-        // Make the new snapshot.
         if let Err(err) =
             write_shell_snapshot(shell.shell_type.clone(), &temp_path, session_cwd).await
         {
@@ -200,10 +197,10 @@ async fn write_shell_snapshot(
     output_path: &AbsolutePathBuf,
     cwd: &AbsolutePathBuf,
 ) -> Result<()> {
-    if shell_type == ShellType::PowerShell || shell_type == ShellType::Cmd {
+    if shell_type == ShellType::PowerShell {
         bail!("Shell snapshot not supported yet for {shell_type:?}");
     }
-    let shell = get_shell(shell_type.clone(), /*path*/ None)
+    let shell = get_shell(shell_type.clone(), None)
         .with_context(|| format!("No available shell for {shell_type:?}"))?;
 
     let raw_snapshot = capture_snapshot(&shell, cwd).await?;
@@ -231,7 +228,6 @@ async fn capture_snapshot(shell: &Shell, cwd: &AbsolutePathBuf) -> Result<String
         ShellType::Bash => run_shell_script(shell, &bash_snapshot_script(), cwd).await,
         ShellType::Sh => run_shell_script(shell, &sh_snapshot_script(), cwd).await,
         ShellType::PowerShell => run_shell_script(shell, powershell_snapshot_script(), cwd).await,
-        ShellType::Cmd => bail!("Shell snapshotting is not yet supported for {shell_type:?}"),
     }
 }
 
@@ -251,26 +247,13 @@ async fn validate_snapshot(
 ) -> Result<()> {
     let snapshot_path_display = snapshot_path.display();
     let script = format!("set -e; . \"{snapshot_path_display}\"");
-    run_script_with_timeout(
-        shell,
-        &script,
-        SNAPSHOT_TIMEOUT,
-        /*use_login_shell*/ false,
-        cwd,
-    )
-    .await
-    .map(|_| ())
+    run_script_with_timeout(shell, &script, SNAPSHOT_TIMEOUT, false, cwd)
+        .await
+        .map(|_| ())
 }
 
 async fn run_shell_script(shell: &Shell, script: &str, cwd: &AbsolutePathBuf) -> Result<String> {
-    run_script_with_timeout(
-        shell,
-        script,
-        SNAPSHOT_TIMEOUT,
-        /*use_login_shell*/ true,
-        cwd,
-    )
-    .await
+    run_script_with_timeout(shell, script, SNAPSHOT_TIMEOUT, true, cwd).await
 }
 
 async fn run_script_with_timeout(
@@ -283,8 +266,6 @@ async fn run_script_with_timeout(
     let args = shell.derive_exec_args(script, use_login_shell);
     let shell_name = shell.name();
 
-    // Handler is kept as guard to control the drop. The `mut` pattern is required because .args()
-    // returns a ref of handler.
     let mut handler = Command::new(&args[0]);
     handler.args(&args[1..]);
     handler.stdin(Stdio::null());
@@ -494,9 +475,6 @@ $envVars | ForEach-Object {
 "##
 }
 
-/// Removes shell snapshots that either lack a matching session rollout file or
-/// whose rollouts have not been updated within the retention window.
-/// The active session id is exempt from cleanup.
 pub async fn cleanup_stale_snapshots(
     codex_home: &AbsolutePathBuf,
     active_session_id: ThreadId,
@@ -569,11 +547,9 @@ async fn remove_snapshot_file(path: &Path) {
 fn snapshot_session_id_from_file_name(file_name: &str) -> Option<&str> {
     let (stem, extension) = file_name.rsplit_once('.')?;
     match extension {
-        "sh" | "ps1" => Some(
-            stem.split_once('.')
-                .map_or(stem, |(session_id, _generation)| session_id),
-        ),
-        _ if extension.starts_with("tmp-") => Some(stem),
+        "sh" | "ps1" => stem
+            .split_once('.')
+            .map(|(session_id, _generation)| session_id),
         _ => None,
     }
 }

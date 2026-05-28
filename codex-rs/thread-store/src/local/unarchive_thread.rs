@@ -87,17 +87,13 @@ pub(super) async fn unarchive_thread(
                 restored_path.display()
             ),
         })?;
-    stored_thread_from_rollout_item(
-        item,
-        /*archived*/ false,
-        store.config.default_model_provider_id.as_str(),
-    )
-    .ok_or_else(|| ThreadStoreError::Internal {
-        message: format!(
-            "failed to read unarchived thread id from {}",
-            restored_path.display()
-        ),
-    })
+    stored_thread_from_rollout_item(item, false, store.config.default_model_provider_id.as_str())
+        .ok_or_else(|| ThreadStoreError::Internal {
+            message: format!(
+                "failed to read unarchived thread id from {}",
+                restored_path.display()
+            ),
+        })
 }
 
 #[cfg(test)]
@@ -118,7 +114,7 @@ mod tests {
     #[tokio::test]
     async fn unarchive_thread_restores_rollout_and_returns_updated_thread() {
         let home = TempDir::new().expect("temp dir");
-        let store = LocalThreadStore::new(test_config(home.path()), /*state_db*/ None);
+        let store = LocalThreadStore::new(test_config(home.path()), None);
         let uuid = Uuid::from_u128(203);
         let thread_id = ThreadId::from_string(&uuid.to_string()).expect("valid thread id");
         let archived_path = write_archived_session_file(home.path(), "2025-01-03T13-00-00", uuid)
@@ -161,7 +157,7 @@ mod tests {
         .expect("state db should initialize");
         let store = LocalThreadStore::new(config.clone(), Some(runtime.clone()));
         runtime
-            .mark_backfill_complete(/*last_watermark*/ None)
+            .mark_backfill_complete(None)
             .await
             .expect("backfill should be complete");
         let mut builder = codex_state::ThreadMetadataBuilder::new(

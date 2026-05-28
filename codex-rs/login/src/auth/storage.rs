@@ -25,7 +25,6 @@ use codex_keyring_store::DefaultKeyringStore;
 use codex_keyring_store::KeyringStore;
 use once_cell::sync::Lazy;
 
-/// Expected structure for $CODEX_HOME/auth.json.
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub struct AuthDotJson {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -70,8 +69,6 @@ impl FileAuthStorage {
         Self { codex_home }
     }
 
-    /// Attempt to read and parse the `auth.json` file in the given `CODEX_HOME` directory.
-    /// Returns the full AuthDotJson structure.
     pub(super) fn try_read_auth_json(&self, auth_file: &Path) -> std::io::Result<AuthDotJson> {
         let mut file = File::open(auth_file)?;
         let mut contents = String::new();
@@ -119,7 +116,6 @@ impl AuthStorageBackend for FileAuthStorage {
 
 const KEYRING_SERVICE: &str = "Codex Auth";
 
-// turns codex_home path into a stable, short key string
 fn compute_store_key(codex_home: &Path) -> std::io::Result<String> {
     let canonical = codex_home
         .canonicalize()
@@ -185,7 +181,7 @@ impl AuthStorageBackend for KeyringAuthStorage {
 
     fn save(&self, auth: &AuthDotJson) -> std::io::Result<()> {
         let key = compute_store_key(&self.codex_home)?;
-        // Simpler error mapping per style: prefer method reference over closure
+
         let serialized = serde_json::to_string(auth).map_err(std::io::Error::other)?;
         self.save_to_keyring(&key, &serialized)?;
         if let Err(err) = delete_file_if_exists(&self.codex_home) {
@@ -245,12 +241,10 @@ impl AuthStorageBackend for AutoAuthStorage {
     }
 
     fn delete(&self) -> std::io::Result<bool> {
-        // Keyring storage will delete from disk as well
         self.keyring_storage.delete()
     }
 }
 
-// A global in-memory store for mapping codex_home -> AuthDotJson.
 static EPHEMERAL_AUTH_STORE: Lazy<Mutex<HashMap<String, AuthDotJson>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 

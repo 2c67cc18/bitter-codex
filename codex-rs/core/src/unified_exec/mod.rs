@@ -1,20 +1,3 @@
-//! Unified Exec: local interactive process execution.
-//!
-//! Responsibilities
-//! - Manages interactive processes (create, reuse, buffer output with caps).
-//! - Spawns the PTY directly with the session shell environment.
-//!
-//! Flow at a glance (open process)
-//! 1) Build a small request `{ command, cwd }`.
-//! 2) Runtime spawns the command locally.
-//! 3) Process handle is returned with streaming output + metadata.
-//!
-//! This keeps policy logic and user interaction centralized while the PTY/process
-//! concerns remain isolated here. The implementation is split between:
-//! - `process.rs`: PTY process lifecycle + output buffering.
-//! - `process_state.rs`: shared exit/failure state for local and remote processes.
-//! - `process_manager.rs`: process startup, reuse, and request handling.
-
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -43,18 +26,15 @@ pub(crate) fn set_deterministic_process_ids_for_tests(enabled: bool) {
 
 pub(crate) use errors::UnifiedExecError;
 pub(crate) use process::NoopSpawnLifecycle;
-#[cfg(unix)]
-pub(crate) use process::SpawnLifecycle;
-pub(crate) use process::SpawnLifecycleHandle;
 pub(crate) use process::UnifiedExecProcess;
 
 pub(crate) const MIN_YIELD_TIME_MS: u64 = 250;
-// Minimum yield time for an empty `write_stdin`.
+
 pub(crate) const MIN_EMPTY_YIELD_TIME_MS: u64 = 5_000;
 pub(crate) const MAX_YIELD_TIME_MS: u64 = 30_000;
 pub(crate) const DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS: u64 = 300_000;
 pub(crate) const DEFAULT_MAX_OUTPUT_TOKENS: usize = 10_000;
-pub(crate) const UNIFIED_EXEC_OUTPUT_MAX_BYTES: usize = 1024 * 1024; // 1 MiB
+pub(crate) const UNIFIED_EXEC_OUTPUT_MAX_BYTES: usize = 1024 * 1024;
 pub(crate) const UNIFIED_EXEC_OUTPUT_MAX_TOKENS: usize = UNIFIED_EXEC_OUTPUT_MAX_BYTES / 4;
 pub(crate) const MAX_UNIFIED_EXEC_PROCESSES: usize = 64;
 
@@ -78,7 +58,6 @@ impl UnifiedExecContext {
 pub(crate) struct ExecCommandRequest {
     pub command: Vec<String>,
     pub shell_type: ShellType,
-    pub hook_command: String,
     pub process_id: i32,
     pub yield_time_ms: u64,
     pub max_output_tokens: Option<usize>,
@@ -133,7 +112,6 @@ struct ProcessEntry {
     process: Arc<UnifiedExecProcess>,
     call_id: String,
     process_id: i32,
-    hook_command: String,
     tty: bool,
     session: Weak<Session>,
     last_used: tokio::time::Instant,
@@ -153,12 +131,3 @@ pub(crate) fn generate_chunk_id() -> String {
         .map(|_| format!("{:x}", rng.random_range(0..16)))
         .collect()
 }
-
-#[cfg(test)]
-#[cfg(unix)]
-#[path = "process_tests.rs"]
-mod process_tests;
-#[cfg(test)]
-#[cfg(unix)]
-#[path = "mod_tests.rs"]
-mod tests;

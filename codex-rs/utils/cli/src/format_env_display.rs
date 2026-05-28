@@ -30,7 +30,7 @@ mod tests {
     #[test]
     fn returns_dash_when_empty() {
         let empty_vars: &[String] = &[];
-        assert_eq!(format_env_display(/*env*/ None, empty_vars), "-");
+        assert_eq!(format_env_display(None, empty_vars), "-");
 
         let empty_map = HashMap::new();
         assert_eq!(format_env_display(Some(&empty_map), empty_vars), "-");
@@ -52,10 +52,7 @@ mod tests {
     fn formats_env_vars_with_dollar_prefix() {
         let vars = vec!["TOKEN".to_string(), "PATH".to_string()];
 
-        assert_eq!(
-            format_env_display(/*env*/ None, &vars),
-            "TOKEN=*****, PATH=*****"
-        );
+        assert_eq!(format_env_display(None, &vars), "TOKEN=*****, PATH=*****");
     }
 
     #[test]

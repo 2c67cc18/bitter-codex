@@ -10,10 +10,7 @@ pub struct CommandToolOptions {
     pub allow_login_shell: bool,
 }
 
-pub(crate) fn create_exec_command_tool_with_environment_id(
-    options: CommandToolOptions,
-    include_environment_id: bool,
-) -> ToolSpec {
+pub(crate) fn create_exec_command_tool(options: CommandToolOptions) -> ToolSpec {
     let mut properties = BTreeMap::from([
         (
             "cmd".to_string(),
@@ -60,19 +57,11 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
             )),
         );
     }
-    if include_environment_id {
-        properties.insert(
-            "environment_id".to_string(),
-            JsonSchema::string(Some(
-                "Optional environment id from the <environment_context> block. If omitted, uses the primary environment.".to_string(),
-            )),
-        );
-    }
-
     ToolSpec::Function(ResponsesApiTool {
         name: "exec_command".to_string(),
-        description: "Runs a command in a PTY, returning output or a session ID for ongoing interaction."
-            .to_string(),
+        description:
+            "Runs a command in a PTY, returning output or a session ID for ongoing interaction."
+                .to_string(),
         strict: false,
         defer_loading: None,
         parameters: JsonSchema::object(

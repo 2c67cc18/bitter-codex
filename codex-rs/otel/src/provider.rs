@@ -81,17 +81,11 @@ impl OtelProvider {
         let metrics_enabled = !matches!(metric_exporter, OtelExporter::None);
 
         if !log_enabled && !trace_enabled && !metrics_enabled {
-            // Tracestate propagation is process-global; clear it when these
-            // settings do not install an active provider.
             crate::trace_context::set_tracestate_entries(BTreeMap::new())?;
             debug!("No OTEL exporter enabled in settings.");
             return Ok(None);
         }
 
-        // Provider setup installs process-global OTEL state that cannot be
-        // rolled back. Validate trace metadata before any setup path can
-        // mutate those globals, and keep span attribute checks aligned with
-        // config loading when traces are exported.
         if trace_enabled {
             crate::config::validate_span_attributes(&settings.span_attributes)?;
         }
@@ -264,10 +258,6 @@ fn tracer_provider_builder(
     }
 }
 
-/// Applies configured attributes when spans start.
-///
-/// Resource attributes describe the provider process. These attributes are
-/// per-span metadata, so they need to be attached before each span is exported.
 #[derive(Debug)]
 struct SpanAttributesProcessor {
     attributes: BTreeMap<String, String>,
@@ -480,11 +470,7 @@ mod tests {
 
     #[test]
     fn resource_attributes_omit_host_name_when_missing_or_empty() {
-        let missing = resource_attributes(
-            &test_otel_settings(),
-            /*host_name*/ None,
-            ResourceKind::Logs,
-        );
+        let missing = resource_attributes(&test_otel_settings(), None, ResourceKind::Logs);
         let empty = resource_attributes(&test_otel_settings(), Some("   "), ResourceKind::Logs);
         let trace_attrs = resource_attributes(
             &test_otel_settings(),
@@ -512,7 +498,6 @@ mod tests {
     #[test]
     fn log_export_target_excludes_trace_safe_events() {
         assert!(is_log_export_target("codex_otel.log_only"));
-        assert!(is_log_export_target("codex_otel.network_proxy"));
         assert!(!is_log_export_target("codex_otel.trace_safe"));
         assert!(!is_log_export_target("codex_otel.trace_safe.debug"));
     }
@@ -522,7 +507,6 @@ mod tests {
         assert!(is_trace_safe_target("codex_otel.trace_safe"));
         assert!(is_trace_safe_target("codex_otel.trace_safe.summary"));
         assert!(!is_trace_safe_target("codex_otel.log_only"));
-        assert!(!is_trace_safe_target("codex_otel.network_proxy"));
     }
 
     fn test_otel_settings() -> OtelSettings {

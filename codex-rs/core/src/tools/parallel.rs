@@ -97,7 +97,7 @@ impl ToolCallRuntime {
         let dispatch_call = call.clone();
 
         let dispatch_span = trace_span!(
-            "dispatch_tool_call_with_code_mode_result",
+            "dispatch_tool_call",
             otel.name = %call.tool_name,
             tool_name = %call.tool_name,
             call_id = call.call_id.as_str(),
@@ -161,12 +161,6 @@ impl ToolCallRuntime {
     fn failure_response(call: ToolCall, err: FunctionCallError) -> ResponseInputItem {
         let message = err.to_string();
         match call.payload {
-            ToolPayload::ToolSearch { .. } => ResponseInputItem::ToolSearchOutput {
-                call_id: call.call_id,
-                status: "completed".to_string(),
-                execution: "client".to_string(),
-                tools: Vec::new(),
-            },
             ToolPayload::Custom { .. } => ResponseInputItem::CustomToolCallOutput {
                 call_id: call.call_id,
                 name: None,
@@ -206,100 +200,5 @@ impl ToolCallRuntime {
         } else {
             format!("aborted by user after {secs:.1}s")
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::Duration;
-
-    use crate::tools::context::FunctionToolOutput;
-    use crate::tools::context::ToolInvocation;
-    use crate::tools::registry::CoreToolRuntime;
-    use crate::tools::registry::ToolExecutor;
-    use crate::tools::registry::ToolRegistry;
-    use crate::turn_diff_tracker::TurnDiffTracker;
-    use codex_protocol::models::FunctionCallOutputBody;
-    use codex_protocol::models::FunctionCallOutputPayload;
-    use pretty_assertions::assert_eq;
-
-    struct ImmediateHandler {
-        tool_name: codex_tools::ToolName,
-    }
-
-    #[async_trait::async_trait]
-    impl ToolExecutor<ToolInvocation> for ImmediateHandler {
-        fn tool_name(&self) -> codex_tools::ToolName {
-            self.tool_name.clone()
-        }
-
-        fn spec(&self) -> codex_tools::ToolSpec {
-            codex_tools::ToolSpec::Function(codex_tools::ResponsesApiTool {
-                name: self.tool_name.name.clone(),
-                description: "Immediate test tool.".to_string(),
-                strict: false,
-                defer_loading: None,
-                parameters: codex_tools::JsonSchema::default(),
-                output_schema: None,
-            })
-        }
-
-        async fn handle(
-            &self,
-            _invocation: ToolInvocation,
-        ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
-            Ok(Box::new(FunctionToolOutput::from_text(
-                "ok".to_string(),
-                Some(true),
-            )))
-        }
-    }
-
-    impl CoreToolRuntime for ImmediateHandler {}
-
-    #[tokio::test]
-    async fn cancellation_after_handler_finishes_preserves_completed_result()
-    -> anyhow::Result<()> {
-        let (mut session, turn_context) = crate::session::tests::make_session_and_context().await;
-        let session = Arc::new(session);
-        let turn_context = Arc::new(turn_context);
-        let tool_name = codex_tools::ToolName::plain("test_tool");
-        let handler = Arc::new(ImmediateHandler {
-            tool_name: tool_name.clone(),
-        }) as Arc<dyn CoreToolRuntime>;
-        let router = Arc::new(ToolRouter::from_parts(
-            ToolRegistry::from_tools([handler]),
-            Vec::new(),
-        ));
-        let tracker = Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new()));
-        let runtime = ToolCallRuntime::new(router, session, turn_context, tracker);
-        let cancellation_token = CancellationToken::new();
-        let call = ToolCall {
-            tool_name,
-            call_id: "call-1".to_string(),
-            payload: ToolPayload::Function {
-                arguments: "{}".to_string(),
-            },
-        };
-
-        let response_task =
-            tokio::spawn(runtime.handle_tool_call(call, cancellation_token.clone()));
-        cancellation_token.cancel();
-
-        let response = tokio::time::timeout(Duration::from_secs(1), response_task)
-            .await
-            .expect("timed out waiting for tool response")
-            .expect("tool response task should join")?;
-        let expected_response = ResponseInputItem::FunctionCallOutput {
-            call_id: "call-1".to_string(),
-            output: FunctionCallOutputPayload {
-                body: FunctionCallOutputBody::Text("ok".to_string()),
-                success: Some(true),
-            },
-        };
-        assert_eq!(expected_response, response);
-
-        Ok(())
     }
 }

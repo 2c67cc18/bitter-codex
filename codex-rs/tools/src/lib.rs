@@ -1,12 +1,8 @@
-//! Shared tool definitions and Responses API tool primitives that can live
-//! outside `codex-core`.
-
 mod dynamic_tool;
 mod function_call_error;
 mod image_detail;
 mod json_schema;
 mod responses_api;
-mod tool_config;
 mod tool_definition;
 mod tool_executor;
 mod tool_output;
@@ -34,14 +30,6 @@ pub use responses_api::coalesce_loadable_tool_specs;
 pub use responses_api::default_namespace_description;
 pub use responses_api::dynamic_tool_to_responses_api_tool;
 pub use responses_api::tool_definition_to_responses_api_tool;
-pub use tool_config::ShellCommandBackendConfig;
-pub use tool_config::ToolEnvironmentMode;
-pub use tool_config::ToolUserShellType;
-pub use tool_config::UnifiedExecShellMode;
-pub use tool_config::ZshForkConfig;
-pub use tool_config::request_user_input_available_modes;
-pub use tool_config::shell_command_backend_for_features;
-pub use tool_config::shell_type_for_model_and_features;
 pub use tool_definition::ToolDefinition;
 pub use tool_executor::ToolExecutor;
 pub use tool_executor::ToolExposure;

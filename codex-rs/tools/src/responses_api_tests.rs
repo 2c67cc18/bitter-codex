@@ -19,7 +19,8 @@ fn tool_definition_to_responses_api_tool_omits_false_defer_loading() {
             description: "Look up an order".to_string(),
             input_schema: JsonSchema::object(
                 BTreeMap::from([(
-                    "order_id".to_string(), JsonSchema::string(/*description*/ None),
+                    "order_id".to_string(),
+                    JsonSchema::string(/*description*/ None),
                 )]),
                 Some(vec!["order_id".to_string()]),
                 Some(false.into())
@@ -34,7 +35,8 @@ fn tool_definition_to_responses_api_tool_omits_false_defer_loading() {
             defer_loading: None,
             parameters: JsonSchema::object(
                 BTreeMap::from([(
-                    "order_id".to_string(), JsonSchema::string(/*description*/ None),
+                    "order_id".to_string(),
+                    JsonSchema::string(/*description*/ None),
                 )]),
                 Some(vec!["order_id".to_string()]),
                 Some(false.into())
@@ -70,7 +72,8 @@ fn dynamic_tool_to_responses_api_tool_preserves_defer_loading() {
             defer_loading: Some(true),
             parameters: JsonSchema::object(
                 BTreeMap::from([(
-                    "order_id".to_string(), JsonSchema::string(/*description*/ None),
+                    "order_id".to_string(),
+                    JsonSchema::string(/*description*/ None),
                 )]),
                 Some(vec!["order_id".to_string()]),
                 Some(false.into())
@@ -83,7 +86,7 @@ fn dynamic_tool_to_responses_api_tool_preserves_defer_loading() {
 #[test]
 fn loadable_tool_spec_namespace_serializes_with_deferred_child_tools() {
     let namespace = LoadableToolSpec::Namespace(ResponsesApiNamespace {
-        name: "mcp__codex_apps__calendar".to_string(),
+        name: "calendar".to_string(),
         description: "Plan events".to_string(),
         tools: vec![ResponsesApiNamespaceTool::Function(ResponsesApiTool {
             name: "create_event".to_string(),
@@ -105,7 +108,7 @@ fn loadable_tool_spec_namespace_serializes_with_deferred_child_tools() {
         value,
         json!({
             "type": "namespace",
-            "name": "mcp__codex_apps__calendar",
+            "name": "calendar",
             "description": "Plan events",
             "tools": [
                 {

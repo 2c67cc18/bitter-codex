@@ -16,11 +16,6 @@ use codex_protocol::openai_models::ModelsResponse;
 use crate::auth::resolve_provider_auth;
 use crate::models_endpoint::OpenAiModelsEndpoint;
 
-/// Optional provider-backed features that Codex may expose at runtime.
-///
-/// These capabilities are a provider-owned upper bound. Callers can disable
-/// more functionality through normal config, but should not expose a feature
-/// that the active provider marks unsupported here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProviderCapabilities {
     pub namespace_tools: bool,
@@ -38,14 +33,12 @@ impl Default for ProviderCapabilities {
     }
 }
 
-/// Current app-visible account state for a model provider.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderAccountState {
     pub account: Option<ProviderAccount>,
     pub requires_openai_auth: bool,
 }
 
-/// Error returned when a provider cannot construct its app-visible account state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderAccountError {
     MissingChatgptAccountDetails,
@@ -68,70 +61,39 @@ impl std::error::Error for ProviderAccountError {}
 
 pub type ProviderAccountResult = std::result::Result<ProviderAccountState, ProviderAccountError>;
 
-/// Default model used for automatic approval review when a provider does not
-/// require a backend-specific model ID.
-pub const DEFAULT_APPROVAL_REVIEW_PREFERRED_MODEL: &str = "codex-auto-review";
-
-/// Runtime provider abstraction used by model execution.
-///
-/// Implementations own provider-specific behavior for a model backend. The
-/// `ModelProviderInfo` returned by `info` is the serialized/configured provider
-/// metadata used by the default OpenAI-compatible implementation.
 #[async_trait::async_trait]
 pub trait ModelProvider: fmt::Debug + Send + Sync {
-    /// Returns the configured provider metadata.
     fn info(&self) -> &ModelProviderInfo;
 
-    /// Returns the provider-owned capability upper bounds.
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities::default()
     }
 
-    /// Returns the preferred model used for automatic approval review.
-    ///
-    /// Providers that require backend-specific model IDs should override this.
-    fn approval_review_preferred_model(&self) -> &'static str {
-        DEFAULT_APPROVAL_REVIEW_PREFERRED_MODEL
-    }
-
-    /// Returns whether requests made through this provider should include attestation.
     fn supports_attestation(&self) -> bool {
         false
     }
 
-    /// Returns the provider-scoped auth manager, when this provider uses one.
-    ///
-    /// TODO(celia-oai): Make auth manager access internal to this crate so callers
-    /// resolve provider-specific auth only through `ModelProvider`. We first need
-    /// to think through whether Codex should have a unified provider-specific auth
-    /// manager throughout the codebase; that is a larger refactor than this change.
     fn auth_manager(&self) -> Option<Arc<AuthManager>>;
 
-    /// Returns the current provider-scoped auth value, if one is configured.
     async fn auth(&self) -> Option<CodexAuth>;
 
-    /// Returns the current app-visible account state for this provider.
     fn account_state(&self) -> ProviderAccountResult;
 
-    /// Returns provider configuration adapted for the API client.
     async fn api_provider(&self) -> codex_protocol::error::Result<Provider> {
         let auth = self.auth().await;
         self.info()
             .to_api_provider(auth.as_ref().map(CodexAuth::auth_mode))
     }
 
-    /// Returns the provider base URL that will be used at request time.
     async fn runtime_base_url(&self) -> codex_protocol::error::Result<Option<String>> {
         Ok(self.info().base_url.clone())
     }
 
-    /// Returns the auth provider used to attach request credentials.
     async fn api_auth(&self) -> codex_protocol::error::Result<SharedAuthProvider> {
         let auth = self.auth().await;
         resolve_provider_auth(auth.as_ref(), self.info())
     }
 
-    /// Creates the model manager implementation appropriate for this provider.
     fn models_manager(
         &self,
         codex_home: PathBuf,
@@ -139,10 +101,8 @@ pub trait ModelProvider: fmt::Debug + Send + Sync {
     ) -> SharedModelsManager;
 }
 
-/// Shared runtime model provider handle.
 pub type SharedModelProvider = Arc<dyn ModelProvider>;
 
-/// Creates the default runtime model provider for configured provider metadata.
 pub fn create_model_provider(
     provider_info: ModelProviderInfo,
     auth_manager: Option<Arc<AuthManager>>,
@@ -150,7 +110,6 @@ pub fn create_model_provider(
     Arc::new(ConfiguredModelProvider::new(provider_info, auth_manager))
 }
 
-/// Runtime model provider backed by configured `ModelProviderInfo`.
 #[derive(Clone, Debug)]
 struct ConfiguredModelProvider {
     info: ModelProviderInfo,
@@ -278,7 +237,6 @@ mod tests {
             base_url: Some(base_url),
             env_key: None,
             env_key_instructions: None,
-            experimental_bearer_token: None,
             auth: None,
             wire_api: WireApi::Responses,
             query_params: None,
@@ -309,7 +267,6 @@ mod tests {
             "supports_reasoning_summaries": false,
             "support_verbosity": false,
             "default_verbosity": null,
-            "apply_patch_tool_type": null,
             "truncation_policy": {"mode": "bytes", "limit": 10_000},
             "supports_parallel_tool_calls": false,
             "supports_image_detail_original": false,
@@ -322,33 +279,14 @@ mod tests {
 
     #[test]
     fn configured_provider_uses_default_capabilities() {
-        let provider = create_model_provider(
-            ModelProviderInfo::create_openai_provider(/*base_url*/ None),
-            /*auth_manager*/ None,
-        );
+        let provider = create_model_provider(ModelProviderInfo::create_openai_provider(None), None);
 
         assert_eq!(provider.capabilities(), ProviderCapabilities::default());
     }
-
-    #[test]
-    fn configured_provider_uses_default_approval_review_preferred_model() {
-        let provider = create_model_provider(
-            ModelProviderInfo::create_openai_provider(/*base_url*/ None),
-            /*auth_manager*/ None,
-        );
-
-        assert_eq!(
-            provider.approval_review_preferred_model(),
-            DEFAULT_APPROVAL_REVIEW_PREFERRED_MODEL
-        );
-    }
-
     #[tokio::test]
     async fn configured_provider_runtime_base_url_uses_configured_base_url() {
-        let provider = create_model_provider(
-            provider_for("https://example.test/v1".to_string()),
-            /*auth_manager*/ None,
-        );
+        let provider =
+            create_model_provider(provider_for("https://example.test/v1".to_string()), None);
 
         assert_eq!(
             provider
@@ -361,10 +299,7 @@ mod tests {
 
     #[test]
     fn openai_provider_returns_unauthenticated_openai_account_state() {
-        let provider = create_model_provider(
-            ModelProviderInfo::create_openai_provider(/*base_url*/ None),
-            /*auth_manager*/ None,
-        );
+        let provider = create_model_provider(ModelProviderInfo::create_openai_provider(None), None);
 
         assert_eq!(
             provider.account_state(),
@@ -378,7 +313,7 @@ mod tests {
     #[test]
     fn openai_provider_returns_api_key_account_state() {
         let provider = create_model_provider(
-            ModelProviderInfo::create_openai_provider(/*base_url*/ None),
+            ModelProviderInfo::create_openai_provider(None),
             Some(AuthManager::from_auth_for_testing(CodexAuth::from_api_key(
                 "openai-api-key",
             ))),
@@ -403,7 +338,7 @@ mod tests {
                 requires_openai_auth: false,
                 ..Default::default()
             },
-            /*auth_manager*/ None,
+            None,
         );
 
         assert_eq!(
@@ -412,46 +347,6 @@ mod tests {
                 account: None,
                 requires_openai_auth: false,
             })
-        );
-    }
-
-    #[tokio::test]
-    async fn configured_provider_models_manager_uses_provider_bearer_token() {
-        let server = MockServer::start().await;
-        let remote_models = vec![remote_model("provider-model")];
-
-        Mock::given(method("GET"))
-            .and(path("/models"))
-            .and(header_regex("Authorization", "Bearer provider-token"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .insert_header("content-type", "application/json")
-                    .set_body_json(ModelsResponse {
-                        models: remote_models.clone(),
-                    }),
-            )
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        let mut provider_info = provider_for(server.uri());
-        provider_info.experimental_bearer_token = Some("provider-token".to_string());
-        let provider = create_model_provider(
-            provider_info,
-            Some(AuthManager::from_auth_for_testing(
-                CodexAuth::create_dummy_chatgpt_auth_for_testing(),
-            )),
-        );
-
-        let manager =
-            provider.models_manager(test_codex_home(), /*config_model_catalog*/ None);
-        let catalog = manager.raw_model_catalog(RefreshStrategy::Online).await;
-
-        assert!(
-            catalog
-                .models
-                .iter()
-                .any(|model| model.slug == "provider-model")
         );
     }
 }

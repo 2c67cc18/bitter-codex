@@ -12,7 +12,6 @@ pub enum StdioPolicy {
     Inherit,
 }
 
-/// Spawns the child process for the local shell runtime.
 pub(crate) struct SpawnChildRequest<'a> {
     pub program: PathBuf,
     pub args: Vec<String>,
@@ -32,9 +31,7 @@ pub(crate) async fn spawn_child_async(request: SpawnChildRequest<'_>) -> std::io
         env,
     } = request;
 
-    trace!(
-        "spawn_child_async: {program:?} {args:?} {arg0:?} {cwd:?} {stdio_policy:?} {env:?}"
-    );
+    trace!("spawn_child_async: {program:?} {args:?} {arg0:?} {cwd:?} {stdio_policy:?} {env:?}");
 
     let mut cmd = Command::new(&program);
     #[cfg(unix)]
@@ -43,10 +40,6 @@ pub(crate) async fn spawn_child_async(request: SpawnChildRequest<'_>) -> std::io
     cmd.current_dir(cwd);
     cmd.env_clear();
     cmd.envs(env);
-
-    // If this Codex process dies (including being killed via SIGKILL), we want
-    // any child processes that were spawned as part of a `"shell"` tool call
-    // to also be terminated.
 
     #[cfg(unix)]
     unsafe {
@@ -58,11 +51,8 @@ pub(crate) async fn spawn_child_async(request: SpawnChildRequest<'_>) -> std::io
                 codex_utils_pty::process_group::detach_from_tty()?;
             }
 
-            // This relies on prctl(2), so it only works on Linux.
             #[cfg(target_os = "linux")]
             {
-                // This prctl call effectively requests, "deliver SIGTERM when my
-                // current parent dies."
                 codex_utils_pty::process_group::set_parent_death_signal(parent_pid)?;
             }
             Ok(())
@@ -71,16 +61,11 @@ pub(crate) async fn spawn_child_async(request: SpawnChildRequest<'_>) -> std::io
 
     match stdio_policy {
         StdioPolicy::RedirectForShellTool => {
-            // Do not create a file descriptor for stdin because otherwise some
-            // commands may hang forever waiting for input. For example, ripgrep has
-            // a heuristic where it may try to read from stdin as explained here:
-            // https://github.com/BurntSushi/ripgrep/blob/e2362d4d5185d02fa857bf381e7bd52e66fafc73/crates/core/flags/hiargs.rs#L1101-L1103
             cmd.stdin(Stdio::null());
 
             cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
         }
         StdioPolicy::Inherit => {
-            // Inherit stdin, stdout, and stderr from the parent process.
             cmd.stdin(Stdio::inherit())
                 .stdout(Stdio::inherit())
                 .stderr(Stdio::inherit());

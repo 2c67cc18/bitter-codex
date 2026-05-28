@@ -22,8 +22,6 @@ fn formatter() -> &'static DecimalFormatter {
     FORMATTER.get_or_init(|| make_local_formatter().unwrap_or_else(make_en_us_formatter))
 }
 
-/// Format an i64 with locale-aware digit separators (e.g. "12345" -> "12,345"
-/// for en-US).
 pub fn format_with_separators(n: i64) -> String {
     formatter().format(&Decimal::from(n)).to_string()
 }
@@ -38,7 +36,6 @@ fn format_si_suffix_with_formatter(n: i64, formatter: &DecimalFormatter) -> Stri
         return formatter.format(&Decimal::from(n)).to_string();
     }
 
-    // Format `n / scale` with the requested number of fractional digits.
     let format_scaled = |n: i64, scale: i64, frac_digits: u32| -> String {
         let value = n as f64 / scale as f64;
         let scaled: i64 = (value * 10f64.powi(frac_digits as i32)).round() as i64;
@@ -59,19 +56,12 @@ fn format_si_suffix_with_formatter(n: i64, formatter: &DecimalFormatter) -> Stri
         }
     }
 
-    // Above 1000G, keep whole‑G precision.
     format!(
         "{}G",
         format_with_separators_with_formatter(((n as f64) / 1e9).round() as i64, formatter)
     )
 }
 
-/// Format token counts to 3 significant figures, using base-10 SI suffixes.
-///
-/// Examples (en-US):
-///   - 999 -> "999"
-///   - 1200 -> "1.20K"
-///   - 123456789 -> "123M"
 pub fn format_si_suffix(n: i64) -> String {
     format_si_suffix_with_formatter(n, formatter())
 }
@@ -97,7 +87,7 @@ mod tests {
         assert_eq!(fmt(999_950_000), "1.00G");
         assert_eq!(fmt(1_000_000_000), "1.00G");
         assert_eq!(fmt(1_234_000_000), "1.23G");
-        // Above 1000G we keep whole‑G precision (no higher unit supported here).
+
         assert_eq!(fmt(1_234_000_000_000), "1,234G");
     }
 }

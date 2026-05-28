@@ -1,5 +1,3 @@
-//! Path normalization, symlink resolution, and atomic writes shared across Codex crates.
-
 pub(crate) mod env;
 pub use env::is_wsl;
 
@@ -15,9 +13,6 @@ pub fn normalize_for_path_comparison(path: impl AsRef<Path>) -> std::io::Result<
     Ok(normalize_for_wsl(canonical))
 }
 
-/// Compare paths after applying Codex's filesystem normalization.
-///
-/// If either path cannot be normalized, this falls back to direct path equality.
 pub fn paths_match_after_normalization(left: impl AsRef<Path>, right: impl AsRef<Path>) -> bool {
     if let (Ok(left), Ok(right)) = (
         normalize_for_path_comparison(left.as_ref()),
@@ -29,7 +24,7 @@ pub fn paths_match_after_normalization(left: impl AsRef<Path>, right: impl AsRef
 }
 
 pub fn normalize_for_native_workdir(path: impl AsRef<Path>) -> PathBuf {
-    normalize_for_native_workdir_with_flag(path.as_ref().to_path_buf(), cfg!(windows))
+    path.as_ref().to_path_buf()
 }
 
 pub struct SymlinkWritePaths {
@@ -37,12 +32,6 @@ pub struct SymlinkWritePaths {
     pub write_path: PathBuf,
 }
 
-/// Resolve the final filesystem target for `path` while retaining a safe write path.
-///
-/// This follows symlink chains (including relative symlink targets) until it reaches a
-/// non-symlink path. If the chain cycles or any metadata/link resolution fails, it
-/// returns `read_path: None` and uses the original absolute path as `write_path`.
-/// There is no fixed max-resolution count; cycles are detected via a visited set.
 pub fn resolve_symlink_write_paths(path: &Path) -> io::Result<SymlinkWritePaths> {
     let root = AbsolutePathBuf::from_absolute_path(path)
         .map(AbsolutePathBuf::into_path_buf)
@@ -50,7 +39,6 @@ pub fn resolve_symlink_write_paths(path: &Path) -> io::Result<SymlinkWritePaths>
     let mut current = root.clone();
     let mut visited = HashSet::new();
 
-    // Follow symlink chains while guarding against cycles.
     loop {
         let meta = match std::fs::symlink_metadata(&current) {
             Ok(meta) => meta,
@@ -75,7 +63,6 @@ pub fn resolve_symlink_write_paths(path: &Path) -> io::Result<SymlinkWritePaths>
             });
         }
 
-        // If we've already seen this path, the chain cycles.
         if !visited.insert(current.clone()) {
             return Ok(SymlinkWritePaths {
                 read_path: None,
@@ -136,14 +123,6 @@ fn normalize_for_wsl(path: PathBuf) -> PathBuf {
     normalize_for_wsl_with_flag(path, env::is_wsl())
 }
 
-fn normalize_for_native_workdir_with_flag(path: PathBuf, is_windows: bool) -> PathBuf {
-    if is_windows {
-        dunce::simplified(&path).to_path_buf()
-    } else {
-        path
-    }
-}
-
 fn normalize_for_wsl_with_flag(path: PathBuf, is_wsl: bool) -> PathBuf {
     if !is_wsl {
         return path;
@@ -200,7 +179,6 @@ fn lower_ascii_path(path: PathBuf) -> PathBuf {
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::ffi::OsStringExt;
 
-    // WSL mounts Windows drives under /mnt/<drive>, which are case-insensitive.
     let bytes = path.as_os_str().as_bytes();
     let mut lowered = Vec::with_capacity(bytes.len());
     for byte in bytes {

@@ -14,7 +14,6 @@ use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::Error;
 use tokio_tungstenite::tungstenite::Message;
 
-/// Generic telemetry.
 pub trait SseTelemetry: Send + Sync {
     fn on_sse_poll(
         &self,
@@ -31,7 +30,6 @@ pub trait SseTelemetry: Send + Sync {
     );
 }
 
-/// Telemetry for Responses WebSocket transport.
 pub trait WebsocketTelemetry: Send + Sync {
     fn on_ws_request(&self, duration: Duration, error: Option<&ApiError>, connection_reused: bool);
 
@@ -76,8 +74,6 @@ where
     F: Clone + Fn(Request) -> Fut,
     Fut: Future<Output = Result<T, TransportError>>,
 {
-    // Wraps `run_with_retry` to attach per-attempt request telemetry for both
-    // unary and streaming HTTP calls.
     run_with_retry(policy, make_request, move |req, attempt| {
         let telemetry = telemetry.clone();
         let send = send.clone();

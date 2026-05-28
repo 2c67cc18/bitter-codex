@@ -6,9 +6,6 @@ use tokio::sync::mpsc;
 use tokio::time::Duration;
 use tokio::time::timeout;
 
-/// Minimal SSE helper that forwards raw `data:` frames as UTF-8 strings.
-///
-/// Errors and idle timeouts are sent as `Err(StreamError)` before the task exits.
 pub fn sse_stream(
     stream: ByteStream,
     idle_timeout: Duration,

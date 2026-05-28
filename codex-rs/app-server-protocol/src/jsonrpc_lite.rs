@@ -1,6 +1,3 @@
-//! We do not do true JSON-RPC 2.0, as we neither send nor expect the
-//! "jsonrpc": "2.0" field.
-
 use codex_protocol::protocol::W3cTraceContext;
 use serde::Deserialize;
 use serde::Serialize;
@@ -8,9 +5,7 @@ use std::fmt;
 
 pub const JSONRPC_VERSION: &str = "2.0";
 
-#[derive(
-    Debug, Clone, PartialEq, PartialOrd, Ord, Deserialize, Serialize, Hash, Eq,
-)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Ord, Deserialize, Serialize, Hash, Eq)]
 #[serde(untagged)]
 pub enum RequestId {
     String(String),
@@ -28,7 +23,6 @@ impl fmt::Display for RequestId {
 
 pub type Result = serde_json::Value;
 
-/// Refers to any valid JSON-RPC object that can be decoded off the wire, or encoded to be sent.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum JSONRPCMessage {
@@ -38,19 +32,17 @@ pub enum JSONRPCMessage {
     Error(JSONRPCError),
 }
 
-/// A request that expects a response.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct JSONRPCRequest {
     pub id: RequestId,
     pub method: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params: Option<serde_json::Value>,
-    /// Optional W3C Trace Context for distributed tracing.
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace: Option<W3cTraceContext>,
 }
 
-/// A notification which does not expect a response.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct JSONRPCNotification {
     pub method: String,
@@ -58,14 +50,12 @@ pub struct JSONRPCNotification {
     pub params: Option<serde_json::Value>,
 }
 
-/// A successful (non-error) response to a request.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct JSONRPCResponse {
     pub id: RequestId,
     pub result: Result,
 }
 
-/// A response to a request that indicates an error occurred.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct JSONRPCError {
     pub error: JSONRPCErrorError,

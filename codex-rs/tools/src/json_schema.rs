@@ -8,12 +8,6 @@ use std::collections::BTreeSet;
 const DEFINITION_TABLE_KEYS: [&str; 2] = ["$defs", "definitions"];
 const SCHEMA_CHILD_KEYS: [&str; 2] = ["items", "anyOf"];
 
-/// Primitive JSON Schema type names we support in tool definitions.
-///
-/// This mirrors the OpenAI Structured Outputs subset for JSON Schema `type`:
-/// string, number, boolean, integer, object, array, and null.
-/// Keywords such as `enum`, `const`, and `anyOf` are modeled separately.
-/// See <https://developers.openai.com/api/docs/guides/structured-outputs#supported-schemas>.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum JsonSchemaPrimitiveType {
@@ -26,7 +20,6 @@ pub enum JsonSchemaPrimitiveType {
     Null,
 }
 
-/// JSON Schema `type` supports either a single type name or a union of names.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum JsonSchemaType {
@@ -34,7 +27,6 @@ pub enum JsonSchemaType {
     Multiple(Vec<JsonSchemaPrimitiveType>),
 }
 
-/// Generic JSON-Schema subset needed for our tool definitions.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct JsonSchema {
     #[serde(rename = "$ref", skip_serializing_if = "Option::is_none")]
@@ -65,7 +57,6 @@ pub struct JsonSchema {
 }
 
 impl JsonSchema {
-    /// Construct a scalar/object/array schema with a single JSON Schema type.
     fn typed(schema_type: JsonSchemaPrimitiveType, description: Option<String>) -> Self {
         Self {
             schema_type: Some(JsonSchemaType::Single(schema_type)),
@@ -135,7 +126,6 @@ impl JsonSchema {
     }
 }
 
-/// Whether additional properties are allowed, and if so, any required schema.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum AdditionalProperties {
@@ -155,7 +145,6 @@ impl From<JsonSchema> for AdditionalProperties {
     }
 }
 
-/// Parse the tool `input_schema` or return an error for invalid schema.
 pub fn parse_tool_input_schema(input_schema: &JsonValue) -> Result<JsonSchema, serde_json::Error> {
     let mut input_schema = input_schema.clone();
     sanitize_json_schema(&mut input_schema);
@@ -171,15 +160,9 @@ pub fn parse_tool_input_schema(input_schema: &JsonValue) -> Result<JsonSchema, s
     Ok(schema)
 }
 
-// Use compact normalized JSON bytes as a cheap local proxy for the 1k-token
-// schema budget.
 const MAX_COMPACT_TOOL_SCHEMA_BYTES: usize = 4_000;
 const MAX_COMPACT_TOOL_SCHEMA_DEPTH: usize = 2;
 
-/// Shrink unusually large tool schemas while preserving the top-level argument
-/// surface. Compaction is best-effort rather than a hard cap: it runs only
-/// after schema sanitization/pruning and applies increasingly lossy passes
-/// while the schema remains over budget.
 fn compact_large_tool_schema(value: &mut JsonValue) {
     for pass in LARGE_SCHEMA_COMPACTION_PASSES {
         if compact_schema_fits_budget(value) {
@@ -198,7 +181,7 @@ const LARGE_SCHEMA_COMPACTION_PASSES: &[LargeSchemaCompactionPass] = &[
 ];
 
 fn collapse_deep_schema_objects_from_root(value: &mut JsonValue) {
-    collapse_deep_schema_objects(value, /*depth*/ 0);
+    collapse_deep_schema_objects(value, 0);
 }
 
 fn compact_schema_fits_budget(value: &JsonValue) -> bool {
@@ -311,9 +294,6 @@ fn for_each_schema_child_mut(
     }
 }
 
-/// Replace local definition refs with empty schemas before dropping root
-/// definition tables, so downstream behavior does not depend on how a schema
-/// parser handles refs to missing definitions.
 fn drop_schema_definitions(value: &mut JsonValue) {
     rewrite_definition_refs_to_empty_schemas(value);
 
@@ -380,19 +360,9 @@ fn is_complex_schema_object(map: &serde_json::Map<String, JsonValue>) -> bool {
         || map.contains_key("$ref")
 }
 
-/// Sanitize a JSON Schema (as serde_json::Value) so it can fit our limited
-/// schema representation. This function:
-/// - Ensures every typed schema object has a `"type"` when required.
-/// - Preserves explicit `anyOf`.
-/// - Preserves `$ref` and reachable local `$defs` / `definitions`.
-/// - Collapses `const` into single-value `enum`.
-/// - Fills required child fields for object/array schema types, including
-///   nullable unions, with permissive defaults when absent.
-/// - Coerces object schemas with no recognized schema hints into `{}`.
 fn sanitize_json_schema(value: &mut JsonValue) {
     match value {
         JsonValue::Bool(_) => {
-            // JSON Schema boolean form: true/false. Coerce to an accept-all string.
             *value = json!({ "type": "string" });
         }
         JsonValue::Array(values) => {
@@ -466,12 +436,6 @@ fn sanitize_json_schema(value: &mut JsonValue) {
     }
 }
 
-/// Sanitize a schema definition table before deserializing into `JsonSchema`.
-///
-/// Definition tables must be objects. Codex keeps valid definition tables and
-/// recursively applies the same compatibility lowering used for inline schemas,
-/// but drops malformed tables so `strict: false` tool registration degrades
-/// gracefully instead of failing on an unreachable or invalid definition table.
 fn sanitize_schema_table(map: &mut serde_json::Map<String, JsonValue>, key: &str) {
     let should_remove = match map.get_mut(key) {
         Some(JsonValue::Object(definitions)) => {
@@ -511,8 +475,6 @@ struct DefinitionPointer {
     name: String,
 }
 
-/// Prune unused root definition entries to avoid sending tokens for definitions
-/// the tool schema never references.
 fn prune_unreachable_definitions(value: &mut JsonValue) {
     let reachable = collect_reachable_definitions(value);
     let JsonValue::Object(map) = value else {
@@ -633,8 +595,6 @@ fn parse_local_definition_ref(schema_ref: &str) -> Option<DefinitionPointer> {
         .into_iter()
         .find(|candidate| table.as_ref() == *candidate)?;
 
-    // Responses API non-strict mode accepts nested local refs such as
-    // `#/$defs/User/properties/name`, so keep the parent definition reachable.
     let (name, _) = pointer.split_front()?;
     Some(DefinitionPointer {
         table,

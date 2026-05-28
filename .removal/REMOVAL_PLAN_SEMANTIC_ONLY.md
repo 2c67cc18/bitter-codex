@@ -1618,3 +1618,9 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   surfaces because this pass intentionally removed additions without restoring
   deleted imports/crates. The next semantic worker must delete or reshape the
   remaining callers, not recreate local shims.
+- Config filesystem abstraction correction: do not restore
+  `codex-rs/config/src/file_system.rs`, `ExecutorFileSystem`, or test-only
+  filesystem adapters. That abstraction was part of the removed exec-server /
+  sandbox indirection. Retained config loading should be reshaped to plain
+  filesystem operations (`tokio::fs`/`std::fs` as appropriate), and tests should
+  use real temporary files rather than reintroducing the abstraction.

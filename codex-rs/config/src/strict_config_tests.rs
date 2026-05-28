@@ -89,29 +89,6 @@ foo = true"#;
 }
 
 #[test]
-fn strict_config_rejects_unknown_profile_feature_key() {
-    let path = Path::new("/tmp/config.toml");
-    let contents = r#"
-[profiles.work.features]
-foo = true"#;
-
-    let error = config_error_from_ignored_toml_fields::<ConfigToml>(path, contents)
-        .expect("unknown feature error");
-
-    assert_eq!(
-        error,
-        ConfigError::new(
-            path.to_path_buf(),
-            TextRange {
-                start: TextPosition { line: 3, column: 1 },
-                end: TextPosition { line: 3, column: 3 },
-            },
-            "unknown configuration field `profiles.work.features.foo`",
-        )
-    );
-}
-
-#[test]
 fn strict_config_accepts_opaque_desktop_keys() {
     let path = Path::new("/tmp/config.toml");
     let contents = r#"

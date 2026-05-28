@@ -91,7 +91,6 @@ impl<'de> Deserialize<'de> for SessionId {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -46,17 +46,15 @@ impl SessionTask for RegularTask {
     ) -> Option<String> {
         let sess = session.clone_session();
         let run_turn_span = trace_span!("run_turn");
-        // Regular turns emit `TurnStarted` inline so first-turn lifecycle does
-        // not wait on startup prewarm resolution.
+
         let event = EventMsg::TurnStarted(TurnStartedEvent {
             turn_id: ctx.sub_id.clone(),
             trace_id: ctx.trace_id.clone(),
             started_at: ctx.turn_timing_state.started_at_unix_secs().await,
             model_context_window: ctx.model_context_window(),
-            collaboration_mode_kind: ctx.collaboration_mode.mode,
         });
         sess.send_event(ctx.as_ref(), event).await;
-        sess.set_server_reasoning_included(/*included*/ false).await;
+        sess.set_server_reasoning_included(false).await;
         let prewarmed_client_session = match sess
             .consume_startup_prewarm_for_regular_turn(&cancellation_token)
             .await

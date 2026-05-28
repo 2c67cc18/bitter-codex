@@ -4,14 +4,6 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-[[bin]]
-name = "codex-app-server"
-path = "src/main.rs"
-
-[[bin]]
-name = "codex-app-server-test-notify-capture"
-path = "src/bin/notify_capture.rs"
-
 [lib]
 name = "codex_app_server"
 path = "src/lib.rs"
@@ -23,7 +15,6 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-base64 = { workspace = true }
 axum = { workspace = true, default-features = false, features = [
     "http1",
     "json",
@@ -37,9 +28,7 @@ codex-features = { workspace = true }
 codex-git-utils = { workspace = true }
 codex-otel = { workspace = true }
 codex-utils-cli = { workspace = true }
-codex-utils-pty = { workspace = true }
 codex-backend-client = { workspace = true }
-codex-chatgpt = { workspace = true }
 codex-login = { workspace = true }
 codex-model-provider = { workspace = true }
 codex-models-manager = { workspace = true }
@@ -49,11 +38,9 @@ codex-app-server-transport = { workspace = true }
 codex-rollout = { workspace = true }
 codex-state = { workspace = true }
 codex-thread-store = { workspace = true }
-codex-tools = { workspace = true }
 codex-utils-absolute-path = { workspace = true }
 codex-utils-json-to-toml = { workspace = true }
 chrono = { workspace = true }
-clap = { workspace = true, features = ["derive"] }
 futures = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -75,27 +62,9 @@ tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "json"
 uuid = { workspace = true, features = ["serde", "v7"] }
 
 [dev-dependencies]
-app_test_support = { workspace = true }
 axum = { workspace = true, default-features = false, features = [
     "http1",
     "json",
     "tokio",
 ] }
-base64 = { workspace = true }
-codex-model-provider-info = { workspace = true }
-codex-utils-cargo-bin = { workspace = true }
-core_test_support = { workspace = true }
-flate2 = { workspace = true }
-hmac = { workspace = true }
-opentelemetry = { workspace = true }
-opentelemetry_sdk = { workspace = true }
 pretty_assertions = { workspace = true }
-reqwest = { workspace = true, features = ["rustls-tls"] }
-serial_test = { workspace = true }
-sha2 = { workspace = true }
-shlex = { workspace = true }
-tar = { workspace = true }
-tokio-tungstenite = { workspace = true }
-tracing-opentelemetry = { workspace = true }
-url = { workspace = true }
-wiremock = { workspace = true }

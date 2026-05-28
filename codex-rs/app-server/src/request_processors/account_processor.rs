@@ -1,8 +1,7 @@
 use super::*;
 
-// Duration before a browser ChatGPT login attempt is abandoned.
 const LOGIN_CHATGPT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
-// The override is intentionally available only in debug builds, matching the login path below.
+
 #[cfg(debug_assertions)]
 const LOGIN_ISSUER_OVERRIDE_ENV_VAR: &str = "CODEX_APP_SERVER_LOGIN_ISSUER";
 
@@ -59,7 +58,6 @@ pub(crate) struct AccountRequestProcessor {
     thread_manager: Arc<ThreadManager>,
     outgoing: Arc<OutgoingMessageSender>,
     config: Arc<Config>,
-    config_manager: ConfigManager,
     active_login: Arc<Mutex<Option<ActiveLogin>>>,
 }
 
@@ -69,14 +67,12 @@ impl AccountRequestProcessor {
         thread_manager: Arc<ThreadManager>,
         outgoing: Arc<OutgoingMessageSender>,
         config: Arc<Config>,
-        config_manager: ConfigManager,
     ) -> Self {
         Self {
             auth_manager,
             thread_manager,
             outgoing,
             config,
-            config_manager,
             active_login: Arc::new(Mutex::new(None)),
         }
     }
@@ -159,53 +155,6 @@ impl AccountRequestProcessor {
         }
     }
 
-    async fn maybe_refresh_remote_installed_plugins_cache_for_current_config(
-        config_manager: &ConfigManager,
-        thread_manager: &Arc<ThreadManager>,
-        auth: Option<CodexAuth>,
-    ) {
-        match config_manager
-            .load_latest_config(/*fallback_cwd*/ None)
-            .await
-        {
-            Ok(config) => {
-                let refresh_thread_manager = Arc::clone(thread_manager);
-                let refresh_config_manager = config_manager.clone();
-                thread_manager
-                    .plugins_manager()
-                    .maybe_start_remote_installed_plugins_cache_refresh(
-                        &config.plugins_config_input(),
-                        auth,
-                        Some(Arc::new(move || {
-                            Self::spawn_effective_plugins_changed_task(
-                                Arc::clone(&refresh_thread_manager),
-                                refresh_config_manager.clone(),
-                            );
-                        })),
-                    );
-            }
-            Err(err) => {
-                warn!(
-                    "failed to reload config after account changed, skipping remote installed plugins cache refresh: {err}"
-                );
-            }
-        }
-    }
-
-    fn spawn_effective_plugins_changed_task(
-        thread_manager: Arc<ThreadManager>,
-        config_manager: ConfigManager,
-    ) {
-        tokio::spawn(async move {
-            thread_manager.plugins_manager().clear_cache();
-            thread_manager.skills_manager().clear_cache();
-            if thread_manager.list_thread_ids().await.is_empty() {
-                return;
-            }
-            crate::mcp_refresh::queue_best_effort_refresh(&thread_manager, &config_manager).await;
-        });
-    }
-
     async fn login_v2(
         &self,
         request_id: ConnectionRequestId,
@@ -265,7 +214,6 @@ impl AccountRequestProcessor {
             ));
         }
 
-        // Cancel any active login attempt.
         {
             let mut guard = self.active_login.lock().await;
             if let Some(active) = guard.take() {
@@ -295,12 +243,10 @@ impl AccountRequestProcessor {
         self.outgoing.send_result(request_id, result).await;
 
         if logged_in {
-            self.send_login_success_notifications(/*login_id*/ None)
-                .await;
+            self.send_login_success_notifications(None).await;
         }
     }
 
-    // Build options for a ChatGPT login attempt; performs validation.
     async fn login_chatgpt_common(
         &self,
         codex_streamlined_login: bool,
@@ -369,7 +315,6 @@ impl AccountRequestProcessor {
         let login_id = Uuid::new_v4();
         let shutdown_handle = server.cancel_handle();
 
-        // Replace active login if present.
         {
             let mut guard = self.active_login.lock().await;
             if let Some(existing) = guard.take() {
@@ -382,9 +327,7 @@ impl AccountRequestProcessor {
         }
 
         let outgoing_clone = self.outgoing.clone();
-        let config_manager = self.config_manager.clone();
         let thread_manager = Arc::clone(&self.thread_manager);
-        let chatgpt_base_url = self.config.chatgpt_base_url.clone();
         let active_login = self.active_login.clone();
         let auth_url = server.auth_url.clone();
         tokio::spawn(async move {
@@ -404,16 +347,13 @@ impl AccountRequestProcessor {
 
             Self::send_chatgpt_login_completion_notifications(
                 &outgoing_clone,
-                config_manager,
                 thread_manager,
-                chatgpt_base_url,
                 login_id,
                 success,
                 error_msg,
             )
             .await;
 
-            // Clear the active login if it matches this attempt. It may have been replaced or cancelled.
             let mut guard = active_login.lock().await;
             if guard.as_ref().map(ActiveLogin::login_id) == Some(login_id) {
                 *guard = None;
@@ -434,9 +374,7 @@ impl AccountRequestProcessor {
     async fn login_chatgpt_device_code_response(
         &self,
     ) -> Result<LoginAccountResponse, JSONRPCErrorError> {
-        let opts = self
-            .login_chatgpt_common(/*codex_streamlined_login*/ false)
-            .await?;
+        let opts = self.login_chatgpt_common(false).await?;
         let device_code = request_device_code(&opts)
             .await
             .map_err(Self::login_chatgpt_device_code_start_error)?;
@@ -458,9 +396,7 @@ impl AccountRequestProcessor {
         let user_code = device_code.user_code.clone();
 
         let outgoing_clone = self.outgoing.clone();
-        let config_manager = self.config_manager.clone();
         let thread_manager = Arc::clone(&self.thread_manager);
-        let chatgpt_base_url = self.config.chatgpt_base_url.clone();
         let active_login = self.active_login.clone();
         tokio::spawn(async move {
             let (success, error_msg) = tokio::select! {
@@ -477,9 +413,7 @@ impl AccountRequestProcessor {
 
             Self::send_chatgpt_login_completion_notifications(
                 &outgoing_clone,
-                config_manager,
                 thread_manager,
-                chatgpt_base_url,
                 login_id,
                 success,
                 error_msg,
@@ -542,8 +476,7 @@ impl AccountRequestProcessor {
         self.outgoing.send_result(request_id, result).await;
 
         if logged_in {
-            self.send_login_success_notifications(/*login_id*/ None)
-                .await;
+            self.send_login_success_notifications(None).await;
         }
     }
 
@@ -562,7 +495,6 @@ impl AccountRequestProcessor {
             ));
         }
 
-        // Cancel any active login attempt to avoid persisting managed auth state.
         {
             let mut guard = self.active_login.lock().await;
             if let Some(active) = guard.take() {
@@ -586,25 +518,10 @@ impl AccountRequestProcessor {
         )
         .map_err(|err| internal_error(format!("failed to set external auth: {err}")))?;
         self.auth_manager.reload().await;
-        self.config_manager.replace_cloud_requirements_loader(
-            self.auth_manager.clone(),
-            self.config.chatgpt_base_url.clone(),
-        );
-        self.config_manager
-            .sync_default_client_residency_requirement()
-            .await;
-
         Ok(LoginAccountResponse::ChatgptAuthTokens {})
     }
 
     async fn send_login_success_notifications(&self, login_id: Option<Uuid>) {
-        Self::maybe_refresh_remote_installed_plugins_cache_for_current_config(
-            &self.config_manager,
-            &self.thread_manager,
-            self.auth_manager.auth_cached(),
-        )
-        .await;
-
         let payload_login_completed = AccountLoginCompletedNotification {
             login_id: login_id.map(|id| id.to_string()),
             success: true,
@@ -625,9 +542,7 @@ impl AccountRequestProcessor {
 
     async fn send_chatgpt_login_completion_notifications(
         outgoing: &OutgoingMessageSender,
-        config_manager: ConfigManager,
         thread_manager: Arc<ThreadManager>,
-        chatgpt_base_url: String,
         login_id: Uuid,
         success: bool,
         error_msg: Option<String>,
@@ -644,19 +559,8 @@ impl AccountRequestProcessor {
         if success {
             let auth_manager = thread_manager.auth_manager();
             auth_manager.reload().await;
-            config_manager
-                .replace_cloud_requirements_loader(auth_manager.clone(), chatgpt_base_url);
-            config_manager
-                .sync_default_client_residency_requirement()
-                .await;
 
             let auth = auth_manager.auth_cached();
-            Self::maybe_refresh_remote_installed_plugins_cache_for_current_config(
-                &config_manager,
-                &thread_manager,
-                auth.clone(),
-            )
-            .await;
             let payload_v2 = AccountUpdatedNotification {
                 auth_mode: auth.as_ref().map(CodexAuth::api_auth_mode),
                 plan_type: auth.as_ref().and_then(CodexAuth::account_plan_type),
@@ -668,7 +572,6 @@ impl AccountRequestProcessor {
     }
 
     async fn logout_common(&self) -> std::result::Result<Option<AuthMode>, JSONRPCErrorError> {
-        // Cancel any active login attempt.
         {
             let mut guard = self.active_login.lock().await;
             if let Some(active) = guard.take() {
@@ -683,14 +586,6 @@ impl AccountRequestProcessor {
             }
         }
 
-        Self::maybe_refresh_remote_installed_plugins_cache_for_current_config(
-            &self.config_manager,
-            &self.thread_manager,
-            self.auth_manager.auth_cached(),
-        )
-        .await;
-
-        // Reflect the current auth method after logout (likely None).
         Ok(self
             .auth_manager
             .auth_cached()
@@ -745,9 +640,6 @@ impl AccountRequestProcessor {
 
         self.refresh_token_if_requested(do_refresh).await;
 
-        // Determine whether auth is required based on the active model provider.
-        // If a custom provider is configured with `requires_openai_auth == false`,
-        // then no auth step is required; otherwise, default to requiring auth.
         let requires_openai_auth = self.config.model_provider.requires_openai_auth;
 
         let response = if !requires_openai_auth {

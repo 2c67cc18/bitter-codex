@@ -11,37 +11,13 @@ use tokio::sync::Mutex;
 use tracing::Instrument;
 
 use crate::connection_rpc_gate::ConnectionRpcGate;
-use crate::outgoing_message::ConnectionId;
-
 type BoxFutureUnit = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum RequestSerializationQueueKey {
     Global(&'static str),
-    Thread {
-        thread_id: String,
-    },
-    ThreadPath {
-        path: PathBuf,
-    },
-    CommandExecProcess {
-        connection_id: ConnectionId,
-        process_id: String,
-    },
-    Process {
-        connection_id: ConnectionId,
-        process_handle: String,
-    },
-    FuzzyFileSearchSession {
-        session_id: String,
-    },
-    FsWatch {
-        connection_id: ConnectionId,
-        watch_id: String,
-    },
-    McpOauth {
-        server_name: String,
-    },
+    Thread { thread_id: String },
+    ThreadPath { path: PathBuf },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -52,7 +28,6 @@ pub(crate) enum RequestSerializationAccess {
 
 impl RequestSerializationQueueKey {
     pub(crate) fn from_scope(
-        connection_id: ConnectionId,
         scope: ClientRequestSerializationScope,
     ) -> (Self, RequestSerializationAccess) {
         match scope {
@@ -68,35 +43,6 @@ impl RequestSerializationQueueKey {
             ),
             ClientRequestSerializationScope::ThreadPath { path } => (
                 Self::ThreadPath { path },
-                RequestSerializationAccess::Exclusive,
-            ),
-            ClientRequestSerializationScope::CommandExecProcess { process_id } => (
-                Self::CommandExecProcess {
-                    connection_id,
-                    process_id,
-                },
-                RequestSerializationAccess::Exclusive,
-            ),
-            ClientRequestSerializationScope::Process { process_handle } => (
-                Self::Process {
-                    connection_id,
-                    process_handle,
-                },
-                RequestSerializationAccess::Exclusive,
-            ),
-            ClientRequestSerializationScope::FuzzyFileSearchSession { session_id } => (
-                Self::FuzzyFileSearchSession { session_id },
-                RequestSerializationAccess::Exclusive,
-            ),
-            ClientRequestSerializationScope::FsWatch { watch_id } => (
-                Self::FsWatch {
-                    connection_id,
-                    watch_id,
-                },
-                RequestSerializationAccess::Exclusive,
-            ),
-            ClientRequestSerializationScope::McpOauth { server_name } => (
-                Self::McpOauth { server_name },
                 RequestSerializationAccess::Exclusive,
             ),
         }
@@ -221,11 +167,11 @@ mod tests {
     }
 
     fn queue_drain_timeout() -> Duration {
-        Duration::from_secs(/*secs*/ 1)
+        Duration::from_secs(1)
     }
 
     fn shutdown_wait_timeout() -> Duration {
-        Duration::from_millis(/*millis*/ 50)
+        Duration::from_millis(50)
     }
 
     #[tokio::test]
@@ -450,7 +396,7 @@ mod tests {
         let (blocker_started_tx, blocker_started_rx) = oneshot::channel::<()>();
         let (blocker_release_tx, blocker_release_rx) = oneshot::channel::<()>();
         let (started_tx, mut started_rx) = mpsc::unbounded_channel();
-        let (release_tx, _) = broadcast::channel::<()>(/*capacity*/ 1);
+        let (release_tx, _) = broadcast::channel::<()>(1);
 
         queues
             .enqueue(
@@ -511,7 +457,7 @@ mod tests {
         let (blocker_started_tx, blocker_started_rx) = oneshot::channel::<()>();
         let (blocker_release_tx, blocker_release_rx) = oneshot::channel::<()>();
         let (read_started_tx, mut read_started_rx) = mpsc::unbounded_channel();
-        let (read_release_tx, _) = broadcast::channel::<()>(/*capacity*/ 1);
+        let (read_release_tx, _) = broadcast::channel::<()>(1);
         let (write_started_tx, write_started_rx) = oneshot::channel::<()>();
 
         queues

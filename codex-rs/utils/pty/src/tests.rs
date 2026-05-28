@@ -30,9 +30,6 @@ fn find_python() -> Option<String> {
 }
 
 fn setsid_available() -> bool {
-    if cfg!(windows) {
-        return false;
-    }
     std::process::Command::new("setsid")
         .arg("true")
         .status()
@@ -41,33 +38,18 @@ fn setsid_available() -> bool {
 }
 
 fn shell_command(program: &str) -> (String, Vec<String>) {
-    if cfg!(windows) {
-        let cmd = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
-        (cmd, vec!["/C".to_string(), program.to_string()])
-    } else {
-        (
-            "/bin/sh".to_string(),
-            vec!["-c".to_string(), program.to_string()],
-        )
-    }
+    (
+        "/bin/sh".to_string(),
+        vec!["-c".to_string(), program.to_string()],
+    )
 }
 
 fn echo_sleep_command(marker: &str) -> String {
-    if cfg!(windows) {
-        format!("echo {marker} & ping -n 2 127.0.0.1 > NUL")
-    } else {
-        format!("echo {marker}; sleep 0.05")
-    }
+    format!("echo {marker}; sleep 0.05")
 }
 
 fn split_stdout_stderr_command() -> String {
-    if cfg!(windows) {
-        // Keep this in cmd.exe syntax so the test does not depend on a runner-local
-        // PowerShell/Python setup just to produce deterministic split output.
-        "(echo split-out)&(>&2 echo split-err)".to_string()
-    } else {
-        "printf 'split-out\\n'; printf 'split-err\\n' >&2".to_string()
-    }
+    "printf 'split-out\\n'; printf 'split-err\\n' >&2".to_string()
 }
 
 async fn collect_split_output(mut output_rx: tokio::sync::mpsc::Receiver<Vec<u8>>) -> Vec<u8> {
@@ -116,10 +98,10 @@ async fn collect_output_until_exit(
             }
             res = &mut exit_rx => {
                 let code = res.unwrap_or(-1);
-                // On Windows (ConPTY in particular), it's possible to observe the exit notification
-                // before the final bytes are drained from the PTY reader thread. Drain for a brief
-                // "quiet" window to make output assertions deterministic.
-                let (quiet_ms, max_ms) = if cfg!(windows) { (200, 2_000) } else { (50, 500) };
+
+
+
+                let (quiet_ms, max_ms) = (50, 500);
                 let quiet = tokio::time::Duration::from_millis(quiet_ms);
                 let max_deadline =
                     tokio::time::Instant::now() + tokio::time::Duration::from_millis(max_ms);
@@ -221,7 +203,7 @@ async fn wait_for_python_repl_ready_via_probe(
     let mut collected = Vec::new();
     let marker = "__codex_pty_ready__";
     let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_millis(timeout_ms);
-    let probe_window = tokio::time::Duration::from_millis(if cfg!(windows) { 750 } else { 250 });
+    let probe_window = tokio::time::Duration::from_millis(250);
 
     while tokio::time::Instant::now() < deadline {
         writer
@@ -366,8 +348,8 @@ async fn pty_python_repl_emits_output_and_exits() -> anyhow::Result<()> {
     .await?;
     let (session, mut output_rx, exit_rx) = combine_spawned_output(spawned);
     let writer = session.writer_sender();
-    let newline = if cfg!(windows) { "\r\n" } else { "\n" };
-    let startup_timeout_ms = if cfg!(windows) { 10_000 } else { 5_000 };
+    let newline = "\n";
+    let startup_timeout_ms = 5_000;
     let mut output =
         wait_for_python_repl_ready(&mut output_rx, startup_timeout_ms, ready_marker).await?;
     writer
@@ -375,7 +357,7 @@ async fn pty_python_repl_emits_output_and_exits() -> anyhow::Result<()> {
         .await?;
     writer.send(format!("exit(){newline}").into_bytes()).await?;
 
-    let timeout_ms = if cfg!(windows) { 10_000 } else { 5_000 };
+    let timeout_ms = 5_000;
     let (remaining_output, code) = collect_output_until_exit(output_rx, exit_rx, timeout_ms).await;
     output.extend_from_slice(&remaining_output);
     let text = String::from_utf8_lossy(&output);
@@ -391,44 +373,27 @@ async fn pty_python_repl_emits_output_and_exits() -> anyhow::Result<()> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pipe_process_round_trips_stdin() -> anyhow::Result<()> {
-    let (program, args) = if cfg!(windows) {
-        let cmd = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
-        (
-            cmd,
-            vec![
-                "/Q".to_string(),
-                "/V:ON".to_string(),
-                "/D".to_string(),
-                "/C".to_string(),
-                "set /p line= & echo(!line!".to_string(),
-            ],
-        )
-    } else {
-        let Some(python) = find_python() else {
-            eprintln!("python not found; skipping pipe_process_round_trips_stdin");
-            return Ok(());
-        };
-        (
-            python,
-            vec![
-                "-u".to_string(),
-                "-c".to_string(),
-                "import sys; print(sys.stdin.readline().strip());".to_string(),
-            ],
-        )
+    let Some(program) = find_python() else {
+        eprintln!("python not found; skipping pipe_process_round_trips_stdin");
+        return Ok(());
     };
+    let args = vec![
+        "-u".to_string(),
+        "-c".to_string(),
+        "import sys; print(sys.stdin.readline().strip());".to_string(),
+    ];
     let env_map: HashMap<String, String> = std::env::vars().collect();
     let spawned = spawn_pipe_process(&program, &args, Path::new("."), &env_map, &None).await?;
     let (session, output_rx, exit_rx) = combine_spawned_output(spawned);
     let writer = session.writer_sender();
-    let newline = if cfg!(windows) { "\r\n" } else { "\n" };
+    let newline = "\n";
     writer
         .send(format!("roundtrip{newline}").into_bytes())
         .await?;
     drop(writer);
     session.close_stdin();
 
-    let (output, code) = collect_output_until_exit(output_rx, exit_rx, /*timeout_ms*/ 5_000).await;
+    let (output, code) = collect_output_until_exit(output_rx, exit_rx, 5_000).await;
     let text = String::from_utf8_lossy(&output);
 
     assert!(
@@ -504,7 +469,7 @@ async fn pipe_and_pty_share_interface() -> anyhow::Result<()> {
     let (_pipe_session, pipe_output_rx, pipe_exit_rx) = combine_spawned_output(pipe);
     let (_pty_session, pty_output_rx, pty_exit_rx) = combine_spawned_output(pty);
 
-    let timeout_ms = if cfg!(windows) { 10_000 } else { 3_000 };
+    let timeout_ms = 3_000;
     let (pipe_out, pipe_code) =
         collect_output_until_exit(pipe_output_rx, pipe_exit_rx, timeout_ms).await;
     let (pty_out, pty_code) =
@@ -537,7 +502,7 @@ async fn pipe_drains_stderr_without_stdout_activity() -> anyhow::Result<()> {
     let spawned = spawn_pipe_process(&python, &args, Path::new("."), &env_map, &None).await?;
     let (_session, output_rx, exit_rx) = combine_spawned_output(spawned);
 
-    let (output, code) = collect_output_until_exit(output_rx, exit_rx, /*timeout_ms*/ 10_000).await;
+    let (output, code) = collect_output_until_exit(output_rx, exit_rx, 10_000).await;
 
     assert_eq!(code, 0, "expected python to exit cleanly");
     assert!(!output.is_empty(), "expected stderr output to be drained");
@@ -558,7 +523,7 @@ async fn pipe_process_can_expose_split_stdout_and_stderr() -> anyhow::Result<()>
         exit_rx,
     } = spawned;
 
-    let timeout_ms = if cfg!(windows) { 10_000 } else { 2_000 };
+    let timeout_ms = 2_000;
     let timeout = tokio::time::Duration::from_millis(timeout_ms);
     let stdout_task = tokio::spawn(async move { collect_split_output(stdout_rx).await });
     let stderr_task = tokio::spawn(async move { collect_split_output(stderr_rx).await });
@@ -573,16 +538,8 @@ async fn pipe_process_can_expose_split_stdout_and_stderr() -> anyhow::Result<()>
         .await
         .map_err(|_| anyhow::anyhow!("timed out waiting to drain split stderr"))??;
 
-    let expected_stdout = if cfg!(windows) {
-        b"split-out\r\n".to_vec()
-    } else {
-        b"split-out\n".to_vec()
-    };
-    let expected_stderr = if cfg!(windows) {
-        b"split-err\r\n".to_vec()
-    } else {
-        b"split-err\n".to_vec()
-    };
+    let expected_stdout = b"split-out\n".to_vec();
+    let expected_stderr = b"split-err\n".to_vec();
 
     assert_eq!(stdout, expected_stdout);
     assert_eq!(stderr, expected_stderr);
@@ -788,7 +745,7 @@ async fn pty_terminate_kills_background_children_in_same_process_group() -> anyh
     .await?;
     let (session, mut output_rx, _exit_rx) = combine_spawned_output(spawned);
 
-    let bg_pid = match wait_for_marker_pid(&mut output_rx, marker, /*timeout_ms*/ 2_000).await {
+    let bg_pid = match wait_for_marker_pid(&mut output_rx, marker, 2_000).await {
         Ok(pid) => pid,
         Err(err) => {
             session.terminate();
@@ -802,7 +759,7 @@ async fn pty_terminate_kills_background_children_in_same_process_group() -> anyh
 
     session.terminate();
 
-    let exited = wait_for_process_exit(bg_pid, /*timeout_ms*/ 3_000).await?;
+    let exited = wait_for_process_exit(bg_pid, 3_000).await?;
     if !exited {
         let _ = unsafe { libc::kill(bg_pid, libc::SIGKILL) };
     }
@@ -852,7 +809,7 @@ async fn pty_spawn_can_preserve_inherited_fds() -> anyhow::Result<()> {
     drop(write_end);
 
     let (_session, output_rx, exit_rx) = combine_spawned_output(spawned);
-    let (_, code) = collect_output_until_exit(output_rx, exit_rx, /*timeout_ms*/ 2_000).await;
+    let (_, code) = collect_output_until_exit(output_rx, exit_rx, 2_000).await;
     assert_eq!(code, 0, "expected preserved-fd PTY child to exit cleanly");
 
     let mut pipe_output = String::new();
@@ -906,19 +863,14 @@ async fn pty_preserving_inherited_fds_keeps_python_repl_running() -> anyhow::Res
     let (session, mut output_rx, exit_rx) = combine_spawned_output(spawned);
     let writer = session.writer_sender();
     let newline = "\n";
-    let mut output = wait_for_python_repl_ready_via_probe(
-        &writer,
-        &mut output_rx,
-        /*timeout_ms*/ 5_000,
-        newline,
-    )
-    .await?;
+    let mut output =
+        wait_for_python_repl_ready_via_probe(&writer, &mut output_rx, 5_000, newline).await?;
     let marker = "__codex_preserved_py_pid:";
     writer
         .send(format!("import os; print('{marker}' + str(os.getpid())){newline}").into_bytes())
         .await?;
 
-    let python_pid = match wait_for_marker_pid(&mut output_rx, marker, /*timeout_ms*/ 2_000).await {
+    let python_pid = match wait_for_marker_pid(&mut output_rx, marker, 2_000).await {
         Ok(pid) => pid,
         Err(err) => {
             session.terminate();
@@ -931,8 +883,7 @@ async fn pty_preserving_inherited_fds_keeps_python_repl_running() -> anyhow::Res
     );
 
     writer.send(format!("exit(){newline}").into_bytes()).await?;
-    let (remaining_output, code) =
-        collect_output_until_exit(output_rx, exit_rx, /*timeout_ms*/ 5_000).await;
+    let (remaining_output, code) = collect_output_until_exit(output_rx, exit_rx, 5_000).await;
     output.extend_from_slice(&remaining_output);
 
     assert_eq!(code, 0, "expected python to exit cleanly");
@@ -1021,12 +972,7 @@ async fn pty_spawn_with_inherited_fds_supports_resize() -> anyhow::Result<()> {
 
     let (session, mut output_rx, exit_rx) = combine_spawned_output(spawned);
     let writer = session.writer_sender();
-    let mut output = wait_for_output_contains(
-        &mut output_rx,
-        "start:31 101\r\n",
-        /*timeout_ms*/ 5_000,
-    )
-    .await?;
+    let mut output = wait_for_output_contains(&mut output_rx, "start:31 101\r\n", 5_000).await?;
 
     session.resize(TerminalSize {
         rows: 45,
@@ -1035,8 +981,7 @@ async fn pty_spawn_with_inherited_fds_supports_resize() -> anyhow::Result<()> {
     writer.send(b"go\n".to_vec()).await?;
     session.close_stdin();
 
-    let (remaining_output, code) =
-        collect_output_until_exit(output_rx, exit_rx, /*timeout_ms*/ 5_000).await;
+    let (remaining_output, code) = collect_output_until_exit(output_rx, exit_rx, 5_000).await;
     output.extend_from_slice(&remaining_output);
     let text = String::from_utf8_lossy(&output);
     let normalized = text.replace("\r\n", "\n");
@@ -1089,7 +1034,7 @@ async fn pipe_spawn_no_stdin_can_preserve_inherited_fds() -> anyhow::Result<()> 
     drop(write_end);
 
     let (_session, output_rx, exit_rx) = combine_spawned_output(spawned);
-    let (_, code) = collect_output_until_exit(output_rx, exit_rx, /*timeout_ms*/ 2_000).await;
+    let (_, code) = collect_output_until_exit(output_rx, exit_rx, 2_000).await;
     assert_eq!(code, 0, "expected preserved-fd pipe child to exit cleanly");
 
     let mut pipe_output = String::new();

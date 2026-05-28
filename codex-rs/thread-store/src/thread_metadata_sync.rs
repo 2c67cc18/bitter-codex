@@ -7,12 +7,11 @@ use chrono::Utc;
 use codex_git_utils::collect_git_info;
 use codex_git_utils::get_git_repo_root;
 use codex_protocol::ThreadId;
+use codex_protocol::models::ContentItem;
+use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::GitInfo;
 use codex_protocol::protocol::RolloutItem;
-use codex_protocol::protocol::ThreadMemoryMode;
-use codex_protocol::protocol::USER_MESSAGE_BEGIN;
-use codex_protocol::protocol::UserMessageEvent;
 
 use crate::CreateThreadParams;
 use crate::GitInfoPatch;
@@ -24,12 +23,8 @@ const IMAGE_ONLY_USER_MESSAGE_PLACEHOLDER: &str = "[Image]";
 const THREAD_UPDATED_AT_TOUCH_INTERVAL: Duration = Duration::from_secs(5);
 #[cfg(test)]
 const THREAD_UPDATED_AT_TOUCH_INTERVAL: Duration = Duration::from_millis(50);
+const USER_MESSAGE_BEGIN: &str = "## My request for Codex:";
 
-/// Live-thread helper that derives metadata updates from canonical rollout items.
-///
-/// Stores receive raw history plus explicit metadata patches. This helper keeps append-derived
-/// metadata observation in the live layer without owning persistence-policy filtering or making
-/// `append_items` infer metadata inside a `ThreadStore` implementation.
 pub(crate) struct ThreadMetadataSync {
     thread_id: ThreadId,
     cwd_seen: bool,
@@ -68,14 +63,9 @@ impl ThreadMetadataSync {
             created_at: Some(created_at),
             updated_at: Some(created_at),
             source: Some(params.source.clone()),
-            thread_source: Some(params.thread_source),
-            agent_nickname: Some(params.source.get_nickname()),
-            agent_role: Some(params.source.get_agent_role()),
-            agent_path: Some(params.source.get_agent_path().map(Into::into)),
             cwd: Some(cwd.clone()),
             cli_version: Some(env!("CARGO_PKG_VERSION").to_string()),
             git_info: git_info.map(git_info_patch_from_observation),
-            memory_mode: Some(params.metadata.memory_mode),
             dynamic_tools,
             ..Default::default()
         };
@@ -204,10 +194,6 @@ impl ThreadMetadataSync {
                 RolloutItem::SessionMeta(meta_line) if meta_line.meta.id == self.thread_id => {
                     update.created_at = parse_session_timestamp(meta_line.meta.timestamp.as_str());
                     update.source = Some(meta_line.meta.source.clone());
-                    update.thread_source = Some(meta_line.meta.thread_source);
-                    update.agent_nickname = Some(meta_line.meta.agent_nickname.clone());
-                    update.agent_role = Some(meta_line.meta.agent_role.clone());
-                    update.agent_path = Some(meta_line.meta.agent_path.clone());
                     if let Some(model_provider) = meta_line.meta.model_provider.clone()
                         && !model_provider.is_empty()
                     {
@@ -223,11 +209,6 @@ impl ThreadMetadataSync {
                     if let Some(git_info) = meta_line.git.clone() {
                         update.git_info = Some(git_info_patch_from_observation(git_info));
                     }
-                    if let Some(memory_mode) = meta_line.meta.memory_mode.as_deref()
-                        && let Some(memory_mode) = parse_memory_mode(memory_mode)
-                    {
-                        update.memory_mode = Some(memory_mode);
-                    }
                     if let Some(dynamic_tools) = meta_line.meta.dynamic_tools.clone() {
                         update.dynamic_tools = Some(dynamic_tools);
                     }
@@ -239,11 +220,9 @@ impl ThreadMetadataSync {
                     }
                     update.model = Some(turn_ctx.model.clone());
                     update.reasoning_effort = turn_ctx.effort;
-                    update.approval_mode = Some(turn_ctx.approval_policy);
-                    update.sandbox_policy = Some(turn_ctx.sandbox_policy.clone());
                 }
-                RolloutItem::EventMsg(EventMsg::UserMessage(user)) => {
-                    if let Some(preview) = user_message_preview(user) {
+                RolloutItem::ResponseItem(item) => {
+                    if let Some((preview, title)) = user_response_item_preview_and_title(item) {
                         if !self.first_user_message_seen {
                             self.first_user_message_seen = true;
                             update.first_user_message = Some(preview.clone());
@@ -252,12 +231,9 @@ impl ThreadMetadataSync {
                             self.preview_seen = true;
                             update.preview = Some(preview);
                         }
-                    }
-                    if !self.title_seen {
-                        let title = strip_user_message_prefix(user.message.as_str());
-                        if !title.is_empty() {
+                        if !self.title_seen && !title.is_empty() {
                             self.title_seen = true;
-                            update.title = Some(title.to_string());
+                            update.title = Some(title);
                         }
                     }
                 }
@@ -266,18 +242,8 @@ impl ThreadMetadataSync {
                         update.token_usage = Some(info.total_token_usage.clone());
                     }
                 }
-                RolloutItem::EventMsg(EventMsg::ThreadGoalUpdated(event)) => {
-                    if !self.preview_seen {
-                        let objective = event.goal.objective.trim();
-                        if !objective.is_empty() {
-                            self.preview_seen = true;
-                            update.preview = Some(objective.to_string());
-                        }
-                    }
-                }
                 RolloutItem::SessionMeta(_)
                 | RolloutItem::EventMsg(_)
-                | RolloutItem::ResponseItem(_)
                 | RolloutItem::Compacted(_) => {}
             }
         }
@@ -293,14 +259,6 @@ impl ThreadMetadataSync {
             None => self.pending_update = Some(update),
         }
         self.pending_update_generation = self.pending_update_generation.wrapping_add(1);
-    }
-}
-
-fn parse_memory_mode(value: &str) -> Option<ThreadMemoryMode> {
-    match value {
-        "enabled" => Some(ThreadMemoryMode::Enabled),
-        "disabled" => Some(ThreadMemoryMode::Disabled),
-        _ => None,
     }
 }
 
@@ -321,20 +279,33 @@ fn strip_user_message_prefix(text: &str) -> &str {
     }
 }
 
-fn user_message_preview(user: &UserMessageEvent) -> Option<String> {
-    let message = strip_user_message_prefix(user.message.as_str());
-    if !message.is_empty() {
-        return Some(message.to_string());
+fn user_response_item_preview_and_title(item: &ResponseItem) -> Option<(String, String)> {
+    let ResponseItem::Message { role, content, .. } = item else {
+        return None;
+    };
+    if role != "user" {
+        return None;
     }
-    if user
-        .images
-        .as_ref()
-        .is_some_and(|images| !images.is_empty())
-        || !user.local_images.is_empty()
-    {
-        return Some(IMAGE_ONLY_USER_MESSAGE_PLACEHOLDER.to_string());
+    let mut text = String::new();
+    let mut has_image = false;
+    for item in content {
+        match item {
+            ContentItem::InputText { text: part } => text.push_str(part),
+            ContentItem::InputImage { .. } => has_image = true,
+            ContentItem::OutputText { .. } => {}
+        }
     }
-    None
+    let title = strip_user_message_prefix(text.as_str()).to_string();
+    if !title.is_empty() {
+        Some((title.clone(), title))
+    } else if has_image {
+        Some((
+            IMAGE_ONLY_USER_MESSAGE_PLACEHOLDER.to_string(),
+            String::new(),
+        ))
+    } else {
+        None
+    }
 }
 
 fn thread_updated_at_touch() -> ThreadMetadataPatch {
@@ -353,18 +324,11 @@ fn update_has_metadata_facts(update: &ThreadMetadataPatch) -> bool {
         || update.reasoning_effort.is_some()
         || update.created_at.is_some()
         || update.source.is_some()
-        || update.thread_source.is_some()
-        || update.agent_nickname.is_some()
-        || update.agent_role.is_some()
-        || update.agent_path.is_some()
         || update.cwd.is_some()
         || update.cli_version.is_some()
-        || update.approval_mode.is_some()
-        || update.sandbox_policy.is_some()
         || update.token_usage.is_some()
         || update.first_user_message.is_some()
         || update.git_info.is_some()
-        || update.memory_mode.is_some()
         || update.dynamic_tools.is_some()
 }
 
@@ -378,14 +342,12 @@ fn git_info_patch_from_observation(git_info: GitInfo) -> GitInfoPatch {
 
 #[cfg(test)]
 mod tests {
+    use codex_protocol::models::ContentItem;
+    use codex_protocol::models::ResponseItem;
     use codex_protocol::protocol::CompactedItem;
     use codex_protocol::protocol::SessionMeta;
     use codex_protocol::protocol::SessionMetaLine;
     use codex_protocol::protocol::SessionSource;
-    use codex_protocol::protocol::ThreadGoal;
-    use codex_protocol::protocol::ThreadGoalStatus;
-    use codex_protocol::protocol::ThreadGoalUpdatedEvent;
-    use codex_protocol::protocol::UserMessageEvent;
     use pretty_assertions::assert_eq;
 
     use super::*;
@@ -399,7 +361,7 @@ mod tests {
             thread_id,
             vec![
                 RolloutItem::SessionMeta(session_meta(thread_id)),
-                RolloutItem::EventMsg(EventMsg::UserMessage(user_message("hello metadata"))),
+                user_message("hello metadata"),
             ],
         ));
 
@@ -429,44 +391,17 @@ mod tests {
     }
 
     #[test]
-    fn goal_update_sets_preview_without_overriding_existing_preview() {
-        let thread_id = ThreadId::new();
-        let sync = ThreadMetadataSync::for_resume(&resume_params(
-            thread_id,
-            vec![
-                RolloutItem::EventMsg(EventMsg::ThreadGoalUpdated(goal_update(
-                    thread_id,
-                    "ship the refactor",
-                ))),
-                RolloutItem::EventMsg(EventMsg::UserMessage(user_message("first user text"))),
-            ],
-        ));
-
-        let update = sync.take_pending_update().expect("pending metadata update");
-        assert_eq!(update.patch.preview.as_deref(), Some("ship the refactor"));
-        assert_eq!(
-            update.patch.first_user_message.as_deref(),
-            Some("first user text")
-        );
-        assert_eq!(update.patch.title.as_deref(), Some("first user text"));
-    }
-
-    #[test]
     fn later_user_messages_do_not_emit_existing_preview_fields() {
         let thread_id = ThreadId::new();
         let mut sync = ThreadMetadataSync::for_resume(&resume_params(
             thread_id,
-            vec![RolloutItem::EventMsg(EventMsg::UserMessage(user_message(
-                "first user text",
-            )))],
+            vec![user_message("first user text")],
         ));
         let pending = sync.take_pending_update().expect("pending resume metadata");
         sync.mark_pending_update_applied(&pending);
 
         let update = sync
-            .observe_appended_items(&[RolloutItem::EventMsg(EventMsg::UserMessage(user_message(
-                "later user text",
-            )))])
+            .observe_appended_items(&[user_message("later user text")])
             .expect("updated_at touch");
 
         assert_eq!(update.patch.preview, None);
@@ -508,7 +443,7 @@ mod tests {
             thread_id,
             vec![
                 RolloutItem::SessionMeta(session_meta(thread_id)),
-                RolloutItem::EventMsg(EventMsg::UserMessage(user_message("hello metadata"))),
+                user_message("hello metadata"),
             ],
         ));
 
@@ -517,10 +452,8 @@ mod tests {
             "resume-only metadata should not flush without a new append"
         );
         assert!(
-            sync.observe_appended_items(&[RolloutItem::EventMsg(EventMsg::UserMessage(
-                user_message("new append"),
-            ))])
-            .is_some(),
+            sync.observe_appended_items(&[user_message("new append")])
+                .is_some(),
             "the first append should flush resume metadata together with append metadata"
         );
     }
@@ -534,20 +467,20 @@ mod tests {
             metadata: ThreadPersistenceMetadata {
                 cwd: None,
                 model_provider: "test-provider".to_string(),
-                memory_mode: ThreadMemoryMode::Enabled,
             },
             event_persistence_mode: ThreadEventPersistenceMode::Limited,
         }
     }
 
-    fn user_message(message: &str) -> UserMessageEvent {
-        UserMessageEvent {
-            message: message.to_string(),
-            images: None,
-            local_images: Vec::new(),
-            text_elements: Vec::new(),
-            ..Default::default()
-        }
+    fn user_message(message: &str) -> RolloutItem {
+        RolloutItem::ResponseItem(ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputText {
+                text: message.to_string(),
+            }],
+            phase: None,
+        })
     }
 
     fn session_meta(thread_id: ThreadId) -> SessionMetaLine {
@@ -559,23 +492,6 @@ mod tests {
                 ..Default::default()
             },
             git: None,
-        }
-    }
-
-    fn goal_update(thread_id: ThreadId, objective: &str) -> ThreadGoalUpdatedEvent {
-        ThreadGoalUpdatedEvent {
-            thread_id,
-            turn_id: None,
-            goal: ThreadGoal {
-                thread_id,
-                objective: objective.to_string(),
-                status: ThreadGoalStatus::Active,
-                token_budget: None,
-                tokens_used: 0,
-                time_used_seconds: 0,
-                created_at: 0,
-                updated_at: 0,
-            },
         }
     }
 }

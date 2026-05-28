@@ -1,8 +1,3 @@
-//! Root of the `codex-core` library.
-
-// Prevent accidental direct writes to stdout/stderr in library code. All
-// user-visible output must go through the appropriate abstraction (e.g.,
-// the TUI or the tracing stack).
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
 mod client;
@@ -11,7 +6,6 @@ pub(crate) mod session;
 pub use session::SteerInputError;
 mod codex_thread;
 mod compact_remote;
-mod compact_remote_v2;
 mod config_lock;
 pub use codex_thread::CodexThread;
 pub use codex_thread::CodexThreadSettingsOverrides;
@@ -22,35 +16,18 @@ pub mod context;
 mod context_manager;
 pub mod exec;
 pub mod exec_env;
-#[cfg(test)]
-mod git_info_tests;
 mod installation_id;
-mod original_image_detail;
 pub(crate) mod mention_syntax;
+mod original_image_detail;
 pub(crate) mod utils;
-pub use mention_syntax::PLUGIN_TEXT_MENTION_SIGIL;
 pub use mention_syntax::TOOL_MENTION_SIGIL;
 pub use utils::path_utils;
 #[doc(hidden)]
 pub(crate) mod prompt_debug;
 #[doc(hidden)]
 pub use prompt_debug::build_prompt_input;
-mod session_prefix;
 mod session_startup_prewarm;
 mod shell_detect;
-pub mod skills;
-pub(crate) use skills::SkillLoadOutcome;
-pub(crate) use skills::SkillMetadata;
-pub(crate) use skills::SkillsManager;
-pub(crate) use skills::build_available_skills;
-pub(crate) use skills::build_skill_name_counts;
-pub(crate) use skills::default_skill_metadata_budget;
-pub(crate) use skills::injection::SkillInjections;
-pub(crate) use skills::injection::build_skill_injections;
-pub(crate) use skills::injection::collect_explicit_skill_mentions;
-pub(crate) use skills::injection;
-pub(crate) use skills::manager;
-pub(crate) use skills::skills_load_input_from_config;
 mod stream_events_utils;
 pub mod test_support;
 mod unified_exec;
@@ -98,13 +75,7 @@ pub use rollout::SortDirection;
 pub use rollout::ThreadItem;
 pub use rollout::ThreadSortKey;
 pub use rollout::ThreadsPage;
-pub use rollout::append_thread_name;
 pub use rollout::find_archived_thread_path_by_id_str;
-#[deprecated(note = "use find_thread_path_by_id_str")]
-pub use rollout::find_conversation_path_by_id_str;
-pub use rollout::find_thread_meta_by_name_str;
-pub use rollout::find_thread_name_by_id;
-pub use rollout::find_thread_names_by_ids;
 pub use rollout::find_thread_path_by_id_str;
 pub use rollout::parse_cursor;
 pub use rollout::read_head_for_summary;
@@ -113,7 +84,6 @@ pub use rollout::rollout_date_parts;
 mod function_tool;
 mod state;
 mod tasks;
-mod user_shell_command;
 pub mod util;
 
 pub use client::ModelClient;
@@ -121,7 +91,6 @@ pub use client::ModelClientSession;
 pub use client::X_CODEX_INSTALLATION_ID_HEADER;
 pub use client::X_CODEX_TURN_METADATA_HEADER;
 pub use client_common::Prompt;
-pub use client_common::REVIEW_PROMPT;
 pub use client_common::ResponseEvent;
 pub use client_common::ResponseStream;
 pub use compact::content_items_to_text;

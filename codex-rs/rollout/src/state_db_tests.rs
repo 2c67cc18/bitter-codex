@@ -30,21 +30,19 @@ async fn try_init_waits_for_concurrent_startup_backfill() -> anyhow::Result<()> 
     let runtime =
         codex_state::StateRuntime::init(home.path().to_path_buf(), "test-provider".to_string())
             .await?;
-    let claimed = runtime.try_claim_backfill(/*lease_seconds*/ 60).await?;
+    let claimed = runtime.try_claim_backfill(60).await?;
     assert!(claimed);
     let runtime_for_completion = runtime.clone();
     let complete_backfill = tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-        runtime_for_completion
-            .mark_backfill_complete(/*last_watermark*/ None)
-            .await
+        runtime_for_completion.mark_backfill_complete(None).await
     });
 
     let initialized = try_init_with_roots_and_backfill_lease(
         home.path().to_path_buf(),
         home.path().to_path_buf(),
         "test-provider".to_string(),
-        /*backfill_lease_seconds*/ 60,
+        60,
     )
     .await?;
     complete_backfill.await??;
@@ -62,14 +60,14 @@ async fn try_init_times_out_waiting_for_stuck_startup_backfill() -> anyhow::Resu
     let runtime =
         codex_state::StateRuntime::init(home.path().to_path_buf(), "test-provider".to_string())
             .await?;
-    let claimed = runtime.try_claim_backfill(/*lease_seconds*/ 60).await?;
+    let claimed = runtime.try_claim_backfill(60).await?;
     assert!(claimed);
 
     let result = try_init_with_roots_and_backfill_lease(
         home.path().to_path_buf(),
         home.path().to_path_buf(),
         "test-provider".to_string(),
-        /*backfill_lease_seconds*/ 60,
+        60,
     )
     .await;
     let err = match result {

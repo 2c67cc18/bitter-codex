@@ -31,7 +31,6 @@ fn telemetry_transport_error_message(error: &TransportError) -> String {
     error.to_string()
 }
 
-/// Provider-owned OpenAI-compatible `/models` endpoint.
 #[derive(Debug)]
 pub(crate) struct OpenAiModelsEndpoint {
     provider_info: ModelProviderInfo,

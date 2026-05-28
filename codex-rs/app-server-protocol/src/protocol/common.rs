@@ -9,29 +9,17 @@ use serde::Deserialize;
 use serde::Serialize;
 use strum_macros::Display;
 
-/// Authentication mode for OpenAI-backed providers.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 pub enum AuthMode {
-    /// OpenAI API key provided by the caller and stored by Codex.
     ApiKey,
-    /// ChatGPT OAuth managed by Codex (tokens persisted and refreshed by Codex).
+
     Chatgpt,
-    /// [UNSTABLE] FOR OPENAI INTERNAL USE ONLY - DO NOT USE.
-    ///
-    /// ChatGPT auth tokens are supplied by an external host app and are only
-    /// stored in memory. Token refresh must be handled by the external host app.
+
     #[serde(rename = "chatgptAuthTokens")]
     #[strum(serialize = "chatgptAuthTokens")]
     ChatgptAuthTokens,
-    /// Programmatic Codex auth backed by a registered Agent Identity.
-    #[serde(rename = "agentIdentity")]
-    #[strum(serialize = "agentIdentity")]
-    AgentIdentity,
 }
-
-
-
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClientRequestSerializationScope {
@@ -39,9 +27,6 @@ pub enum ClientRequestSerializationScope {
     GlobalSharedRead(&'static str),
     Thread { thread_id: String },
     ThreadPath { path: PathBuf },
-    CommandExecProcess { process_id: String },
-    Process { process_handle: String },
-    FsWatch { watch_id: String },
 }
 
 macro_rules! serialization_scope_expr {
@@ -78,33 +63,8 @@ macro_rules! serialization_scope_expr {
             })
         }
     };
-    ($actual_params:ident, optional_command_process_id($params:ident . $field:ident)) => {
-        $actual_params
-            .$field
-            .clone()
-            .map(|process_id| ClientRequestSerializationScope::CommandExecProcess { process_id })
-    };
-    ($actual_params:ident, command_process_id($params:ident . $field:ident)) => {
-        Some(ClientRequestSerializationScope::CommandExecProcess {
-            process_id: $actual_params.$field.clone(),
-        })
-    };
-    ($actual_params:ident, process_handle($params:ident . $field:ident)) => {
-        Some(ClientRequestSerializationScope::Process {
-            process_handle: $actual_params.$field.clone(),
-        })
-    };
-    ($actual_params:ident, fs_watch_id($params:ident . $field:ident)) => {
-        Some(ClientRequestSerializationScope::FsWatch {
-            watch_id: $actual_params.$field.clone(),
-        })
-    };
 }
 
-/// Generates an `enum ClientRequest` where each variant is a request that the
-/// client can send to the server. Each variant has associated `params` and
-/// `response` types. Also generates a `export_client_responses()` function to
-/// export all response types to TypeScript.
 macro_rules! client_request_definitions {
     (
         $(
@@ -119,7 +79,7 @@ macro_rules! client_request_definitions {
             }
         ),* $(,)?
     ) => {
-        /// Request from the client to the server.
+
         #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
         #[serde(tag = "method", rename_all = "camelCase")]
         pub enum ClientRequest {
@@ -168,7 +128,7 @@ macro_rules! client_request_definitions {
             }
         }
 
-        /// Typed response from the server to the client.
+
         #[derive(Serialize, Deserialize, Debug, Clone)]
         #[allow(clippy::large_enum_variant)]
         #[serde(tag = "method", rename_all = "camelCase")]
@@ -220,7 +180,6 @@ macro_rules! client_request_definitions {
         #[allow(clippy::large_enum_variant)]
         pub enum ClientResponsePayload {
             $( $variant($response), )*
-            InterruptConversation(v1::InterruptConversationResponse),
         }
 
         impl ClientResponsePayload {
@@ -238,9 +197,6 @@ macro_rules! client_request_definitions {
                             Ok((request_id, result, Some(Self::$variant(response))))
                         }
                     )*
-                    Self::InterruptConversation(response) => {
-                        serde_json::to_value(response).map(|result| (request_id, result, None))
-                    }
                 }
             }
 
@@ -254,7 +210,6 @@ macro_rules! client_request_definitions {
                             })
                         }
                     )*
-                    Self::InterruptConversation(_) => None,
                 }
             }
 
@@ -275,16 +230,7 @@ macro_rules! client_request_definitions {
                             serde_json::to_value(response).map(|result| (request_id, result))
                         }
                     )*
-                    Self::InterruptConversation(response) => {
-                        serde_json::to_value(response).map(|result| (request_id, result))
-                    }
                 }
-            }
-        }
-
-        impl From<v1::InterruptConversationResponse> for ClientResponsePayload {
-            fn from(response: v1::InterruptConversationResponse) -> Self {
-                Self::InterruptConversation(response)
             }
         }
 
@@ -319,9 +265,9 @@ client_request_definitions! {
         response: v1::InitializeResponse,
     },
 
-    /// NEW APIs
-    // Thread lifecycle
-    // Uses `inspect_params` because only some fields are experimental.
+
+
+
     ThreadStart => "thread/start" {
         params: v2::ThreadStartParams,
         inspect_params: true,
@@ -381,20 +327,10 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadBackgroundTerminalsCleanResponse,
     },
-    ThreadRollback => "thread/rollback" {
-        params: v2::ThreadRollbackParams,
-        serialization: thread_id(params.thread_id),
-        response: v2::ThreadRollbackResponse,
-    },
     ThreadList => "thread/list" {
         params: v2::ThreadListParams,
         serialization: None,
         response: v2::ThreadListResponse,
-    },
-    ThreadSearch => "thread/search" {
-        params: v2::ThreadSearchParams,
-        serialization: None,
-        response: v2::ThreadSearchResponse,
     },
     ThreadLoadedList => "thread/loaded/list" {
         params: v2::ThreadLoadedListParams,
@@ -408,12 +344,12 @@ client_request_definitions! {
     },
     ThreadTurnsList => "thread/turns/list" {
         params: v2::ThreadTurnsListParams,
-        // Explicitly concurrent: this primarily reads append-only rollout storage.
+
         serialization: None,
         response: v2::ThreadTurnsListResponse,
     },
-    // File system requests are intentionally concurrent. Desktop already treats local
-    // file system operations as concurrent, and app-server remote fs mirrors that model.
+
+
     TurnStart => "turn/start" {
         params: v2::TurnStartParams,
         inspect_params: true,
@@ -497,20 +433,16 @@ client_request_definitions! {
         serialization: global("account-auth"),
         response: v2::GetAccountResponse,
     },
-    /// DEPRECATED in favor of GetAccount
+
     GetAuthStatus {
         params: v1::GetAuthStatusParams,
         serialization: global("account-auth"),
         response: v1::GetAuthStatusResponse,
     },
-    // Legacy fuzzy search cancellation is intentionally concurrent: clients reuse a
-    // cancellation token so a newer request can cancel an older in-flight search.
+
+
 }
 
-/// Generates an `enum ServerRequest` where each variant is a request that the
-/// server can send to the client along with the corresponding params and
-/// response types. It also generates helper types used by the app/server
-/// infrastructure (payload enum, request constructor, and export helpers).
 macro_rules! server_request_definitions {
     (
         $(
@@ -521,7 +453,7 @@ macro_rules! server_request_definitions {
             }
         ),* $(,)?
     ) => {
-        /// Request initiated from the server and sent to the client.
+
         #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
         #[allow(clippy::large_enum_variant)]
         #[serde(tag = "method", rename_all = "camelCase")]
@@ -562,7 +494,7 @@ macro_rules! server_request_definitions {
             }
         }
 
-        /// Typed response from the client to the server.
+
         #[derive(Serialize, Deserialize, Debug, Clone)]
         #[serde(tag = "method", rename_all = "camelCase")]
         pub enum ServerResponse {
@@ -615,8 +547,6 @@ macro_rules! server_request_definitions {
     };
 }
 
-/// Generates `ServerNotification` enum and helpers, including a JSON Schema
-/// exporter for each notification.
 macro_rules! server_notification_definitions {
     (
         $(
@@ -624,7 +554,7 @@ macro_rules! server_notification_definitions {
             $variant:ident $(=> $wire:literal)? ( $payload:ty )
         ),* $(,)?
     ) => {
-        /// Notification sent from the server to the client.
+
         #[derive(
             Serialize,
             Deserialize,
@@ -661,7 +591,7 @@ macro_rules! server_notification_definitions {
 
     };
 }
-/// Notifications sent from the client to the server.
+
 macro_rules! client_notification_definitions {
     (
         $(
@@ -692,7 +622,6 @@ impl TryFrom<JSONRPCRequest> for ServerRequest {
 
 server_request_definitions! {
 
-    /// Execute a dynamic tool call on the client.
     DynamicToolCall => "item/tool/call" {
         params: v2::DynamicToolCallParams,
         response: v2::DynamicToolCallResponse,
@@ -705,7 +634,7 @@ server_request_definitions! {
 }
 
 server_notification_definitions! {
-    /// NEW NOTIFICATIONS
+
     Error => "error" (v2::ErrorNotification),
     ThreadStarted => "thread/started" (v2::ThreadStartedNotification),
     ThreadStatusChanged => "thread/status/changed" (v2::ThreadStatusChangedNotification),
@@ -719,18 +648,15 @@ server_notification_definitions! {
     TurnCompleted => "turn/completed" (v2::TurnCompletedNotification),
     ItemStarted => "item/started" (v2::ItemStartedNotification),
     ItemCompleted => "item/completed" (v2::ItemCompletedNotification),
-    /// This event is internal-only. Used by Codex Cloud.
-    RawResponseItemCompleted => "rawResponseItem/completed" (v2::RawResponseItemCompletedNotification),
     AgentMessageDelta => "item/agentMessage/delta" (v2::AgentMessageDeltaNotification),
     CommandExecutionOutputDelta => "item/commandExecution/outputDelta" (v2::CommandExecutionOutputDeltaNotification),
     TerminalInteraction => "item/commandExecution/terminalInteraction" (v2::TerminalInteractionNotification),
-    ServerRequestResolved => "serverRequest/resolved" (v2::ServerRequestResolvedNotification),
     AccountUpdated => "account/updated" (v2::AccountUpdatedNotification),
     AccountRateLimitsUpdated => "account/rateLimits/updated" (v2::AccountRateLimitsUpdatedNotification),
     ReasoningSummaryTextDelta => "item/reasoning/summaryTextDelta" (v2::ReasoningSummaryTextDeltaNotification),
     ReasoningSummaryPartAdded => "item/reasoning/summaryPartAdded" (v2::ReasoningSummaryPartAddedNotification),
     ReasoningTextDelta => "item/reasoning/textDelta" (v2::ReasoningTextDeltaNotification),
-    /// Deprecated: Use `ContextCompaction` item type instead.
+
     ContextCompacted => "thread/compacted" (v2::ContextCompactedNotification),
     ModelRerouted => "model/rerouted" (v2::ModelReroutedNotification),
     ModelVerification => "model/verification" (v2::ModelVerificationNotification),

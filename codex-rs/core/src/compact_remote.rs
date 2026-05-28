@@ -21,7 +21,9 @@ use codex_protocol::items::ContextCompactionItem;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::CompactedItem;
+use codex_protocol::protocol::ErrorEvent;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::TurnStartedEvent;
 use futures::TryFutureExt;
@@ -57,7 +59,6 @@ pub(crate) async fn run_remote_compact_task(
         trace_id: turn_context.trace_id.clone(),
         started_at: turn_context.turn_timing_state.started_at_unix_secs().await,
         model_context_window: turn_context.model_context_window(),
-        collaboration_mode_kind: turn_context.collaboration_mode.mode,
     });
     sess.send_event(&turn_context, start_event).await;
 
@@ -77,16 +78,17 @@ async fn run_remote_compact_task_inner(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
     initial_context_injection: InitialContextInjection,
-    trigger: CompactionTrigger,
-    reason: CompactionReason,
-    phase: CompactionPhase,
+    _trigger: CompactionTrigger,
+    _reason: CompactionReason,
+    _phase: CompactionPhase,
 ) -> CodexResult<()> {
     let result =
         run_remote_compact_task_inner_impl(sess, turn_context, initial_context_injection).await;
     if let Err(err) = result {
-        let event = EventMsg::Error(
-            err.to_error_event(Some("Error running remote compact task".to_string())),
-        );
+        let event = EventMsg::Error(ErrorEvent {
+            message: format!("Error running remote compact task: {err}"),
+            codex_error_info: Some(CodexErrorInfo::Other),
+        });
         sess.send_event(turn_context, event).await;
         return Err(err);
     }
@@ -128,7 +130,6 @@ async fn run_remote_compact_task_inner_impl(
         tools: tool_router.model_visible_specs(),
         parallel_tool_calls: turn_context.model_info.supports_parallel_tool_calls,
         base_instructions,
-        personality: turn_context.personality,
         output_schema: None,
         output_schema_strict: true,
     };
@@ -194,9 +195,6 @@ pub(crate) async fn process_compacted_history(
     mut compacted_history: Vec<ResponseItem>,
     initial_context_injection: InitialContextInjection,
 ) -> Vec<ResponseItem> {
-    // Mid-turn compaction is the only path that must inject initial context above the last user
-    // message in the replacement history. Pre-turn compaction instead injects context after the
-    // compaction item, but mid-turn compaction keeps the compaction item last for model training.
     let initial_context = if matches!(
         initial_context_injection,
         InitialContextInjection::BeforeLastUserMessage
@@ -210,22 +208,6 @@ pub(crate) async fn process_compacted_history(
     insert_initial_context_before_last_real_user_or_summary(compacted_history, initial_context)
 }
 
-/// Returns whether an item from remote compaction output should be preserved.
-///
-/// Called while processing the model-provided compacted transcript, before we
-/// append fresh canonical context from the current session.
-///
-/// We drop:
-/// - `developer` messages because remote output can include stale/duplicated
-///   instruction content.
-/// - non-user-content `user` messages (session prefix/instruction wrappers),
-///   while preserving real user messages.
-///
-/// This intentionally keeps:
-/// - `assistant` messages (future remote compaction models may emit them)
-/// - `user`-role warnings that parse as `TurnItem::UserMessage` and compaction-generated summary
-///   messages. Legacy warning fragments are filtered by `parse_turn_item` before they reach this
-///   check.
 pub(crate) fn should_keep_compacted_history_item(item: &ResponseItem) -> bool {
     match item {
         ResponseItem::Message { role, .. } if role == "developer" => false,
@@ -242,9 +224,7 @@ pub(crate) fn should_keep_compacted_history_item(item: &ResponseItem) -> bool {
         ResponseItem::Reasoning { .. }
         | ResponseItem::LocalShellCall { .. }
         | ResponseItem::FunctionCall { .. }
-        | ResponseItem::ToolSearchCall { .. }
         | ResponseItem::FunctionCallOutput { .. }
-        | ResponseItem::ToolSearchOutput { .. }
         | ResponseItem::CustomToolCall { .. }
         | ResponseItem::CustomToolCallOutput { .. }
         | ResponseItem::WebSearchCall { .. }

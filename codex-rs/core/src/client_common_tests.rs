@@ -51,12 +51,8 @@ fn serializes_text_schema_with_strict_format() {
         },
         "required": ["answer"],
     });
-    let text_controls = create_text_param_for_request(
-        /*verbosity*/ None,
-        &Some(schema.clone()),
-        /*output_schema_strict*/ true,
-    )
-    .expect("text controls");
+    let text_controls =
+        create_text_param_for_request(None, &Some(schema.clone()), true).expect("text controls");
 
     let req = ResponsesApiRequest {
         model: "gpt-5.4".to_string(),
@@ -103,12 +99,8 @@ fn serializes_text_schema_with_non_strict_format() {
         "required": ["answer"],
         "additionalProperties": false
     });
-    let text_controls = create_text_param_for_request(
-        /*verbosity*/ None,
-        &Some(schema.clone()),
-        /*output_schema_strict*/ false,
-    )
-    .expect("text controls");
+    let text_controls =
+        create_text_param_for_request(None, &Some(schema.clone()), false).expect("text controls");
 
     let format = text_controls.format.expect("format field");
     assert!(!format.strict);

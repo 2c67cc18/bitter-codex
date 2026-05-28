@@ -15,7 +15,6 @@ workspace = true
 [dependencies]
 async-trait = { workspace = true }
 codex-api = { workspace = true }
-codex-client = { workspace = true }
 codex-login = { workspace = true }
 codex-model-provider-info = { workspace = true }
 codex-models-manager = { workspace = true }

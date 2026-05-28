@@ -6,35 +6,6 @@ use std::num::NonZeroU64;
 use tempfile::tempdir;
 
 #[test]
-fn test_deserialize_ollama_model_provider_toml() {
-    let azure_provider_toml = r#"
-name = "Ollama"
-base_url = "http://localhost:11434/v1"
-        "#;
-    let expected_provider = ModelProviderInfo {
-        name: "Ollama".into(),
-        base_url: Some("http://localhost:11434/v1".into()),
-        env_key: None,
-        env_key_instructions: None,
-        experimental_bearer_token: None,
-        auth: None,
-        wire_api: WireApi::Responses,
-        query_params: None,
-        http_headers: None,
-        env_http_headers: None,
-        request_max_retries: None,
-        stream_max_retries: None,
-        stream_idle_timeout_ms: None,
-        websocket_connect_timeout_ms: None,
-        requires_openai_auth: false,
-        supports_websockets: false,
-    };
-
-    let provider: ModelProviderInfo = toml::from_str(azure_provider_toml).unwrap();
-    assert_eq!(expected_provider, provider);
-}
-
-#[test]
 fn test_deserialize_azure_model_provider_toml() {
     let azure_provider_toml = r#"
 name = "Azure"
@@ -47,7 +18,6 @@ query_params = { api-version = "2025-04-01-preview" }
         base_url: Some("https://xxxxx.openai.azure.com/openai".into()),
         env_key: Some("AZURE_OPENAI_API_KEY".into()),
         env_key_instructions: None,
-        experimental_bearer_token: None,
         auth: None,
         wire_api: WireApi::Responses,
         query_params: Some(maplit::hashmap! {
@@ -81,7 +51,6 @@ env_http_headers = { "X-Example-Env-Header" = "EXAMPLE_ENV_VAR" }
         base_url: Some("https://example.com".into()),
         env_key: Some("API_KEY".into()),
         env_key_instructions: None,
-        experimental_bearer_token: None,
         auth: None,
         wire_api: WireApi::Responses,
         query_params: None,
@@ -131,7 +100,7 @@ supports_websockets = true
 
 #[test]
 fn test_supports_remote_compaction_for_openai() {
-    let provider = ModelProviderInfo::create_openai_provider(/*base_url*/ None);
+    let provider = ModelProviderInfo::create_openai_provider(None);
 
     assert!(provider.supports_remote_compaction());
 }
@@ -143,7 +112,6 @@ fn test_supports_remote_compaction_for_azure_name() {
         base_url: Some("https://example.com/openai".into()),
         env_key: Some("AZURE_OPENAI_API_KEY".into()),
         env_key_instructions: None,
-        experimental_bearer_token: None,
         auth: None,
         wire_api: WireApi::Responses,
         query_params: None,
@@ -167,7 +135,6 @@ fn test_supports_remote_compaction_for_non_openai_non_azure_provider() {
         base_url: Some("https://example.com/v1".into()),
         env_key: Some("API_KEY".into()),
         env_key_instructions: None,
-        experimental_bearer_token: None,
         auth: None,
         wire_api: WireApi::Responses,
         query_params: None,
@@ -222,12 +189,12 @@ fn test_merge_configured_model_providers_adds_custom_provider() {
     let configured_model_providers =
         std::collections::HashMap::from([("custom".to_string(), custom_provider.clone())]);
 
-    let mut expected = built_in_model_providers(/*openai_base_url*/ None);
+    let mut expected = built_in_model_providers(None);
     expected.insert("custom".to_string(), custom_provider);
 
     assert_eq!(
         merge_configured_model_providers(
-            built_in_model_providers(/*openai_base_url*/ None),
+            built_in_model_providers(None),
             configured_model_providers,
         ),
         Ok(expected)

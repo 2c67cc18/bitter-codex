@@ -35,11 +35,10 @@ pub struct ModelProviderCapabilitiesReadResponse {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelListParams {
-    /// Opaque pagination cursor returned by a previous call.
     pub cursor: Option<String>,
-    /// Optional page size; defaults to a reasonable server-side value.
+
     pub limit: Option<u32>,
-    /// When true, include models that are hidden from the default picker list.
+
     pub include_hidden: Option<bool>,
 }
 
@@ -81,16 +80,13 @@ pub struct Model {
     #[serde(default = "default_input_modalities")]
     pub input_modalities: Vec<InputModality>,
     #[serde(default)]
-    pub supports_personality: bool,
-    /// Deprecated: use `serviceTiers` instead.
-    #[serde(default)]
     pub additional_speed_tiers: Vec<String>,
     #[serde(default)]
     pub service_tiers: Vec<ModelServiceTier>,
-    /// Catalog default service tier id for this model, when one is configured.
+
     #[serde(default)]
     pub default_service_tier: Option<String>,
-    // Only one model should be marked as default.
+
     pub is_default: bool,
 }
 
@@ -114,8 +110,7 @@ pub struct ReasoningEffortOption {
 #[serde(rename_all = "camelCase")]
 pub struct ModelListResponse {
     pub data: Vec<Model>,
-    /// Opaque cursor to pass to the next call to continue after the last item.
-    /// If None, there are no more items to return.
+
     pub next_cursor: Option<String>,
 }
 

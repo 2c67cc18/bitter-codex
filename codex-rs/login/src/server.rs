@@ -1,16 +1,3 @@
-//! Local OAuth callback server for CLI login.
-//!
-//! This module runs the short-lived localhost server used by interactive sign-in.
-//!
-//! The callback flow has two competing responsibilities:
-//!
-//! - preserve enough backend and transport detail for developers, sysadmins, and support
-//!   engineers to diagnose failed sign-ins
-//! - avoid persisting secrets or sensitive URL/query data into normal application logs
-//!
-//! This module therefore keeps the user-facing error path and the structured-log path separate.
-//! Returned `io::Error` values still carry the detail needed by CLI/browser callers, while
-//! structured logs only emit explicitly reviewed fields plus redacted URL/error values.
 use std::io::Cursor;
 use std::io::Read;
 use std::io::Write;
@@ -53,14 +40,13 @@ use tracing::warn;
 
 const DEFAULT_ISSUER: &str = "https://auth.openai.com";
 const DEFAULT_PORT: u16 = 1455;
-// Keep in sync with the Codex CLI Hydra redirect URI allow-list.
+
 const FALLBACK_PORT: u16 = 1457;
 static LOGIN_ERROR_PAGE_TEMPLATE: LazyLock<Template> = LazyLock::new(|| {
     Template::parse(include_str!("assets/error.html"))
         .unwrap_or_else(|err| panic!("login error page template must parse: {err}"))
 });
 
-/// Options for launching the local login callback server.
 #[derive(Debug, Clone)]
 pub struct ServerOptions {
     pub codex_home: PathBuf,
@@ -75,7 +61,6 @@ pub struct ServerOptions {
 }
 
 impl ServerOptions {
-    /// Creates a server configuration with the default issuer and port.
     pub fn new(
         codex_home: PathBuf,
         client_id: String,
@@ -96,7 +81,6 @@ impl ServerOptions {
     }
 }
 
-/// Handle for a running login callback server.
 pub struct LoginServer {
     pub auth_url: String,
     pub actual_port: u16,
@@ -105,38 +89,32 @@ pub struct LoginServer {
 }
 
 impl LoginServer {
-    /// Waits for the login callback loop to finish.
     pub async fn block_until_done(self) -> io::Result<()> {
         self.server_handle
             .await
             .map_err(|err| io::Error::other(format!("login server thread panicked: {err:?}")))?
     }
 
-    /// Requests shutdown of the callback server.
     pub fn cancel(&self) {
         self.shutdown_handle.shutdown();
     }
 
-    /// Returns a cloneable cancel handle for the running server.
     pub fn cancel_handle(&self) -> ShutdownHandle {
         self.shutdown_handle.clone()
     }
 }
 
-/// Handle used to signal the login server loop to exit.
 #[derive(Clone, Debug)]
 pub struct ShutdownHandle {
     shutdown_notify: Arc<tokio::sync::Notify>,
 }
 
 impl ShutdownHandle {
-    /// Signals the login loop to terminate.
     pub fn shutdown(&self) {
         self.shutdown_notify.notify_one();
     }
 }
 
-/// Starts a local callback server and returns the browser auth URL.
 pub fn run_login_server(opts: ServerOptions) -> io::Result<LoginServer> {
     let pkce = generate_pkce();
     let state = opts.force_state.clone().unwrap_or_else(generate_state);
@@ -167,7 +145,6 @@ pub fn run_login_server(opts: ServerOptions) -> io::Result<LoginServer> {
         let _ = webbrowser::open(&auth_url);
     }
 
-    // Map blocking reads from server.recv() to an async channel.
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Request>(16);
     let _server_handle = {
         let server = server.clone();
@@ -234,8 +211,6 @@ pub fn run_login_server(opts: ServerOptions) -> io::Result<LoginServer> {
                 }
             };
 
-            // Ensure that the server is unblocked so the thread dedicated to
-            // running `server.recv()` in a loop exits cleanly.
             server.unblock();
             result
         })
@@ -249,7 +224,6 @@ pub fn run_login_server(opts: ServerOptions) -> io::Result<LoginServer> {
     })
 }
 
-/// Internal callback handling outcome.
 enum HandledRequest {
     Response(Response<Cursor<Vec<u8>>>),
     RedirectWithHeader(Header),
@@ -330,7 +304,7 @@ async fn process_request(
                         "Missing authorization code. Sign-in could not be completed.",
                         io::ErrorKind::InvalidData,
                         Some("missing_authorization_code"),
-                        /*error_description*/ None,
+                        None,
                     );
                 }
             };
@@ -348,10 +322,10 @@ async fn process_request(
                             &message,
                             io::ErrorKind::PermissionDenied,
                             Some("workspace_restriction"),
-                            /*error_description*/ None,
+                            None,
                         );
                     }
-                    // Obtain API key via token-exchange and persist
+
                     let api_key = obtain_api_key(&opts.issuer, &opts.client_id, &tokens.id_token)
                         .await
                         .ok();
@@ -387,7 +361,7 @@ async fn process_request(
                             "Sign-in completed but redirecting back to Codex failed.",
                             io::ErrorKind::Other,
                             Some("redirect_failed"),
-                            /*error_description*/ None,
+                            None,
                         ),
                     }
                 }
@@ -398,32 +372,22 @@ async fn process_request(
                         &format!("Token exchange failed: {err}"),
                         io::ErrorKind::Other,
                         Some("token_exchange_failed"),
-                        /*error_description*/ None,
+                        None,
                     )
                 }
             }
         }
-        "/success" => {
-            let use_streamlined_success = parsed_url
-                .query_pairs()
-                .any(|(key, value)| key == "codex_streamlined_login" && value == "true");
-            let body = if use_streamlined_success {
-                include_str!("assets/success.html")
-            } else {
-                include_str!("assets/success_legacy.html")
-            };
-            HandledRequest::ResponseAndExit {
-                headers: match Header::from_bytes(
-                    &b"Content-Type"[..],
-                    &b"text/html; charset=utf-8"[..],
-                ) {
-                    Ok(header) => vec![header],
-                    Err(_) => Vec::new(),
-                },
-                body: body.as_bytes().to_vec(),
-                result: Ok(()),
-            }
-        }
+        "/success" => HandledRequest::ResponseAndExit {
+            headers: match Header::from_bytes(
+                &b"Content-Type"[..],
+                &b"text/html; charset=utf-8"[..],
+            ) {
+                Ok(header) => vec![header],
+                Err(_) => Vec::new(),
+            },
+            body: include_str!("assets/success.html").as_bytes().to_vec(),
+            result: Ok(()),
+        },
         "/cancel" => HandledRequest::ResponseAndExit {
             headers: Vec::new(),
             body: b"Login cancelled".to_vec(),
@@ -436,15 +400,6 @@ async fn process_request(
     }
 }
 
-/// tiny_http filters `Connection` headers out of `Response` objects, so using
-/// `req.respond` never informs the client (or the library) that a keep-alive
-/// socket should be closed. That leaves the per-connection worker parked in a
-/// loop waiting for more requests, which in turn causes the next login attempt
-/// to hang on the old connection. This helper bypasses tiny_http’s response
-/// machinery: it extracts the raw writer, prints the HTTP response manually,
-/// and always appends `Connection: close`, ensuring the socket is closed from
-/// the server side. Ideally, tiny_http would provide an API to control
-/// server-side connection persistence, but it does not.
 fn send_response_with_disconnect(
     req: Request,
     mut headers: Vec<Header>,
@@ -492,11 +447,6 @@ fn build_authorize_url(
         ("response_type".to_string(), "code".to_string()),
         ("client_id".to_string(), client_id.to_string()),
         ("redirect_uri".to_string(), redirect_uri.to_string()),
-        (
-            "scope".to_string(),
-            "openid profile email offline_access api.connectors.read api.connectors.invoke"
-                .to_string(),
-        ),
         (
             "code_challenge".to_string(),
             pkce.code_challenge.to_string(),
@@ -561,8 +511,6 @@ fn bind_server(port: u16) -> io::Result<Server> {
                     .map(|io_err| io_err.kind() == io::ErrorKind::AddrInUse)
                     .unwrap_or(false);
 
-                // If the address is in use, there may be another instance of the login server
-                // running. Attempt to cancel it and retry before falling back.
                 if is_addr_in_use {
                     if !cancel_attempted && !using_fallback_port {
                         cancel_attempted = true;
@@ -601,7 +549,6 @@ fn bind_server(port: u16) -> io::Result<Server> {
     }
 }
 
-/// Tokens returned by the OAuth authorization-code exchange.
 pub(crate) struct ExchangedTokens {
     pub id_token: String,
     pub access_token: String,
@@ -648,10 +595,6 @@ fn redact_sensitive_query_value(key: &str, value: &str) -> String {
     }
 }
 
-/// Redacts URL components that commonly carry auth secrets while preserving the host/path shape.
-///
-/// This keeps developer-facing logs useful for debugging transport failures without persisting
-/// tokens, callback codes, fragments, or embedded credentials.
 fn redact_sensitive_url_parts(url: &mut url::Url) {
     let _ = url.set_username("");
     let _ = url.set_password(None);
@@ -684,7 +627,6 @@ fn redact_sensitive_url_parts(url: &mut url::Url) {
     url.set_query(Some(&redacted_query));
 }
 
-/// Redacts any URL attached to a reqwest transport error before it is logged or returned.
 fn redact_sensitive_error_url(mut err: reqwest::Error) -> reqwest::Error {
     if let Some(url) = err.url_mut() {
         redact_sensitive_url_parts(url);
@@ -692,10 +634,6 @@ fn redact_sensitive_error_url(mut err: reqwest::Error) -> reqwest::Error {
     err
 }
 
-/// Sanitizes a free-form URL string for structured logging.
-///
-/// This is used for caller-supplied issuer values, which may contain credentials or query
-/// parameters on non-default deployments.
 fn sanitize_url_for_logging(url: &str) -> String {
     match url::Url::parse(url) {
         Ok(mut url) => {
@@ -705,12 +643,7 @@ fn sanitize_url_for_logging(url: &str) -> String {
         Err(_) => "<invalid-url>".to_string(),
     }
 }
-/// Exchanges an authorization code for tokens.
-///
-/// The returned error remains suitable for user-facing CLI/browser surfaces, so backend-provided
-/// non-JSON error text is preserved there. Structured logging stays narrower: it logs reviewed
-/// fields from parsed token responses and redacted transport errors, but does not log the final
-/// callback-layer `%err` string.
+
 pub(crate) async fn exchange_code_for_tokens(
     issuer: &str,
     client_id: &str,
@@ -784,8 +717,6 @@ pub(crate) async fn exchange_code_for_tokens(
     })
 }
 
-/// Persists exchanged credentials using the configured local auth store, then
-/// best-effort revokes any superseded managed ChatGPT tokens.
 pub(crate) async fn persist_tokens_async(
     codex_home: &Path,
     api_key: Option<String>,
@@ -794,7 +725,6 @@ pub(crate) async fn persist_tokens_async(
     refresh_token: String,
     auth_credentials_store_mode: AuthCredentialsStoreMode,
 ) -> io::Result<()> {
-    // Reuse existing synchronous logic but run it off the async runtime.
     let codex_home = codex_home.to_path_buf();
     let (previous_auth, auth) = tokio::task::spawn_blocking(move || {
         let previous_auth = match load_auth_dot_json(&codex_home, auth_credentials_store_mode) {
@@ -925,7 +855,6 @@ fn jwt_auth_claims(jwt: &str) -> serde_json::Map<String, serde_json::Value> {
     serde_json::Map::new()
 }
 
-/// Validates the ID token against an optional workspace restriction.
 pub(crate) fn ensure_workspace_allowed(
     expected: Option<&[String]>,
     id_token: &str,
@@ -949,7 +878,6 @@ pub(crate) fn ensure_workspace_allowed(
     }
 }
 
-/// Builds a terminal callback response for login failures.
 fn login_error_response(
     message: &str,
     kind: io::ErrorKind,
@@ -968,7 +896,6 @@ fn login_error_response(
     }
 }
 
-/// Returns true when the OAuth callback represents a missing Codex entitlement.
 fn is_missing_codex_entitlement_error(error_code: &str, error_description: Option<&str>) -> bool {
     error_code == "access_denied"
         && error_description.is_some_and(|description| {
@@ -978,7 +905,6 @@ fn is_missing_codex_entitlement_error(error_code: &str, error_description: Optio
         })
 }
 
-/// Converts OAuth callback errors into a user-facing message.
 fn oauth_callback_error_message(error_code: &str, error_description: Option<&str>) -> String {
     if is_missing_codex_entitlement_error(error_code, error_description) {
         return "Codex is not enabled for your workspace. Contact your workspace administrator to request access to Codex.".to_string();
@@ -993,11 +919,6 @@ fn oauth_callback_error_message(error_code: &str, error_description: Option<&str
     format!("Sign-in failed: {error_code}")
 }
 
-/// Extracts token endpoint error detail for both structured logging and caller-visible errors.
-///
-/// Parsed JSON fields are safe to log individually. If the response is not JSON, the raw body is
-/// preserved only for the returned error path so the CLI/browser can still surface the backend
-/// detail, while the structured log path continues to use the explicitly parsed safe fields above.
 fn parse_token_endpoint_error(body: &str) -> TokenEndpointErrorDetail {
     let trimmed = body.trim();
     if trimmed.is_empty() {
@@ -1051,10 +972,6 @@ fn parse_token_endpoint_error(body: &str) -> TokenEndpointErrorDetail {
         }
     }
 
-    // Preserve non-JSON token-endpoint bodies for the returned error so CLI/browser flows still
-    // surface the backend detail users and admins need, but keep that text out of structured logs
-    // by only logging explicitly parsed fields above and avoiding `%err` logging at the callback
-    // layer.
     TokenEndpointErrorDetail {
         error_code: None,
         error_message: None,
@@ -1062,7 +979,6 @@ fn parse_token_endpoint_error(body: &str) -> TokenEndpointErrorDetail {
     }
 }
 
-/// Renders the branded error page used by callback failures.
 fn render_login_error_page(
     message: &str,
     error_code: Option<&str>,
@@ -1100,7 +1016,6 @@ fn render_login_error_page(
         .into_bytes()
 }
 
-/// Escapes error strings before inserting them into HTML.
 fn html_escape(input: &str) -> String {
     let mut escaped = String::with_capacity(input.len());
     for ch in input.chars() {
@@ -1116,13 +1031,11 @@ fn html_escape(input: &str) -> String {
     escaped
 }
 
-/// Exchanges an authenticated ID token for an API-key style access token.
 pub(crate) async fn obtain_api_key(
     issuer: &str,
     client_id: &str,
     id_token: &str,
 ) -> io::Result<String> {
-    // Token exchange for an API key access token
     #[derive(serde::Deserialize)]
     struct ExchangeResp {
         access_token: String,
@@ -1175,7 +1088,6 @@ mod tests {
     use crate::auth::save_auth;
     use crate::token_data::TokenData;
     use crate::token_data::parse_chatgpt_jwt_claims;
-    use core_test_support::skip_if_no_network;
     use pretty_assertions::assert_eq;
 
     use super::DEFAULT_ISSUER;
@@ -1194,8 +1106,6 @@ mod tests {
     #[tokio::test]
     async fn persist_tokens_async_revokes_previous_auth_without_failing_login() -> anyhow::Result<()>
     {
-        skip_if_no_network!(Ok(()));
-
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/oauth/revoke"))
@@ -1221,7 +1131,7 @@ mod tests {
 
         persist_tokens_async(
             codex_home.path(),
-            /*api_key*/ None,
+            None,
             jwt_for_account("new-account"),
             "new-access".to_string(),
             "new-refresh".to_string(),
@@ -1264,8 +1174,6 @@ mod tests {
     #[serial_test::serial(logout_revoke)]
     #[tokio::test]
     async fn persist_tokens_async_does_not_revoke_reused_refresh_token() -> anyhow::Result<()> {
-        skip_if_no_network!(Ok(()));
-
         let server = MockServer::start().await;
         let _env_guard = EnvGuard::set(
             REVOKE_TOKEN_URL_OVERRIDE_ENV_VAR,
@@ -1281,7 +1189,7 @@ mod tests {
 
         persist_tokens_async(
             codex_home.path(),
-            /*api_key*/ None,
+            None,
             jwt_for_account("new-account"),
             "new-access".to_string(),
             "shared-refresh".to_string(),
@@ -1336,7 +1244,7 @@ mod tests {
     impl EnvGuard {
         fn set(key: &'static str, value: String) -> Self {
             let original = std::env::var_os(key);
-            // SAFETY: this test executes serially with other revoke tests.
+
             unsafe {
                 std::env::set_var(key, &value);
             }
@@ -1346,7 +1254,6 @@ mod tests {
 
     impl Drop for EnvGuard {
         fn drop(&mut self) {
-            // SAFETY: the guard restores the original environment before other revoke tests run.
             unsafe {
                 match &self.original {
                     Some(value) => std::env::set_var(self.key, value),
@@ -1457,11 +1364,11 @@ mod tests {
     #[test]
     fn compose_success_url_omits_streamlined_success_by_default() {
         let url = url::Url::parse(&compose_success_url(
-            /*port*/ 1455,
+            1455,
             DEFAULT_ISSUER,
             "e30.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnt9fQ.sig",
             "e30.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnt9fQ.sig",
-            /*codex_streamlined_login*/ false,
+            false,
         ))
         .expect("success url should parse");
 
@@ -1475,11 +1382,11 @@ mod tests {
     #[test]
     fn compose_success_url_includes_streamlined_success_when_requested() {
         let url = url::Url::parse(&compose_success_url(
-            /*port*/ 1455,
+            1455,
             DEFAULT_ISSUER,
             "e30.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnt9fQ.sig",
             "e30.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnt9fQ.sig",
-            /*codex_streamlined_login*/ true,
+            true,
         ))
         .expect("success url should parse");
 

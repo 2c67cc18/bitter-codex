@@ -1,12 +1,3 @@
-// Adapted from path-absolutize 3.1.1:
-// Copyright (c) 2018 magiclen.org (Ron Li)
-// Licensed under the MIT License.
-//
-// Keep this implementation local so explicit-base normalization can be
-// infallible for `AbsolutePathBuf::resolve_path_against_base` and
-// `AbsolutePathBuf::join`; only current-working-directory lookup remains
-// fallible.
-
 use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
@@ -44,43 +35,12 @@ fn normalize_path(path: &Path) -> PathBuf {
     }
 }
 
-#[cfg(not(windows))]
 fn path_with_base(path: &Path, base_path: &Path) -> PathBuf {
     if path.is_absolute() {
         path.to_path_buf()
     } else {
         base_path.join(path)
     }
-}
-
-#[cfg(windows)]
-fn path_with_base(path: &Path, base_path: &Path) -> PathBuf {
-    if path.is_absolute() || path.has_root() {
-        return base_path.join(path);
-    }
-
-    let mut components = path.components();
-    let Some(Component::Prefix(prefix)) = components.next() else {
-        return base_path.join(path);
-    };
-
-    let mut path = PathBuf::new();
-    path.push(prefix.as_os_str());
-
-    if components.clone().next().is_none() {
-        path.push(std::path::MAIN_SEPARATOR_STR);
-        return path;
-    }
-
-    let skip_base_prefix = matches!(base_path.components().next(), Some(Component::Prefix(_)));
-    for component in base_path
-        .components()
-        .skip(usize::from(skip_base_prefix))
-        .chain(components)
-    {
-        path.push(component.as_os_str());
-    }
-    path
 }
 
 #[cfg(test)]
@@ -148,24 +108,6 @@ mod tests {
         assert_eq!(
             absolutize_from(Path::new(""), Path::new("/base/cwd")),
             PathBuf::from("/base/cwd")
-        );
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn windows_root_relative_path_uses_base_prefix() {
-        assert_eq!(
-            absolutize_from(Path::new(r"\path\to\file"), Path::new(r"C:\base\cwd")),
-            PathBuf::from(r"C:\path\to\file")
-        );
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn windows_drive_relative_path_uses_path_prefix_and_base_tail() {
-        assert_eq!(
-            absolutize_from(Path::new(r"D:path\to\file"), Path::new(r"C:\base\cwd")),
-            PathBuf::from(r"D:\base\cwd\path\to\file")
         );
     }
 }

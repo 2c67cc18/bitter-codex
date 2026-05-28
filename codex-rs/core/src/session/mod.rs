@@ -1,103 +1,47 @@
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::fmt::Debug;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-use crate::build_available_skills;
 use crate::compact;
 use crate::config::ManagedFeatures;
-use crate::config::resolve_tool_suggest_config_from_layer_stack;
-use crate::context::ApprovedCommandPrefixSaved;
-use crate::context::AvailableSkillsInstructions;
-use crate::context::CollaborationModeInstructions;
 use crate::context::ContextualUserFragment;
-use crate::context::NetworkRuleSaved;
-use crate::context::PermissionsInstructions;
-use crate::context::PersonalitySpecInstructions;
-use crate::default_skill_metadata_budget;
-use crate::exec_policy::ExecPolicyManager;
-use crate::parse_turn_item;
 use crate::path_utils::normalize_for_native_workdir;
-use crate::skills::SkillRenderSideEffects;
-use crate::skills_load_input_from_config;
 use crate::turn_metadata::TurnMetadataState;
 use crate::turn_timing::now_unix_timestamp_ms;
 use async_channel::Receiver;
 use async_channel::Sender;
 use chrono::Local;
 use chrono::Utc;
-use codex_app_server_protocol::McpServerElicitationRequest;
-use codex_app_server_protocol::McpServerElicitationRequestParams;
-use codex_config::types::OAuthCredentialsStoreMode;
-use codex_exec_server::Environment;
-use codex_exec_server::EnvironmentManager;
-use codex_exec_server::FileSystemSandboxContext;
-use codex_features::FEATURES;
 use codex_features::Feature;
-use codex_features::unstable_features_warning_event;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_login::auth_env_telemetry::collect_auth_env_telemetry;
 use codex_login::default_client::originator;
-use codex_mcp::McpConnectionManager;
-use codex_mcp::McpRuntimeContext;
-use codex_mcp::codex_apps_tools_cache_key;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_models_manager::manager::SharedModelsManager;
-use codex_network_proxy::NetworkProxy;
 use codex_otel::current_span_trace_id;
 use codex_otel::current_span_w3c_trace_context;
 use codex_otel::set_parent_from_w3c_trace_context;
-use codex_protocol::ThreadId;
 use codex_protocol::SessionId;
-use codex_protocol::approvals::ElicitationRequestEvent;
-use codex_protocol::approvals::ExecPolicyAmendment;
-use codex_protocol::approvals::NetworkPolicyAmendment;
-use codex_protocol::approvals::NetworkPolicyRuleAction;
-use codex_protocol::config_types::ApprovalsReviewer;
+use codex_protocol::ThreadId;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
-use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
-use codex_protocol::config_types::Settings;
-use codex_protocol::config_types::WebSearchMode;
-use codex_protocol::dynamic_tools::DynamicToolResponse;
-use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::items::TurnItem;
-use codex_protocol::items::UserMessageItem;
-use codex_protocol::mcp::CallToolResult;
-use codex_protocol::models::ActivePermissionProfile;
-use codex_protocol::models::AdditionalPermissionProfile;
 use codex_protocol::models::BaseInstructions;
-use codex_protocol::models::PermissionProfile;
-use codex_protocol::models::SandboxEnforcement;
-use codex_protocol::models::format_allow_prefixes;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelPreset;
-use codex_protocol::permissions::FileSystemSandboxPolicy;
-use codex_protocol::permissions::NetworkSandboxPolicy;
-use codex_protocol::protocol::FileChange;
-use codex_protocol::protocol::AgentStatus;
-use codex_protocol::protocol::HasLegacyEvent;
 use codex_protocol::protocol::ItemCompletedEvent;
 use codex_protocol::protocol::ItemStartedEvent;
 use codex_protocol::protocol::RawResponseItemEvent;
 use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::SessionSource;
-use codex_protocol::protocol::SubAgentSource;
-use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnAbortReason;
 use codex_protocol::protocol::TurnContextItem;
-use codex_protocol::protocol::TurnContextNetworkItem;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::protocol::W3cTraceContext;
-use codex_protocol::request_user_input::RequestUserInputArgs;
-use codex_protocol::request_user_input::RequestUserInputResponse;
-use codex_rmcp_client::ElicitationResponse;
 use codex_rollout::state_db;
-use codex_rollout_trace::ThreadStartedTraceMetadata;
-use codex_rollout_trace::ThreadTraceContext;
 use codex_thread_store::CreateThreadParams;
 use codex_thread_store::LiveThread;
 use codex_thread_store::LiveThreadInitGuard;
@@ -111,23 +55,10 @@ use codex_utils_output_truncation::TruncationPolicy;
 use futures::future::BoxFuture;
 use futures::future::Shared;
 use futures::prelude::*;
-use rmcp::model::ElicitationCapability;
-use rmcp::model::FormElicitationCapability;
-use rmcp::model::ListResourceTemplatesResult;
-use rmcp::model::ListResourcesResult;
-use rmcp::model::PaginatedRequestParams;
-use rmcp::model::ReadResourceRequestParams;
-use rmcp::model::ReadResourceResult;
-use rmcp::model::RequestId;
-use rmcp::model::UrlElicitationCapability;
 use serde_json::Value;
 use tokio::sync::Mutex;
-use tokio::sync::RwLock;
-use tokio::sync::oneshot;
-use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use toml::Value as TomlValue;
 use tracing::Instrument;
 use tracing::debug;
 use tracing::error;
@@ -139,22 +70,14 @@ use uuid::Uuid;
 
 use crate::client::ModelClient;
 use crate::codex_thread::ThreadConfigSnapshot;
-use crate::compact::collect_user_messages;
 use crate::config::Config;
-use crate::config::Constrained;
 use crate::config::ConstraintResult;
-use crate::config::NetworkProxyAuditMetadata;
-use crate::config::PermissionProfileSnapshot;
-use crate::config::PermissionProfileState;
-use crate::config::StartedNetworkProxy;
-use crate::config::resolve_web_search_mode_for_turn;
 use crate::context_manager::ContextManager;
 use crate::context_manager::TotalTokenUsageBreakdown;
 use crate::thread_rollout_truncation::initial_history_has_prior_user_turns;
 use codex_config::CONFIG_TOML_FILE;
 use codex_config::ConfigLayerSource;
 use codex_config::ConfigLayerStackOrdering;
-use codex_config::types::McpServerConfig;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_protocol::config_types::ShellEnvironmentPolicy;
 use codex_protocol::error::CodexErr;
@@ -165,7 +88,6 @@ use codex_protocol::exec_output::StreamOutput;
 mod config_lock;
 mod handlers;
 mod input_queue;
-mod mcp;
 mod rollout_reconstruction;
 #[allow(clippy::module_inception)]
 pub(crate) mod session;
@@ -184,13 +106,8 @@ use self::session::SessionConfiguration;
 pub(crate) use self::session::SessionSettingsUpdate;
 #[cfg(test)]
 use self::turn::AssistantMessageStreamParsers;
-#[cfg(test)]
-use self::turn::collect_explicit_app_ids_from_skill_items;
-use self::turn_context::TurnContext;
 use self::turn_context::ResolvedTurnEnvironments;
-use self::turn_context::TurnSkillsContext;
-#[cfg(test)]
-mod rollout_reconstruction_tests;
+use self::turn_context::TurnContext;
 
 #[derive(Debug, PartialEq)]
 pub enum SteerInputError {
@@ -213,7 +130,6 @@ impl SteerInputError {
             },
             Self::ActiveTurnNotSteerable { turn_kind } => {
                 let turn_kind_label = match turn_kind {
-                    NonSteerableTurnKind::Review => "review",
                     NonSteerableTurnKind::Compact => "compact",
                 };
                 ErrorEvent {
@@ -231,27 +147,18 @@ impl SteerInputError {
     }
 }
 
-/// Notes from the previous real user turn.
-///
-/// Conceptually this is the same role that `previous_model` used to fill, but
-/// it can carry other prior-turn settings that matter when constructing
-/// sensible state-change diffs or full-context reinjection, such as model
-/// switches or detecting a prior `realtime_active -> false` transition.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PreviousTurnSettings {
     pub(crate) model: String,
-    pub(crate) realtime_active: Option<bool>,
 }
 
-#[cfg(test)]
-use crate::SkillLoadOutcome;
-#[cfg(test)]
-use crate::SkillMetadata;
-use crate::SkillsManager;
-use crate::exec_policy::ExecPolicyUpdateError;
-use crate::guardian::GuardianReviewSessionManager;
-use crate::mcp::McpManager;
-use crate::network_policy_decision::execpolicy_network_rule_amendment;
+#[derive(Debug, Clone)]
+pub struct Submission {
+    pub id: String,
+    pub op: Op,
+    pub trace: Option<W3cTraceContext>,
+}
+
 use crate::rollout::map_session_init_error;
 use crate::session_startup_prewarm::SessionStartupPrewarmHandle;
 use crate::shell;
@@ -259,88 +166,57 @@ use crate::shell_snapshot::ShellSnapshot;
 use crate::state::AutoCompactWindowSnapshot;
 use crate::state::SessionServices;
 use crate::state::SessionState;
+use crate::state::TaskKind;
 #[cfg(test)]
 use crate::stream_events_utils::HandleOutputCtx;
 #[cfg(test)]
 use crate::stream_events_utils::handle_output_item_done;
-use crate::tools::network_approval::NetworkApprovalService;
 #[cfg(test)]
 use crate::tools::parallel::ToolCallRuntime;
-use crate::tools::sandboxing::ApprovalStore;
 use crate::turn_timing::TurnTimingState;
 use crate::turn_timing::record_turn_ttfm_metric;
 use crate::unified_exec::UnifiedExecProcessManager;
-use codex_core_plugins::PluginsManager;
 use codex_git_utils::get_git_repo_root;
-use codex_mcp::compute_auth_statuses;
-use codex_mcp::effective_mcp_servers_from_configured;
-use codex_mcp::host_owned_codex_apps_enabled;
 use codex_otel::SessionTelemetry;
 use codex_otel::THREAD_STARTED_METRIC;
 use codex_otel::TelemetryAuthMode;
-use codex_protocol::config_types::CollaborationMode;
-use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
-use codex_protocol::config_types::WindowsSandboxLevel;
-use codex_protocol::models::ContentItem;
+use codex_protocol::dynamic_tools::DynamicToolResponse;
+use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
-use codex_protocol::protocol::ApplyPatchApprovalRequestEvent;
-use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::CompactedItem;
-use codex_protocol::protocol::DeprecationNoticeEvent;
 use codex_protocol::protocol::ErrorEvent;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
-use codex_protocol::protocol::ExecApprovalRequestEvent;
 use codex_protocol::protocol::InitialHistory;
-use codex_protocol::protocol::McpServerRefreshConfig;
-use codex_protocol::protocol::ModelRerouteEvent;
-use codex_protocol::protocol::ModelRerouteReason;
 use codex_protocol::protocol::ModelVerification;
 use codex_protocol::protocol::ModelVerificationEvent;
-use codex_protocol::protocol::NetworkApprovalContext;
 use codex_protocol::protocol::NonSteerableTurnKind;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::RateLimitSnapshot;
-use codex_protocol::protocol::RequestUserInputEvent;
-use codex_protocol::protocol::ReviewDecision;
-use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::SessionConfiguredEvent;
 use codex_protocol::protocol::StreamErrorEvent;
-use codex_protocol::protocol::Submission;
-use codex_protocol::protocol::ThreadMemoryMode;
 use codex_protocol::protocol::TokenCountEvent;
 use codex_protocol::protocol::TokenUsage;
 use codex_protocol::protocol::TokenUsageInfo;
 use codex_protocol::protocol::WarningEvent;
 use codex_protocol::user_input::UserInput;
-use codex_tools::ToolEnvironmentMode;
-use codex_tools::UnifiedExecShellMode;
-use codex_tools::shell_command_backend_for_features;
 use codex_utils_absolute_path::AbsolutePathBuf;
-#[cfg(test)]
-use codex_utils_stream_parser::ProposedPlanSegment;
 
-/// The high-level interface to the Codex system.
-/// It operates as a queue pair where you send submissions and receive events.
 pub struct Codex {
     pub(crate) tx_sub: Sender<Submission>,
     pub(crate) rx_event: Receiver<Event>,
-    // Last known status of the agent.
-    pub(crate) agent_status: watch::Receiver<AgentStatus>,
+
     pub(crate) session: Arc<Session>,
-    // Shared future for the background submission loop completion so multiple
-    // callers can wait for shutdown.
+
     pub(crate) session_loop_termination: SessionLoopTermination,
 }
 
 pub(crate) type SessionLoopTermination = Shared<BoxFuture<'static, ()>>;
 
-/// Wrapper returned by [`Codex::spawn`] containing the spawned [`Codex`] and
-/// the unique session id.
 pub struct CodexSpawnOk {
     pub codex: Codex,
     pub thread_id: ThreadId,
@@ -351,24 +227,13 @@ pub(crate) struct CodexSpawnArgs {
     pub(crate) installation_id: String,
     pub(crate) auth_manager: Arc<AuthManager>,
     pub(crate) models_manager: SharedModelsManager,
-    pub(crate) environment_manager: Arc<EnvironmentManager>,
-    pub(crate) skills_manager: Arc<SkillsManager>,
-    pub(crate) plugins_manager: Arc<PluginsManager>,
-    pub(crate) mcp_manager: Arc<McpManager>,
     pub(crate) conversation_history: InitialHistory,
     pub(crate) session_source: SessionSource,
-    pub(crate) thread_source: Option<ThreadSource>,
-    pub(crate) parent_session_id: Option<SessionId>,
     pub(crate) dynamic_tools: Vec<DynamicToolSpec>,
+    pub(crate) parent_session_id: Option<SessionId>,
     pub(crate) persist_extended_history: bool,
     pub(crate) metrics_service_name: Option<String>,
     pub(crate) inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
-    pub(crate) inherited_exec_policy: Option<Arc<ExecPolicyManager>>,
-    /// Parent rollout trace used only to derive fresh spawned child traces.
-    ///
-    /// Root sessions and non-thread-spawn subagents pass a disabled context;
-    /// `Session::new` creates the root trace itself when rollout tracing is enabled.
-    pub(crate) parent_rollout_thread_trace: ThreadTraceContext,
     pub(crate) user_shell_override: Option<shell::Shell>,
     pub(crate) parent_trace: Option<W3cTraceContext>,
     pub(crate) environment_selections: ResolvedTurnEnvironments,
@@ -380,28 +245,7 @@ pub(crate) const SUBMISSION_CHANNEL_CAPACITY: usize = 512;
 const CYBER_VERIFY_URL: &str = "https://chatgpt.com/cyber";
 const CYBER_SAFETY_URL: &str = "https://developers.openai.com/codex/concepts/cyber-safety";
 
-fn status_from_event(msg: &EventMsg) -> Option<AgentStatus> {
-    match msg {
-        EventMsg::TurnStarted(_) => Some(AgentStatus::Running),
-        EventMsg::TurnComplete(event) => {
-            Some(AgentStatus::Completed(event.last_agent_message.clone()))
-        }
-        EventMsg::TurnAborted(_) => Some(AgentStatus::Interrupted),
-        EventMsg::Error(event) => Some(AgentStatus::Errored(event.message.clone())),
-        EventMsg::ShutdownComplete => Some(AgentStatus::Shutdown),
-        _ => None,
-    }
-}
-
-fn is_final_agent_status(status: &AgentStatus) -> bool {
-    matches!(
-        status,
-        AgentStatus::Completed(_) | AgentStatus::Errored(_) | AgentStatus::Shutdown
-    )
-}
-
 impl Codex {
-    /// Spawn a new [`Codex`] and initialize the session.
     pub(crate) async fn spawn(args: CodexSpawnArgs) -> CodexResult<CodexSpawnOk> {
         let parent_trace = match args.parent_trace {
             Some(trace) => {
@@ -428,25 +272,18 @@ impl Codex {
 
     async fn spawn_internal(args: CodexSpawnArgs) -> CodexResult<CodexSpawnOk> {
         let CodexSpawnArgs {
-            mut config,
+            config,
             installation_id,
             auth_manager,
             models_manager,
-            environment_manager,
-            skills_manager,
-            plugins_manager,
-            mcp_manager,
             conversation_history,
             session_source,
-            thread_source,
-            parent_session_id,
             dynamic_tools,
+            parent_session_id,
             persist_extended_history,
             metrics_service_name,
             inherited_shell_snapshot,
             user_shell_override,
-            inherited_exec_policy,
-            parent_rollout_thread_trace,
             parent_trace: _,
             environment_selections,
             thread_store,
@@ -454,35 +291,8 @@ impl Codex {
         let (tx_sub, rx_sub) = async_channel::bounded(SUBMISSION_CHANNEL_CAPACITY);
         let (tx_event, rx_event) = async_channel::unbounded();
 
-        if let SessionSource::SubAgent(SubAgentSource::ThreadSpawn { depth, .. }) = session_source
-            && depth >= config.agent_max_depth
-            && !config.features.enabled(Feature::MultiAgentV2)
-        {
-            let _ = config.features.disable(Feature::SpawnCsv);
-            let _ = config.features.disable(Feature::Collab);
-        }
-
-        let exec_policy = if crate::guardian::is_guardian_reviewer_source(&session_source) {
-            // Guardian review should rely on the built-in shell safety checks,
-            // not on caller-provided exec-policy rules that could shape the
-            // reviewer or silently auto-approve commands.
-            Arc::new(ExecPolicyManager::default())
-        } else if let Some(exec_policy) = &inherited_exec_policy {
-            Arc::clone(exec_policy)
-        } else {
-            Arc::new(
-                ExecPolicyManager::load(&config.config_layer_stack)
-                    .await
-                    .map_err(|err| CodexErr::Fatal(format!("failed to load rules: {err}")))?,
-            )
-        };
-
         let config = Arc::new(config);
-        let refresh_strategy = if session_source.is_non_root_agent() {
-            codex_models_manager::manager::RefreshStrategy::Offline
-        } else {
-            codex_models_manager::manager::RefreshStrategy::OnlineIfUncached
-        };
+        let refresh_strategy = codex_models_manager::manager::RefreshStrategy::OnlineIfUncached;
         if config.model.is_none()
             || !matches!(
                 refresh_strategy,
@@ -495,10 +305,6 @@ impl Codex {
             .get_default_model(&config.model, refresh_strategy)
             .await;
 
-        // Resolve base instructions for the session. Priority order:
-        // 1. config.base_instructions override
-        // 2. conversation history => session_meta.base_instructions
-        // 3. base_instructions for current model
         let model_info = models_manager
             .get_model_info(model.as_str(), &config.to_models_manager_config())
             .await;
@@ -506,52 +312,7 @@ impl Codex {
             .base_instructions
             .clone()
             .or_else(|| conversation_history.get_base_instructions().map(|s| s.text))
-            .unwrap_or_else(|| model_info.get_model_instructions(config.personality));
-
-        // Respect thread-start tools. When missing (resumed/forked threads), read from the db
-        // first, then fall back to rollout-file tools.
-        let persisted_tools = if dynamic_tools.is_empty() {
-            let thread_id = match &conversation_history {
-                InitialHistory::Resumed(resumed) => Some(resumed.conversation_id),
-                InitialHistory::Forked(_) => conversation_history.forked_from_id(),
-                InitialHistory::New | InitialHistory::Cleared => None,
-            };
-            match thread_id {
-                Some(thread_id) => {
-                    let state_db_ctx = if config.ephemeral {
-                        None
-                    } else if let Some(local_store) =
-                        thread_store.as_any().downcast_ref::<LocalThreadStore>()
-                    {
-                        local_store.state_db().await
-                    } else {
-                        None
-                    };
-                    state_db::get_dynamic_tools(state_db_ctx.as_deref(), thread_id, "codex_spawn")
-                        .await
-                }
-                None => None,
-            }
-        } else {
-            None
-        };
-        let dynamic_tools = if dynamic_tools.is_empty() {
-            persisted_tools
-                .or_else(|| conversation_history.get_dynamic_tools())
-                .unwrap_or_default()
-        } else {
-            dynamic_tools
-        };
-        // TODO (aibrahim): Consolidate config.model and config.model_reasoning_effort into config.collaboration_mode
-        // to avoid extracting these fields separately and constructing CollaborationMode here.
-        let collaboration_mode = CollaborationMode {
-            mode: ModeKind::Default,
-            settings: Settings {
-                model: model.clone(),
-                reasoning_effort: config.model_reasoning_effort,
-                developer_instructions: None,
-            },
-        };
+            .unwrap_or_default();
         let service_tier = get_service_tier(
             config.service_tier.clone(),
             config.features.enabled(Feature::FastMode),
@@ -559,17 +320,13 @@ impl Codex {
         );
         let session_configuration = SessionConfiguration {
             provider: config.model_provider.clone(),
-            collaboration_mode,
+            model,
+            model_reasoning_effort: config.model_reasoning_effort,
             model_reasoning_summary: config.model_reasoning_summary,
             service_tier,
             developer_instructions: config.developer_instructions.clone(),
-            personality: config.personality,
             base_instructions,
             compact_prompt: config.compact_prompt.clone(),
-            approval_policy: config.permissions.approval_policy.clone(),
-            approvals_reviewer: config.approvals_reviewer,
-            permission_profile_state: session_permission_profile_state_from_config(&config)?,
-            windows_sandbox_level: WindowsSandboxLevel::Disabled,
             cwd: config.cwd.clone(),
             workspace_roots: config.workspace_roots.clone(),
             codex_home: config.codex_home.clone(),
@@ -580,35 +337,24 @@ impl Codex {
             app_server_client_name: None,
             app_server_client_version: None,
             session_source,
-            thread_source,
             dynamic_tools,
             persist_extended_history,
             inherited_shell_snapshot,
             user_shell_override,
         };
 
-        // Generate a unique ID for the lifetime of this Codex session.
         let session_source_clone = session_configuration.session_source.clone();
-        let (agent_status_tx, agent_status_rx) = watch::channel(AgentStatus::PendingInit);
-
         let session = Session::new(
             session_configuration,
             config.clone(),
             installation_id,
             auth_manager.clone(),
             models_manager.clone(),
-            exec_policy,
             tx_event.clone(),
-            agent_status_tx.clone(),
             conversation_history,
             session_source_clone,
-            skills_manager,
-            plugins_manager,
-            mcp_manager.clone(),
             parent_session_id,
-            environment_manager,
             thread_store,
-            parent_rollout_thread_trace,
         )
         .await
         .map_err(|e| {
@@ -617,7 +363,6 @@ impl Codex {
         })?;
         let thread_id = session.conversation_id;
 
-        // This task will run until Op::Shutdown is received.
         let session_for_loop = Arc::clone(&session);
         let session_loop_handle = tokio::spawn(async move {
             submission_loop(session_for_loop, config, rx_sub)
@@ -627,7 +372,6 @@ impl Codex {
         let codex = Codex {
             tx_sub,
             rx_event,
-            agent_status: agent_status_rx,
             session,
             session_loop_termination: session_loop_termination_from_handle(session_loop_handle),
         };
@@ -635,9 +379,8 @@ impl Codex {
         Ok(CodexSpawnOk { codex, thread_id })
     }
 
-    /// Submit the `op` wrapped in a `Submission` with a unique ID.
     pub async fn submit(&self, op: Op) -> CodexResult<String> {
-        self.submit_with_trace(op, /*trace*/ None).await
+        self.submit_with_trace(op, None).await
     }
 
     pub async fn submit_with_trace(
@@ -655,8 +398,6 @@ impl Codex {
         Ok(id)
     }
 
-    /// Use sparingly: prefer `submit()` so Codex is responsible for generating
-    /// unique IDs for each submission.
     pub async fn submit_with_id(&self, mut sub: Submission) -> CodexResult<()> {
         if sub.trace.is_none() {
             sub.trace = current_span_w3c_trace_context();
@@ -667,18 +408,6 @@ impl Codex {
             .map_err(|_| CodexErr::InternalAgentDied)?;
         Ok(())
     }
-
-    /// Persist a thread-level memory mode update for the active session.
-    ///
-    /// This is a local-only operation that updates rollout metadata directly
-    /// and does not involve the model.
-    pub async fn set_thread_memory_mode(
-        &self,
-        mode: codex_protocol::protocol::ThreadMemoryMode,
-    ) -> anyhow::Result<()> {
-        handlers::persist_thread_memory_mode_update(&self.session, mode).await
-    }
-
     pub async fn shutdown_and_wait(&self) -> CodexResult<()> {
         let session_loop_termination = self.session_loop_termination.clone();
         match self.submit(Op::Shutdown).await {
@@ -714,7 +443,6 @@ impl Codex {
         &self,
         app_server_client_name: Option<String>,
         app_server_client_version: Option<String>,
-        mcp_elicitations_auto_deny: bool,
     ) -> ConstraintResult<()> {
         self.session
             .update_settings(SessionSettingsUpdate {
@@ -723,13 +451,7 @@ impl Codex {
                 ..Default::default()
             })
             .await?;
-        let mcp_connection_manager = self.session.services.mcp_connection_manager.read().await;
-        mcp_connection_manager.set_elicitations_auto_deny(mcp_elicitations_auto_deny);
         Ok(())
-    }
-
-    pub(crate) async fn agent_status(&self) -> AgentStatus {
-        self.agent_status.borrow().clone()
     }
 
     pub(crate) async fn thread_config_snapshot(&self) -> ThreadConfigSnapshot {
@@ -747,7 +469,7 @@ impl Codex {
     }
 
     pub(crate) fn enabled(&self, feature: Feature) -> bool {
-        self.session.enabled(feature)
+        self.session.features.enabled(feature)
     }
 }
 
@@ -764,13 +486,6 @@ fn get_service_tier(
             || model_info.supports_service_tier(service_tier)
     })
 }
-
-fn session_permission_profile_state_from_config(
-    config: &Config,
-) -> CodexResult<PermissionProfileState> {
-    Ok(config.permissions.permission_profile_state().clone())
-}
-
 #[cfg(test)]
 pub(crate) fn completed_session_loop_termination() -> SessionLoopTermination {
     futures::future::ready(()).boxed().shared()
@@ -792,13 +507,7 @@ async fn thread_title_from_thread_store(
     conversation_id: ThreadId,
 ) -> Option<String> {
     let thread = match live_thread {
-        Some(live_thread) => {
-            live_thread
-                .read_thread(
-                    /*include_archived*/ true, /*include_history*/ false,
-                )
-                .await
-        }
+        Some(live_thread) => live_thread.read_thread(true, false).await,
         None => {
             thread_store
                 .read_thread(ReadThreadParams {
@@ -827,120 +536,10 @@ impl Session {
         }
     }
 
-    /// Builds the `x-codex-beta-features` header value for this session.
-    ///
-    /// `ModelClient` is session-scoped and intentionally does not depend on the full `Config`, so
-    /// we precompute the comma-separated list of enabled experimental feature keys at session
-    /// creation time and thread it into the client.
-    fn build_model_client_beta_features_header(config: &Config) -> Option<String> {
-        let beta_features_header = FEATURES
-            .iter()
-            .filter_map(|spec| {
-                let advertise_in_model_client_header =
-                    spec.stage.experimental_menu_description().is_some()
-                        || spec.id == Feature::RemoteCompactionV2;
-                if advertise_in_model_client_header && config.features.enabled(spec.id) {
-                    Some(spec.key)
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(",");
-
-        if beta_features_header.is_empty() {
-            None
-        } else {
-            Some(beta_features_header)
-        }
-    }
-
-    async fn start_managed_network_proxy(
-        spec: &crate::config::NetworkProxySpec,
-        permission_profile: &PermissionProfile,
-        managed_network_requirements_enabled: bool,
-        audit_metadata: NetworkProxyAuditMetadata,
-    ) -> anyhow::Result<StartedNetworkProxy> {
-        let network_proxy = spec
-            .start_proxy(
-                permission_profile,
-                None,
-                None,
-                managed_network_requirements_enabled,
-                audit_metadata,
-            )
-            .await
-            .map_err(|err| anyhow::anyhow!("failed to start managed network proxy: {err}"))?;
-        Ok(network_proxy)
-    }
-
-    async fn refresh_managed_network_proxy_for_current_permission_profile(&self) {
-        let Ok(_refresh_guard) = self.managed_network_proxy_refresh_lock.acquire().await else {
-            error!("managed network proxy refresh semaphore closed");
-            return;
-        };
-        let session_configuration = {
-            let state = self.state.lock().await;
-            state.session_configuration.clone()
-        };
-        let Some(spec) = session_configuration
-            .original_config_do_not_use
-            .permissions
-            .network
-            .as_ref()
-            .cloned()
-        else {
-            self.services.network_proxy.store(None);
-            return;
-        };
-
-        let spec = match spec
-            .recompute_for_permission_profile(&session_configuration.permission_profile())
-        {
-            Ok(spec) => spec,
-            Err(err) => {
-                warn!("failed to rebuild managed network proxy policy for sandbox change: {err}");
-                return;
-            }
-        };
-        if let Some(started_proxy) = self.services.network_proxy.load_full() {
-            if let Err(err) = spec.apply_to_started_proxy(started_proxy.as_ref()).await {
-                warn!("failed to refresh managed network proxy for sandbox change: {err}");
-            }
-            return;
-        }
-
-        match Self::start_managed_network_proxy(
-            &spec,
-            &session_configuration.permission_profile(),
-            self.services.managed_network_requirements_configured,
-            self.services.network_proxy_audit_metadata.clone(),
-        )
-        .await
-        {
-            Ok(started_proxy) => {
-                self.services
-                    .network_proxy
-                    .store(Some(Arc::new(started_proxy)));
-            }
-            Err(err) => {
-                warn!("failed to start managed network proxy for sandbox change: {err}");
-            }
-        }
-    }
-
     #[cfg(test)]
     pub(crate) async fn codex_home(&self) -> AbsolutePathBuf {
         let state = self.state.lock().await;
         state.session_configuration.codex_home().clone()
-    }
-
-    pub(crate) fn subscribe_out_of_band_elicitation_pause_state(&self) -> watch::Receiver<bool> {
-        self.out_of_band_elicitation_paused.subscribe()
-    }
-
-    pub(crate) fn set_out_of_band_elicitation_pause_state(&self, paused: bool) {
-        self.out_of_band_elicitation_paused.send_replace(paused);
     }
 
     pub(crate) fn get_tx_event(&self) -> Sender<Event> {
@@ -963,7 +562,6 @@ impl Session {
         self.services.live_thread.as_ref()
     }
 
-    /// Flush rollout writes and return the final durability-barrier result.
     pub(crate) async fn flush_rollout(&self) -> std::io::Result<()> {
         if let Some(live_thread) = self.live_thread() {
             live_thread.flush().await.map_err(std::io::Error::other)
@@ -992,24 +590,6 @@ impl Session {
         format!("auto-compact-{id}")
     }
 
-    pub(crate) async fn route_realtime_text_input(self: &Arc<Self>, text: String) {
-        handlers::user_input_or_turn_inner(
-            self,
-            self.next_internal_sub_id(),
-            Op::UserInput {
-                environments: None,
-                items: vec![UserInput::Text {
-                    text,
-                    text_elements: Vec::new(),
-                }],
-                final_output_json_schema: None,
-                responsesapi_client_metadata: None,
-                thread_settings: Default::default(),
-            },
-        )
-        .await;
-    }
-
     pub(crate) async fn get_total_token_usage(&self) -> i64 {
         let state = self.state.lock().await;
         state.get_total_token_usage(state.server_reasoning_included())
@@ -1030,12 +610,6 @@ impl Session {
         state.token_info().map(|info| info.total_token_usage)
     }
 
-    /// Returns the complete token usage snapshot currently cached for this session.
-    ///
-    /// Resume and fork reconstruction seed this state from the last persisted rollout
-    /// `TokenCount` event. Callers that need to replay restored usage to a client
-    /// should use this accessor instead of `total_token_usage`, because the app-server
-    /// notification includes both total and last-turn usage.
     pub(crate) async fn token_usage_info(&self) -> Option<TokenUsageInfo> {
         let state = self.state.lock().await;
         state.token_info()
@@ -1056,36 +630,8 @@ impl Session {
         }
     }
 
-    // Merges connector IDs into the session-level explicit connector selection.
-    pub(crate) async fn merge_connector_selection(
-        &self,
-        connector_ids: HashSet<String>,
-    ) -> HashSet<String> {
-        let mut state = self.state.lock().await;
-        state.merge_connector_selection(connector_ids)
-    }
-
-    // Returns the connector IDs currently selected for this session.
-    pub(crate) async fn get_connector_selection(&self) -> HashSet<String> {
-        let state = self.state.lock().await;
-        state.get_connector_selection()
-    }
-
-    // Clears connector IDs that were accumulated for explicit selection.
-    pub(crate) async fn clear_connector_selection(&self) {
-        let mut state = self.state.lock().await;
-        state.clear_connector_selection();
-    }
-
     async fn record_initial_history(&self, conversation_history: InitialHistory) {
         let turn_context = self.new_default_turn().await;
-        let is_subagent = {
-            let state = self.state.lock().await;
-            state
-                .session_configuration
-                .session_source
-                .is_non_root_agent()
-        };
         let has_prior_user_turns = initial_history_has_prior_user_turns(&conversation_history);
         {
             let mut state = self.state.lock().await;
@@ -1093,10 +639,7 @@ impl Session {
         }
         match conversation_history {
             InitialHistory::New | InitialHistory::Cleared => {
-                // Defer initial context insertion until the first real turn starts so
-                // turn/start overrides can be merged before we write model-visible context.
-                self.set_previous_turn_settings(/*previous_turn_settings*/ None)
-                    .await;
+                self.set_previous_turn_settings(None).await;
             }
             InitialHistory::Resumed(resumed_history) => {
                 let rollout_items = resumed_history.history;
@@ -1104,7 +647,6 @@ impl Session {
                     .apply_rollout_reconstruction(&turn_context, &rollout_items)
                     .await;
 
-                // If resuming, warn when the last recorded model differs from the current one.
                 let curr: &str = turn_context.model_info.slug.as_str();
                 if let Some(prev) = previous_turn_settings
                     .as_ref()
@@ -1118,47 +660,33 @@ impl Session {
                             message: format!(
                                 "This session was recorded with model `{prev}` but is resuming with `{curr}`. \
                          Consider switching back to `{prev}` as it may affect Codex performance."
-                                        }),
+                            ),
+                        }),
                     )
                     .await;
                 }
 
-                // Seed usage info from the recorded rollout so UIs can show token counts
-                // immediately on resume/fork.
                 if let Some(info) = Self::last_token_info_from_rollout(&rollout_items) {
                     let mut state = self.state.lock().await;
                     state.set_token_info(Some(info));
                 }
-
-                // Defer seeding the session's initial context until the first turn starts so
-                // turn/start overrides can be merged before we write to the rollout.
-                if !is_subagent {
-                    let _ = self.flush_rollout().await;
-                }
+                let _ = self.flush_rollout().await;
             }
             InitialHistory::Forked(rollout_items) => {
                 self.apply_rollout_reconstruction(&turn_context, &rollout_items)
                     .await;
 
-                // Seed usage info from the recorded rollout so UIs can show token counts
-                // immediately on resume/fork.
                 if let Some(info) = Self::last_token_info_from_rollout(&rollout_items) {
                     let mut state = self.state.lock().await;
                     state.set_token_info(Some(info));
                 }
 
-                // If persisting, persist all rollout items as-is (the store filters).
                 if !rollout_items.is_empty() {
                     self.persist_rollout_items(&rollout_items).await;
                 }
 
-                // Forked threads should remain file-backed immediately after startup.
                 self.ensure_rollout_materialized().await;
-
-                // Flush after seeding history and any persisted rollout copy.
-                if !is_subagent {
-                    let _ = self.flush_rollout().await;
-                }
+                let _ = self.flush_rollout().await;
             }
         }
     }
@@ -1237,20 +765,12 @@ impl Session {
         previous_cwd: &AbsolutePathBuf,
         next_cwd: &AbsolutePathBuf,
         codex_home: &AbsolutePathBuf,
-        session_source: &SessionSource,
     ) {
         if previous_cwd == next_cwd {
             return;
         }
 
         if !self.features.enabled(Feature::ShellSnapshot) {
-            return;
-        }
-
-        if matches!(
-            session_source,
-            SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
-        ) {
             return;
         }
 
@@ -1269,7 +789,7 @@ impl Session {
         &self,
         updates: SessionSettingsUpdate,
     ) -> ConstraintResult<()> {
-        let (previous_cwd, permission_profile_changed, next_cwd, codex_home, session_source) = {
+        let (previous_cwd, next_cwd, codex_home) = {
             let mut state = self.state.lock().await;
             let updated = match state.session_configuration.apply(&updates) {
                 Ok(updated) => updated,
@@ -1280,27 +800,13 @@ impl Session {
             };
 
             let previous_cwd = state.session_configuration.cwd.clone();
-            let previous_permission_profile = state.session_configuration.permission_profile();
-            let updated_permission_profile = updated.permission_profile();
-            let permission_profile_changed =
-                previous_permission_profile != updated_permission_profile;
             let next_cwd = updated.cwd.clone();
             let codex_home = updated.codex_home.clone();
-            let session_source = updated.session_source.clone();
             state.session_configuration = updated;
-            (previous_cwd, permission_profile_changed, next_cwd, codex_home, session_source)
+            (previous_cwd, next_cwd, codex_home)
         };
 
-        self.maybe_refresh_shell_snapshot_for_cwd(
-            &previous_cwd,
-            &next_cwd,
-            &codex_home,
-            &session_source,
-        );
-        if permission_profile_changed {
-            self.refresh_managed_network_proxy_for_current_permission_profile()
-                .await;
-        }
+        self.maybe_refresh_shell_snapshot_for_cwd(&previous_cwd, &next_cwd, &codex_home);
 
         Ok(())
     }
@@ -1343,41 +849,25 @@ impl Session {
     }
 
     pub(crate) async fn refresh_runtime_config(&self, next_config: Config) {
-        // Refresh only the user layer from the incoming snapshot. Preserve thread-local
-        // layers such as request/session overrides that were present when this session
-        // was created.
-        let config = {
+        let _config = {
             let mut state = self.state.lock().await;
             let mut config = (*state.session_configuration.original_config_do_not_use).clone();
             config.config_layer_stack = config
                 .config_layer_stack
                 .with_user_layer_from(&next_config.config_layer_stack);
-            config.tool_suggest =
-                resolve_tool_suggest_config_from_layer_stack(&config.config_layer_stack);
             let config = Arc::new(config);
             state.session_configuration.original_config_do_not_use = Arc::clone(&config);
             config
         };
-        self.services.skills_manager.clear_cache();
-        self.services.plugins_manager.clear_cache();
     }
 
     pub(crate) async fn reload_user_config_layer(&self) {
-        // Refresh layer-backed runtime state for an existing session, including enabled plugin
-        // and skill state. Derived config fields such as feature gates and legacy notify settings
-        // remain session-static.
-        //
-        // Prefer `refresh_runtime_config()` when the host can already provide a materialized
-        // config snapshot. This file-based path exists for legacy local reload flows.
         let config_toml_paths = {
             let state = self.state.lock().await;
             let config = &state.session_configuration.original_config_do_not_use;
             let user_config_paths = config
                 .config_layer_stack
-                .get_user_layers(
-                    ConfigLayerStackOrdering::LowestPrecedenceFirst,
-                    /*include_disabled*/ true,
-                )
+                .get_user_layers(ConfigLayerStackOrdering::LowestPrecedenceFirst, true)
                 .into_iter()
                 .filter_map(|layer| match &layer.name {
                     ConfigLayerSource::User { file, .. } => Some(file.clone()),
@@ -1425,8 +915,6 @@ impl Session {
                     .config_layer_stack
                     .with_user_config(&config_toml_path, user_config);
             }
-            config.tool_suggest =
-                resolve_tool_suggest_config_from_layer_stack(&config.config_layer_stack);
             config
         };
         self.refresh_runtime_config(next_config).await;
@@ -1437,148 +925,303 @@ impl Session {
         reference_context_item: Option<&TurnContextItem>,
         current_context: &TurnContext,
     ) -> Vec<ResponseItem> {
-        // TODO: Make context updates a pure diff of persisted previous/current TurnContextItem
-        // state so replay/backtracking is deterministic. Runtime inputs that affect model-visible
-        // context (shell, exec policy, feature gates, previous-turn bridge) should be persisted
-        // state or explicit non-state replay events.
         let previous_turn_settings = {
             let state = self.state.lock().await;
             state.previous_turn_settings()
         };
         let shell = self.user_shell();
-        let permissions_instructions = current_context
-            .config
-            .include_permissions_instructions
-            .then(|| {
-                PermissionsInstructions::from_permission_profile(
-                    &current_context.permission_profile,
-                    current_context.approval_policy.value(),
-                    current_context.config.approvals_reviewer,
-                    #[allow(deprecated)]
-                    &current_context.cwd,
-                    current_context
-                        .features
-                        .enabled(Feature::ExecPermissionApprovals),
-                    current_context
-                        .features
-                        .enabled(Feature::RequestPermissionsTool),
-                )
-                .render()
-            });
         crate::context_manager::updates::build_settings_update_items(
             reference_context_item,
             previous_turn_settings.as_ref(),
             current_context,
             shell.as_ref(),
-            permissions_instructions.as_deref(),
-            self.features.enabled(Feature::Personality),
         )
     }
 
-    /// Persist the event to rollout and send it to clients.
+    pub(crate) async fn build_initial_context(
+        &self,
+        turn_context: &TurnContext,
+    ) -> Vec<ResponseItem> {
+        let mut developer_sections = Vec::new();
+        let mut contextual_user_sections = Vec::new();
+
+        let previous_turn_settings = {
+            let state = self.state.lock().await;
+            state.previous_turn_settings()
+        };
+        if let Some(model_switch_message) =
+            crate::context_manager::updates::build_model_instructions_update_item(
+                previous_turn_settings.as_ref(),
+                turn_context,
+            )
+        {
+            developer_sections.push(model_switch_message);
+        }
+        if let Some(developer_instructions) = turn_context.developer_instructions.as_deref()
+            && !developer_instructions.is_empty()
+        {
+            developer_sections.push(developer_instructions.to_string());
+        }
+        if turn_context.config.include_environment_context {
+            let shell = self.user_shell();
+            contextual_user_sections.push(
+                crate::context::EnvironmentContext::from_turn_context(turn_context, shell.as_ref())
+                    .render(),
+            );
+        }
+
+        let mut items = Vec::new();
+        if let Some(developer_message) =
+            crate::context_manager::updates::build_developer_update_item(developer_sections)
+        {
+            items.push(developer_message);
+        }
+        if let Some(contextual_user_message) =
+            crate::context_manager::updates::build_contextual_user_message(contextual_user_sections)
+        {
+            items.push(contextual_user_message);
+        }
+        items
+    }
+
+    pub(crate) async fn record_context_updates_and_set_reference_context_item(
+        &self,
+        turn_context: &TurnContext,
+    ) {
+        let reference_context_item = {
+            let state = self.state.lock().await;
+            state.reference_context_item()
+        };
+        let context_items = if reference_context_item.is_none() {
+            self.build_initial_context(turn_context).await
+        } else {
+            self.build_settings_update_items(reference_context_item.as_ref(), turn_context)
+                .await
+        };
+        let turn_context_item = turn_context.to_turn_context_item();
+        if !context_items.is_empty() {
+            self.record_conversation_items(turn_context, &context_items)
+                .await;
+        }
+        self.persist_rollout_items(&[RolloutItem::TurnContext(turn_context_item.clone())])
+            .await;
+        let mut state = self.state.lock().await;
+        state.set_reference_context_item(Some(turn_context_item));
+    }
+
+    pub(crate) async fn record_conversation_items(
+        &self,
+        turn_context: &TurnContext,
+        items: &[ResponseItem],
+    ) {
+        self.record_into_history(items, turn_context).await;
+        self.persist_rollout_response_items(items).await;
+        self.send_raw_response_items(turn_context, items).await;
+    }
+
+    pub(crate) async fn record_user_prompt_and_emit_turn_item(
+        &self,
+        turn_context: &TurnContext,
+        user_input: &[UserInput],
+    ) {
+        let item = ResponseItem::from(ResponseInputItem::from(user_input.to_vec()));
+        self.record_response_item_and_emit_turn_item(turn_context, item)
+            .await;
+    }
+
+    pub(crate) async fn record_response_item_and_emit_turn_item(
+        &self,
+        turn_context: &TurnContext,
+        item: ResponseItem,
+    ) {
+        self.record_conversation_items(turn_context, std::slice::from_ref(&item))
+            .await;
+        if let Some(turn_item) = crate::event_mapping::parse_turn_item(&item) {
+            self.emit_turn_item_completed(turn_context, turn_item).await;
+        }
+    }
+
+    pub(crate) async fn record_into_history(
+        &self,
+        items: &[ResponseItem],
+        turn_context: &TurnContext,
+    ) {
+        let mut state = self.state.lock().await;
+        state.record_items(items.iter(), turn_context.truncation_policy);
+    }
+
+    pub(crate) async fn clone_history(&self) -> ContextManager {
+        let state = self.state.lock().await;
+        state.clone_history()
+    }
+
+    pub(crate) async fn reference_context_item(&self) -> Option<TurnContextItem> {
+        let state = self.state.lock().await;
+        state.reference_context_item()
+    }
+
+    pub(crate) async fn replace_history(
+        &self,
+        items: Vec<ResponseItem>,
+        reference_context_item: Option<TurnContextItem>,
+    ) {
+        let mut state = self.state.lock().await;
+        state.replace_history(items, reference_context_item);
+    }
+
+    pub(crate) async fn replace_compacted_history(
+        &self,
+        items: Vec<ResponseItem>,
+        reference_context_item: Option<TurnContextItem>,
+        compacted_item: CompactedItem,
+    ) {
+        {
+            let mut state = self.state.lock().await;
+            state.replace_history(items, reference_context_item.clone());
+            state.start_next_auto_compact_window();
+        }
+        self.persist_rollout_items(&[RolloutItem::Compacted(compacted_item)])
+            .await;
+        if let Some(turn_context_item) = reference_context_item {
+            self.persist_rollout_items(&[RolloutItem::TurnContext(turn_context_item)])
+                .await;
+        }
+        self.services.model_client.advance_window_generation();
+    }
+
+    async fn persist_rollout_response_items(&self, items: &[ResponseItem]) {
+        let rollout_items: Vec<RolloutItem> = items
+            .iter()
+            .cloned()
+            .map(RolloutItem::ResponseItem)
+            .collect();
+        self.persist_rollout_items(&rollout_items).await;
+    }
+
+    async fn send_raw_response_items(&self, turn_context: &TurnContext, items: &[ResponseItem]) {
+        for item in items {
+            self.send_event(
+                turn_context,
+                EventMsg::RawResponseItem(RawResponseItemEvent { item: item.clone() }),
+            )
+            .await;
+        }
+    }
+
+    pub(crate) async fn update_token_usage_info(
+        &self,
+        turn_context: &TurnContext,
+        token_usage: Option<&TokenUsage>,
+    ) {
+        self.record_token_usage_info(turn_context, token_usage)
+            .await;
+        self.send_token_count_event(turn_context).await;
+    }
+
+    pub(crate) async fn record_token_usage_info(
+        &self,
+        turn_context: &TurnContext,
+        token_usage: Option<&TokenUsage>,
+    ) {
+        if let Some(token_usage) = token_usage {
+            let mut state = self.state.lock().await;
+            state.update_token_info_from_usage(token_usage, turn_context.model_context_window());
+            if matches!(
+                turn_context.config.model_auto_compact_token_limit_scope,
+                AutoCompactTokenLimitScope::BodyAfterPrefix
+            ) {
+                state.ensure_auto_compact_window_server_prefill_from_usage(token_usage);
+            }
+        }
+    }
+
+    pub(crate) async fn recompute_token_usage(&self, turn_context: &TurnContext) {
+        let history = self.clone_history().await;
+        let base_instructions = self.get_base_instructions().await;
+        let Some(estimated_total_tokens) =
+            history.estimate_token_count_with_base_instructions(&base_instructions)
+        else {
+            return;
+        };
+        {
+            let mut state = self.state.lock().await;
+            let mut info = state.token_info().unwrap_or(TokenUsageInfo {
+                total_token_usage: TokenUsage::default(),
+                last_token_usage: TokenUsage::default(),
+                model_context_window: None,
+            });
+            info.last_token_usage = TokenUsage {
+                input_tokens: 0,
+                cached_input_tokens: 0,
+                output_tokens: 0,
+                reasoning_output_tokens: 0,
+                total_tokens: estimated_total_tokens.max(0),
+            };
+            if let Some(model_context_window) = turn_context.model_context_window() {
+                info.model_context_window = Some(model_context_window);
+            }
+            state.set_token_info(Some(info));
+        }
+        self.set_auto_compact_window_estimated_prefill_for_scope(
+            turn_context,
+            estimated_total_tokens,
+        )
+        .await;
+        self.send_token_count_event(turn_context).await;
+    }
+
+    pub(crate) async fn update_rate_limits(
+        &self,
+        turn_context: &TurnContext,
+        new_rate_limits: RateLimitSnapshot,
+    ) {
+        self.record_rate_limits_info(new_rate_limits).await;
+        self.send_token_count_event(turn_context).await;
+    }
+
+    pub(crate) async fn record_rate_limits_info(&self, new_rate_limits: RateLimitSnapshot) {
+        let mut state = self.state.lock().await;
+        state.set_rate_limits(new_rate_limits);
+    }
+
+    pub(crate) async fn set_server_reasoning_included(&self, included: bool) {
+        let mut state = self.state.lock().await;
+        state.set_server_reasoning_included(included);
+    }
+
+    pub(crate) async fn send_token_count_event(&self, turn_context: &TurnContext) {
+        let (info, rate_limits) = {
+            let state = self.state.lock().await;
+            state.token_info_and_rate_limits()
+        };
+        let event = EventMsg::TokenCount(TokenCountEvent { info, rate_limits });
+        self.send_event(turn_context, event).await;
+    }
+
     pub(crate) async fn send_event(&self, turn_context: &TurnContext, msg: EventMsg) {
-        let legacy_source = msg.clone();
-        self.services
-            .rollout_thread_trace
-            .record_codex_turn_event(&turn_context.sub_id, &legacy_source);
-        self.services
-            .rollout_thread_trace
-            .record_tool_call_event(turn_context.sub_id.clone(), &legacy_source);
         let event = Event {
             id: turn_context.sub_id.clone(),
             msg,
         };
         self.send_event_raw(event).await;
-        self.maybe_notify_parent_of_terminal_turn(turn_context, &legacy_source)
-            .await;
-        self.maybe_mirror_event_text_to_realtime(&legacy_source)
-            .await;
-        self.maybe_clear_realtime_handoff_for_event(&legacy_source)
-            .await;
-
-        let show_raw_agent_reasoning = self.show_raw_agent_reasoning();
-        for legacy in legacy_source.as_legacy_events(show_raw_agent_reasoning) {
-            let legacy_event = Event {
-                id: turn_context.sub_id.clone(),
-                msg: legacy,
-            };
-            self.send_event_raw(legacy_event).await;
-        }
-    }
-
-    /// Forwards terminal turn events from spawned MultiAgentV2 children to their direct parent.
-    async fn maybe_notify_parent_of_terminal_turn(
-        &self,
-        turn_context: &TurnContext,
-        msg: &EventMsg,
-    ) {
-        if !self.enabled(Feature::MultiAgentV2) {
-            return;
-        }
-
-        if !matches!(msg, EventMsg::TurnComplete(_) | EventMsg::TurnAborted(_)) {
-            return;
-        }
-
-        let SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-            parent_thread_id,
-            agent_path: Some(child_agent_path),
-            ..
-        }) = &turn_context.session_source
-        else {
-            return;
-        };
-
-        let Some(status) = status_from_event(msg) else {
-            return;
-        };
-        if !is_final_agent_status(&status) {
-            return;
-        }
-
-        self.forward_child_completion_to_parent(
-            turn_context,
-            *parent_thread_id,
-            child_agent_path,
-            status,
-        )
-        .await;
-    }
-
-    /// Sends the standard completion envelope from a spawned MultiAgentV2 child to its parent.
-    async fn forward_child_completion_to_parent(
-        &self,
-        turn_context: &TurnContext,
-        parent_thread_id: ThreadId,
-        child_agent_path: &codex_protocol::AgentPath,
-        status: AgentStatus,
-    ) {
-        let _ = (turn_context, parent_thread_id, child_agent_path, status);
-    }
-
-    async fn maybe_mirror_event_text_to_realtime(&self, _msg: &EventMsg) {
-        // Realtime runtime has been removed; event mirroring is intentionally inert.
-    }
-
-    async fn maybe_clear_realtime_handoff_for_event(&self, _msg: &EventMsg) {
-        // Realtime runtime has been removed; handoff state no longer exists.
     }
 
     pub(crate) async fn send_event_raw(&self, event: Event) {
-        // Persist the event into rollout storage (the store filters as needed).
         let rollout_items = vec![RolloutItem::EventMsg(event.msg.clone())];
         self.persist_rollout_items(&rollout_items).await;
-        self.services
-            .rollout_thread_trace
-            .record_protocol_event(&event.msg);
         self.deliver_event_raw(event).await;
     }
 
-    async fn deliver_event_raw(&self, event: Event) {
-        // Record the last known agent status.
-        if let Some(status) = status_from_event(&event.msg) {
-            self.agent_status.send_replace(status);
+    pub(crate) async fn persist_rollout_items(&self, items: &[RolloutItem]) {
+        let Some(live_thread) = self.live_thread() else {
+            return;
+        };
+        if let Err(err) = live_thread.append_items(items).await {
+            warn!("failed to persist rollout items: {err}");
         }
+    }
+
+    async fn deliver_event_raw(&self, event: Event) {
         if let Err(e) = self.tx_event.send(event).await {
             debug!("dropping event because channel is closed: {e}");
         }
@@ -1615,28 +1258,6 @@ impl Session {
         .await;
     }
 
-    /// Adds an execpolicy amendment to both the in-memory and on-disk policies so future
-    /// commands can use the newly approved prefix.
-    pub(crate) async fn persist_execpolicy_amendment(
-        &self,
-        amendment: &ExecPolicyAmendment,
-    ) -> Result<(), ExecPolicyUpdateError> {
-        let codex_home = self
-            .state
-            .lock()
-            .await
-            .session_configuration
-            .codex_home()
-            .clone();
-
-        self.services
-            .exec_policy
-            .append_amendment_and_update(&codex_home, amendment)
-            .await?;
-
-        Ok(())
-    }
-
     pub(crate) async fn turn_context_for_sub_id(&self, sub_id: &str) -> Option<Arc<TurnContext>> {
         let active = self.active_turn.lock().await;
         active
@@ -1656,999 +1277,11 @@ impl Session {
         ))
     }
 
-    pub(crate) async fn record_execpolicy_amendment_message(
-        &self,
-        sub_id: &str,
-        amendment: &ExecPolicyAmendment,
-    ) {
-        let Some(prefixes) = format_allow_prefixes(vec![amendment.command.clone()]) else {
-            warn!("execpolicy amendment for {sub_id} had no command prefix");
-            return;
-        };
-        let fragment = ApprovedCommandPrefixSaved::new(prefixes);
-        let text = fragment.render();
-        let message: ResponseItem = ContextualUserFragment::into(fragment);
-
-        if let Some(turn_context) = self.turn_context_for_sub_id(sub_id).await {
-            self.record_conversation_items(&turn_context, std::slice::from_ref(&message))
-                .await;
-            return;
-        }
-
-        if self
-            .inject_response_items(vec![ResponseInputItem::Message {
-                role: "developer".to_string(),
-                content: vec![ContentItem::InputText { text }],
-                phase: None,
-            }])
-            .await
-            .is_err()
-        {
-            warn!("no active turn found to record execpolicy amendment message for {sub_id}");
-        }
-    }
-
-    pub(crate) async fn persist_network_policy_amendment(
-        &self,
-        amendment: &NetworkPolicyAmendment,
-        network_approval_context: &NetworkApprovalContext,
-    ) -> anyhow::Result<()> {
-        let _refresh_guard = self
-            .managed_network_proxy_refresh_lock
-            .acquire()
-            .await
-            .map_err(|_| anyhow::anyhow!("managed network proxy refresh semaphore closed"))?;
-        let host =
-            Self::validated_network_policy_amendment_host(amendment, network_approval_context)?;
-        let codex_home = self
-            .state
-            .lock()
-            .await
-            .session_configuration
-            .codex_home()
-            .clone();
-        let execpolicy_amendment =
-            execpolicy_network_rule_amendment(amendment, network_approval_context, &host);
-
-        self.services
-            .exec_policy
-            .append_network_rule_and_update(
-                &codex_home,
-                &host,
-                execpolicy_amendment.protocol,
-                execpolicy_amendment.decision,
-                Some(execpolicy_amendment.justification),
-            )
-            .await
-            .map_err(|err| {
-                anyhow::anyhow!("failed to persist network policy amendment to execpolicy: {err}")
-            })?;
-
-        Ok(())
-    }
-
-    fn validated_network_policy_amendment_host(
-        amendment: &NetworkPolicyAmendment,
-        network_approval_context: &NetworkApprovalContext,
-    ) -> anyhow::Result<String> {
-        let approved_host = normalize_host(&network_approval_context.host);
-        let amendment_host = normalize_host(&amendment.host);
-        if amendment_host != approved_host {
-            return Err(anyhow::anyhow!(
-                "network policy amendment host '{}' does not match approved host '{}'",
-                amendment.host,
-                network_approval_context.host
-            ));
-        }
-        Ok(approved_host)
-    }
-
-    pub(crate) async fn record_network_policy_amendment_message(
-        &self,
-        sub_id: &str,
-        amendment: &NetworkPolicyAmendment,
-    ) {
-        let fragment = NetworkRuleSaved::new(amendment);
-        let text = fragment.render();
-        let message: ResponseItem = ContextualUserFragment::into(fragment);
-
-        if let Some(turn_context) = self.turn_context_for_sub_id(sub_id).await {
-            self.record_conversation_items(&turn_context, std::slice::from_ref(&message))
-                .await;
-            return;
-        }
-
-        if self
-            .inject_response_items(vec![ResponseInputItem::Message {
-                role: "developer".to_string(),
-                content: vec![ContentItem::InputText { text }],
-                phase: None,
-            }])
-            .await
-            .is_err()
-        {
-            warn!("no active turn found to record network policy amendment message for {sub_id}");
-        }
-    }
-
-    /// Emit an exec approval request event and await the user's decision.
-    ///
-    /// The request is keyed by `call_id` + `approval_id` so matching responses
-    /// are delivered to the correct in-flight turn. If the pending approval is
-    /// cleared before a response arrives, treat it as an abort so interrupted
-    /// turns do not continue on a synthetic denial.
-    ///
-    /// Note that if `available_decisions` is `None`, then the other fields will
-    /// be used to derive the available decisions via
-    /// [ExecApprovalRequestEvent::default_available_decisions].
     #[allow(clippy::too_many_arguments)]
     #[expect(
         clippy::await_holding_invalid_type,
         reason = "active turn checks and turn state updates must remain atomic"
     )]
-    pub async fn request_command_approval(
-        &self,
-        turn_context: &TurnContext,
-        call_id: String,
-        approval_id: Option<String>,
-        command: Vec<String>,
-        cwd: AbsolutePathBuf,
-        reason: Option<String>,
-        network_approval_context: Option<NetworkApprovalContext>,
-        proposed_execpolicy_amendment: Option<ExecPolicyAmendment>,
-        additional_permissions: Option<AdditionalPermissionProfile>,
-        available_decisions: Option<Vec<ReviewDecision>>,
-    ) -> ReviewDecision {
-        //  command-level approvals use `call_id`.
-        // `approval_id` is only present for subcommand callbacks (execve intercept)
-        let effective_approval_id = approval_id.clone().unwrap_or_else(|| call_id.clone());
-        // Add the tx_approve callback to the map before sending the request.
-        let (tx_approve, rx_approve) = oneshot::channel();
-        let prev_entry = {
-            let mut active = self.active_turn.lock().await;
-            match active.as_mut() {
-                Some(at) => {
-                    let mut ts = at.turn_state.lock().await;
-                    ts.insert_pending_approval(effective_approval_id.clone(), tx_approve)
-                }
-                None => None,
-            }
-        };
-        if prev_entry.is_some() {
-            warn!("Overwriting existing pending approval for call_id: {effective_approval_id}");
-        }
-
-        let proposed_network_policy_amendments = network_approval_context.as_ref().map(|context| {
-            vec![
-                NetworkPolicyAmendment {
-                    host: context.host.clone(),
-                    action: NetworkPolicyRuleAction::Allow,
-                },
-                NetworkPolicyAmendment {
-                    host: context.host.clone(),
-                    action: NetworkPolicyRuleAction::Deny,
-                },
-            ]
-        });
-        let available_decisions = available_decisions.unwrap_or_else(|| {
-            ExecApprovalRequestEvent::default_available_decisions(
-                network_approval_context.as_ref(),
-                proposed_execpolicy_amendment.as_ref(),
-                proposed_network_policy_amendments.as_deref(),
-                additional_permissions.as_ref(),
-            )
-        });
-        let event = EventMsg::ExecApprovalRequest(ExecApprovalRequestEvent {
-            call_id,
-            approval_id,
-            turn_id: turn_context.sub_id.clone(),
-            started_at_ms: now_unix_timestamp_ms(),
-            command,
-            cwd,
-            reason,
-            network_approval_context,
-            proposed_execpolicy_amendment,
-            proposed_network_policy_amendments,
-            additional_permissions,
-            available_decisions: Some(available_decisions),
-            parsed_cmd,
-        });
-        self.send_event(turn_context, event).await;
-        rx_approve.await.unwrap_or(ReviewDecision::Abort)
-    }
-
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "active turn checks and turn state updates must remain atomic"
-    )]
-    pub async fn request_patch_approval(
-        &self,
-        turn_context: &TurnContext,
-        call_id: String,
-        changes: HashMap<PathBuf, FileChange>,
-        reason: Option<String>,
-        grant_root: Option<PathBuf>,
-    ) -> oneshot::Receiver<ReviewDecision> {
-        // Add the tx_approve callback to the map before sending the request.
-        let (tx_approve, rx_approve) = oneshot::channel();
-        let approval_id = call_id.clone();
-        let prev_entry = {
-            let mut active = self.active_turn.lock().await;
-            match active.as_mut() {
-                Some(at) => {
-                    let mut ts = at.turn_state.lock().await;
-                    ts.insert_pending_approval(approval_id.clone(), tx_approve)
-                }
-                None => None,
-            }
-        };
-        if prev_entry.is_some() {
-            warn!("Overwriting existing pending approval for call_id: {approval_id}");
-        }
-
-        let event = EventMsg::ApplyPatchApprovalRequest(ApplyPatchApprovalRequestEvent {
-            call_id,
-            turn_id: turn_context.sub_id.clone(),
-            started_at_ms: now_unix_timestamp_ms(),
-            changes,
-            reason,
-            grant_root,
-        });
-        self.send_event(turn_context, event).await;
-        rx_approve
-    }
-
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "active turn checks and turn state updates must remain atomic"
-    )]
-    pub async fn request_user_input(
-        &self,
-        turn_context: &TurnContext,
-        call_id: String,
-        args: RequestUserInputArgs,
-    ) -> Option<RequestUserInputResponse> {
-        let sub_id = turn_context.sub_id.clone();
-        let (tx_response, rx_response) = oneshot::channel();
-        let event_id = sub_id.clone();
-        let prev_entry = {
-            let mut active = self.active_turn.lock().await;
-            match active.as_mut() {
-                Some(at) => {
-                    let mut ts = at.turn_state.lock().await;
-                    ts.insert_pending_user_input(sub_id, tx_response)
-                }
-                None => None,
-            }
-        };
-        if prev_entry.is_some() {
-            warn!("Overwriting existing pending user input for sub_id: {event_id}");
-        }
-
-        let event = EventMsg::RequestUserInput(RequestUserInputEvent {
-            call_id,
-            turn_id: turn_context.sub_id.clone(),
-            questions: args.questions,
-        });
-        turn_context
-            .turn_metadata_state
-            .mark_user_input_requested_during_turn();
-        self.send_event(turn_context, event).await;
-        rx_response.await.ok()
-    }
-
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "active turn checks and turn state updates must remain atomic"
-    )]
-    pub async fn notify_user_input_response(
-        &self,
-        sub_id: &str,
-        response: RequestUserInputResponse,
-    ) {
-        let entry = {
-            let mut active = self.active_turn.lock().await;
-            match active.as_mut() {
-                Some(at) => {
-                    let mut ts = at.turn_state.lock().await;
-                    ts.remove_pending_user_input(sub_id)
-                }
-                None => None,
-            }
-        };
-        match entry {
-            Some(tx_response) => {
-                tx_response.send(response).ok();
-            }
-            None => {
-                warn!("No pending user input found for sub_id: {sub_id}");
-            }
-        }
-    }
-
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "active turn reads must stay consistent with the matching turn state"
-    )]
-    pub(crate) async fn granted_turn_permissions(&self) -> Option<AdditionalPermissionProfile> {
-        let active = self.active_turn.lock().await;
-        let active = active.as_ref()?;
-        let ts = active.turn_state.lock().await;
-        ts.granted_permissions()
-    }
-
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "active turn reads must stay consistent with the matching turn state"
-    )]
-    pub(crate) async fn strict_auto_review_enabled_for_turn(&self) -> bool {
-        let active = self.active_turn.lock().await;
-        let Some(active) = active.as_ref() else {
-            return false;
-        };
-        let ts = active.turn_state.lock().await;
-        ts.strict_auto_review_enabled()
-    }
-
-    pub(crate) async fn granted_session_permissions(&self) -> Option<AdditionalPermissionProfile> {
-        let state = self.state.lock().await;
-        state.granted_permissions()
-    }
-
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "active turn checks and turn state updates must remain atomic"
-    )]
-    pub async fn notify_dynamic_tool_response(&self, call_id: &str, response: DynamicToolResponse) {
-        let entry = {
-            let mut active = self.active_turn.lock().await;
-            match active.as_mut() {
-                Some(at) => {
-                    let mut ts = at.turn_state.lock().await;
-                    ts.remove_pending_dynamic_tool(call_id)
-                }
-                None => None,
-            }
-        };
-        match entry {
-            Some(tx_response) => {
-                tx_response.send(response).ok();
-            }
-            None => {
-                warn!("No pending dynamic tool call found for call_id: {call_id}");
-            }
-        }
-    }
-
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "active turn checks and turn state updates must remain atomic"
-    )]
-    pub async fn notify_approval(&self, approval_id: &str, decision: ReviewDecision) {
-        let entry = {
-            let mut active = self.active_turn.lock().await;
-            match active.as_mut() {
-                Some(at) => {
-                    let mut ts = at.turn_state.lock().await;
-                    ts.remove_pending_approval(approval_id)
-                }
-                None => None,
-            }
-        };
-        match entry {
-            Some(tx_approve) => {
-                tx_approve.send(decision).ok();
-            }
-            None => {
-                warn!("No pending approval found for call_id: {approval_id}");
-            }
-        }
-    }
-
-    /// Records input items: always append to conversation history and
-    /// persist these response items to rollout.
-    pub(crate) async fn record_conversation_items(
-        &self,
-        turn_context: &TurnContext,
-        items: &[ResponseItem],
-    ) {
-        self.record_into_history(items, turn_context).await;
-        self.persist_rollout_response_items(items).await;
-        self.send_raw_response_items(turn_context, items).await;
-    }
-
-    /// Append ResponseItems to the in-memory conversation history only.
-    pub(crate) async fn record_into_history(
-        &self,
-        items: &[ResponseItem],
-        turn_context: &TurnContext,
-    ) {
-        let mut state = self.state.lock().await;
-        state.record_items(items.iter(), turn_context.truncation_policy);
-    }
-
-    async fn maybe_warn_on_server_model_mismatch(
-        self: &Arc<Self>,
-        turn_context: &Arc<TurnContext>,
-        server_model: String,
-    ) -> bool {
-        let requested_model = turn_context.model_info.slug.clone();
-        let server_model_normalized = server_model.to_ascii_lowercase();
-        let requested_model_normalized = requested_model.to_ascii_lowercase();
-        if server_model_normalized == requested_model_normalized {
-            info!("server reported model {server_model} (matches requested model)");
-            return false;
-        }
-
-        warn!("server reported model {server_model} while requested model was {requested_model}");
-
-        let warning_message = format!(
-            "Your account was flagged for potentially high-risk cyber activity and this request was routed to gpt-5.2 as a fallback. To regain access to gpt-5.3-codex, apply for trusted access: {CYBER_VERIFY_URL} or learn more: {CYBER_SAFETY_URL}"
-        );
-
-        self.send_event(
-            turn_context,
-            EventMsg::ModelReroute(ModelRerouteEvent {
-                from_model: requested_model.clone(),
-                to_model: server_model.clone(),
-                reason: ModelRerouteReason::HighRiskCyberActivity,
-            }),
-        )
-        .await;
-
-        self.send_event(
-            turn_context,
-            EventMsg::Warning(WarningEvent {
-                message: warning_message.clone(),
-            }),
-        )
-        .await;
-        true
-    }
-
-    pub(crate) async fn emit_model_verification(
-        self: &Arc<Self>,
-        turn_context: &Arc<TurnContext>,
-        verifications: Vec<ModelVerification>,
-    ) {
-        self.send_event(
-            turn_context,
-            EventMsg::ModelVerification(ModelVerificationEvent { verifications }),
-        )
-        .await;
-    }
-
-    pub(crate) async fn replace_history(
-        &self,
-        items: Vec<ResponseItem>,
-        reference_context_item: Option<TurnContextItem>,
-    ) {
-        let mut state = self.state.lock().await;
-        state.replace_history(items, reference_context_item);
-    }
-
-    pub(crate) async fn replace_compacted_history(
-        &self,
-        items: Vec<ResponseItem>,
-        reference_context_item: Option<TurnContextItem>,
-        compacted_item: CompactedItem,
-    ) {
-        {
-            let mut state = self.state.lock().await;
-            state.replace_history(items, reference_context_item.clone());
-            state.start_next_auto_compact_window();
-        }
-
-        self.persist_rollout_items(&[RolloutItem::Compacted(compacted_item)])
-            .await;
-        if let Some(turn_context_item) = reference_context_item {
-            self.persist_rollout_items(&[RolloutItem::TurnContext(turn_context_item)])
-                .await;
-        }
-        self.services.model_client.advance_window_generation();
-    }
-
-    async fn persist_rollout_response_items(&self, items: &[ResponseItem]) {
-        let rollout_items: Vec<RolloutItem> = items
-            .iter()
-            .cloned()
-            .map(RolloutItem::ResponseItem)
-            .collect();
-        self.persist_rollout_items(&rollout_items).await;
-    }
-
-    pub fn enabled(&self, feature: Feature) -> bool {
-        self.features.enabled(feature)
-    }
-
-    pub(crate) fn features(&self) -> ManagedFeatures {
-        self.features.clone()
-    }
-
-    pub(crate) async fn collaboration_mode(&self) -> CollaborationMode {
-        let state = self.state.lock().await;
-        state.session_configuration.collaboration_mode.clone()
-    }
-
-    async fn send_raw_response_items(&self, turn_context: &TurnContext, items: &[ResponseItem]) {
-        for item in items {
-            self.send_event(
-                turn_context,
-                EventMsg::RawResponseItem(RawResponseItemEvent { item: item.clone() }),
-            )
-            .await;
-        }
-    }
-
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "MCP app context rendering reads through the session-owned manager guard"
-    )]
-    pub(crate) async fn build_initial_context(
-        &self,
-        turn_context: &TurnContext,
-    ) -> Vec<ResponseItem> {
-        let mut developer_sections = Vec::<String>::with_capacity(8);
-        let mut contextual_user_sections = Vec::<String>::with_capacity(2);
-        let mut separate_developer_sections = Vec::<String>::new();
-        let (
-            reference_context_item,
-            previous_turn_settings,
-            collaboration_mode,
-            base_instructions,
-            session_source,
-        ) = {
-            let state = self.state.lock().await;
-            (
-                state.reference_context_item(),
-                state.previous_turn_settings(),
-                state.session_configuration.collaboration_mode.clone(),
-                state.session_configuration.base_instructions.clone(),
-                state.session_configuration.session_source.clone(),
-            )
-        };
-        if let Some(model_switch_message) =
-            crate::context_manager::updates::build_model_instructions_update_item(
-                previous_turn_settings.as_ref(),
-                turn_context,
-            )
-        {
-            developer_sections.push(model_switch_message);
-        }
-        if turn_context.config.include_permissions_instructions {
-            developer_sections.push(
-                PermissionsInstructions::from_permission_profile(
-                    &turn_context.permission_profile,
-                    turn_context.approval_policy.value(),
-                    turn_context.config.approvals_reviewer,
-                    #[allow(deprecated)]
-                    &turn_context.cwd,
-                    turn_context
-                        .features
-                        .enabled(Feature::ExecPermissionApprovals),
-                    turn_context
-                        .features
-                        .enabled(Feature::RequestPermissionsTool),
-                )
-                .render(),
-            );
-        }
-        let separate_guardian_developer_message =
-            crate::guardian::is_guardian_reviewer_source(&session_source);
-        // Keep the guardian policy prompt out of the aggregated developer bundle so it
-        // stays isolated as its own top-level developer message for guardian subagents.
-        if !separate_guardian_developer_message
-            && let Some(developer_instructions) = turn_context.developer_instructions.as_deref()
-            && !developer_instructions.is_empty()
-        {
-            developer_sections.push(developer_instructions.to_string());
-        }
-        // Add developer instructions from collaboration_mode if they exist and are non-empty
-        if turn_context.config.include_collaboration_mode_instructions
-            && let Some(collab_instructions) =
-                CollaborationModeInstructions::from_collaboration_mode(&collaboration_mode)
-        {
-            developer_sections.push(collab_instructions.render());
-        }
-        if let Some(realtime_update) = crate::context_manager::updates::build_initial_realtime_item(
-            reference_context_item.as_ref(),
-            previous_turn_settings.as_ref(),
-            turn_context,
-        ) {
-            developer_sections.push(realtime_update);
-        }
-        if self.features.enabled(Feature::Personality)
-            && let Some(personality) = turn_context.personality
-        {
-            let model_info = turn_context.model_info.clone();
-            let has_baked_personality = model_info.supports_personality()
-                && base_instructions == model_info.get_model_instructions(Some(personality));
-            if !has_baked_personality
-                && let Some(personality_message) =
-                    crate::context_manager::updates::personality_message_for(
-                        &model_info,
-                        personality,
-                    )
-            {
-                developer_sections
-                    .push(PersonalitySpecInstructions::new(personality_message).render());
-            }
-        }
-        if turn_context.config.include_skill_instructions {
-            let available_skills = build_available_skills(
-                &turn_context.turn_skills.outcome,
-                default_skill_metadata_budget(turn_context.model_info.context_window),
-                SkillRenderSideEffects::ThreadStart {
-                    session_telemetry: &self.services.session_telemetry,
-                },
-            );
-            if let Some(available_skills) = available_skills {
-                let warning_message = available_skills.warning_message.clone();
-                let skills_instructions = AvailableSkillsInstructions::new(
-                    available_skills.skill_root_lines,
-                    available_skills.skill_lines,
-                );
-                if let Some(warning_message) = warning_message {
-                    self.send_event_raw(Event {
-                        id: String::new(),
-                        msg: EventMsg::Warning(WarningEvent {
-                            message: warning_message,
-                        }),
-                    })
-                    .await;
-                }
-                developer_sections.push(skills_instructions.render());
-            }
-        }
-        if turn_context.config.include_environment_context {
-            let shell = self.user_shell();
-            let subagents = String::new();
-            contextual_user_sections.push(
-                crate::context::EnvironmentContext::from_turn_context(turn_context, shell.as_ref())
-                    .with_subagents(subagents)
-                    .render(),
-            );
-        }
-
-        let mut items = Vec::with_capacity(4);
-        if let Some(developer_message) =
-            crate::context_manager::updates::build_developer_update_item(developer_sections)
-        {
-            items.push(developer_message);
-        }
-        for section in separate_developer_sections {
-            if let Some(developer_message) =
-                crate::context_manager::updates::build_developer_update_item(vec![section])
-            {
-                items.push(developer_message);
-            }
-        }
-        if let Some(contextual_user_message) =
-            crate::context_manager::updates::build_contextual_user_message(contextual_user_sections)
-        {
-            items.push(contextual_user_message);
-        }
-        // Emit the guardian policy prompt as a separate developer item so the guardian
-        // subagent sees a distinct, easy-to-audit instruction block.
-        if separate_guardian_developer_message
-            && let Some(developer_instructions) = turn_context.developer_instructions.as_deref()
-            && !developer_instructions.is_empty()
-            && let Some(guardian_developer_message) =
-                crate::context_manager::updates::build_developer_update_item(vec![
-                    developer_instructions.to_string(),
-                ])
-        {
-            items.push(guardian_developer_message);
-        }
-        items
-    }
-
-    pub(crate) async fn persist_rollout_items(&self, items: &[RolloutItem]) {
-        if let Some(live_thread) = self.live_thread()
-            && let Err(e) = live_thread.append_items(items).await
-        {
-            error!("failed to record rollout items: {e:#}");
-        }
-    }
-
-    pub(crate) async fn clone_history(&self) -> ContextManager {
-        let state = self.state.lock().await;
-        state.clone_history()
-    }
-
-    pub(crate) async fn reference_context_item(&self) -> Option<TurnContextItem> {
-        let state = self.state.lock().await;
-        state.reference_context_item()
-    }
-
-    /// Persist the latest turn context snapshot for the first real user turn and for
-    /// steady-state turns that emit model-visible context updates.
-    ///
-    /// When the reference snapshot is missing, this injects full initial context. Otherwise, it
-    /// emits only settings diff items.
-    ///
-    /// If full context is injected and a model switch occurred, this prepends the
-    /// `<model_switch>` developer message so model-specific instructions are not lost.
-    ///
-    /// This is the normal runtime path that establishes a new `reference_context_item`.
-    /// Mid-turn compaction is the other path that can re-establish that baseline when it
-    /// reinjects full initial context into replacement history. Other non-regular tasks
-    /// intentionally do not update the baseline.
-    pub(crate) async fn record_context_updates_and_set_reference_context_item(
-        &self,
-        turn_context: &TurnContext,
-    ) {
-        let reference_context_item = {
-            let state = self.state.lock().await;
-            state.reference_context_item()
-        };
-        let should_inject_full_context = reference_context_item.is_none();
-        let context_items = if should_inject_full_context {
-            self.build_initial_context(turn_context).await
-        } else {
-            // Steady-state path: append only context diffs to minimize token overhead.
-            self.build_settings_update_items(reference_context_item.as_ref(), turn_context)
-                .await
-        };
-        let turn_context_item = turn_context.to_turn_context_item();
-        if !context_items.is_empty() {
-            self.record_conversation_items(turn_context, &context_items)
-                .await;
-        }
-        // Persist one `TurnContextItem` per real user turn so resume/lazy replay can recover the
-        // latest durable baseline even when this turn emitted no model-visible context diffs.
-        self.persist_rollout_items(&[RolloutItem::TurnContext(turn_context_item.clone())])
-            .await;
-
-        // Advance the in-memory diff baseline even when this turn emitted no model-visible
-        // context items. This keeps later runtime diffing aligned with the current turn state.
-        let mut state = self.state.lock().await;
-        state.set_reference_context_item(Some(turn_context_item));
-    }
-
-    pub(crate) async fn update_token_usage_info(
-        &self,
-        turn_context: &TurnContext,
-        token_usage: Option<&TokenUsage>,
-    ) {
-        self.record_token_usage_info(turn_context, token_usage)
-            .await;
-        self.send_token_count_event(turn_context).await;
-    }
-
-    pub(crate) async fn record_token_usage_info(
-        &self,
-        turn_context: &TurnContext,
-        token_usage: Option<&TokenUsage>,
-    ) {
-        if let Some(token_usage) = token_usage {
-            let token_info = {
-                let mut state = self.state.lock().await;
-                state
-                    .update_token_info_from_usage(token_usage, turn_context.model_context_window());
-                if matches!(
-                    turn_context.config.model_auto_compact_token_limit_scope,
-                    AutoCompactTokenLimitScope::BodyAfterPrefix
-                ) {
-                    state.ensure_auto_compact_window_server_prefill_from_usage(token_usage);
-                }
-                state.token_info()
-            };
-            if let Some(token_info) = token_info.as_ref() {
-                let _ = token_info;
-            }
-        }
-    }
-
-    pub(crate) async fn recompute_token_usage(&self, turn_context: &TurnContext) {
-        let history = self.clone_history().await;
-        let base_instructions = self.get_base_instructions().await;
-        let Some(estimated_total_tokens) =
-            history.estimate_token_count_with_base_instructions(&base_instructions)
-        else {
-            return;
-        };
-        {
-            let mut state = self.state.lock().await;
-            let mut info = state.token_info().unwrap_or(TokenUsageInfo {
-                total_token_usage: TokenUsage::default(),
-                last_token_usage: TokenUsage::default(),
-                model_context_window: None,
-            });
-
-            info.last_token_usage = TokenUsage {
-                input_tokens: 0,
-                cached_input_tokens: 0,
-                output_tokens: 0,
-                reasoning_output_tokens: 0,
-                total_tokens: estimated_total_tokens.max(0),
-            };
-
-            if let Some(model_context_window) = turn_context.model_context_window() {
-                info.model_context_window = Some(model_context_window);
-            }
-
-            state.set_token_info(Some(info));
-        }
-        self.set_auto_compact_window_estimated_prefill_for_scope(
-            turn_context,
-            estimated_total_tokens,
-        )
-        .await;
-        self.send_token_count_event(turn_context).await;
-    }
-
-    pub(crate) async fn update_rate_limits(
-        &self,
-        turn_context: &TurnContext,
-        new_rate_limits: RateLimitSnapshot,
-    ) {
-        self.record_rate_limits_info(new_rate_limits).await;
-        self.send_token_count_event(turn_context).await;
-    }
-
-    pub(crate) async fn record_rate_limits_info(&self, new_rate_limits: RateLimitSnapshot) {
-        {
-            let mut state = self.state.lock().await;
-            state.set_rate_limits(new_rate_limits);
-        }
-    }
-
-    pub(crate) async fn mcp_dependency_prompted(&self) -> HashSet<String> {
-        let state = self.state.lock().await;
-        state.mcp_dependency_prompted()
-    }
-
-    pub(crate) async fn record_mcp_dependency_prompted<I>(&self, names: I)
-    where
-        I: IntoIterator<Item = String>,
-    {
-        let mut state = self.state.lock().await;
-        state.record_mcp_dependency_prompted(names);
-    }
-
-    pub(crate) async fn set_server_reasoning_included(&self, included: bool) {
-        let mut state = self.state.lock().await;
-        state.set_server_reasoning_included(included);
-    }
-
-    pub(crate) async fn send_token_count_event(&self, turn_context: &TurnContext) {
-        let (info, rate_limits) = {
-            let state = self.state.lock().await;
-            state.token_info_and_rate_limits()
-        };
-        let event = EventMsg::TokenCount(TokenCountEvent { info, rate_limits });
-        self.send_event(turn_context, event).await;
-    }
-
-    pub(crate) async fn set_total_tokens_full(&self, turn_context: &TurnContext) {
-        if let Some(context_window) = turn_context.model_context_window() {
-            let mut state = self.state.lock().await;
-            state.set_token_usage_full(context_window);
-        }
-        self.send_token_count_event(turn_context).await;
-    }
-
-    pub(crate) async fn record_response_item_and_emit_turn_item(
-        &self,
-        turn_context: &TurnContext,
-        response_item: ResponseItem,
-    ) {
-        // Add to conversation history and persist response item to rollout.
-        self.record_conversation_items(turn_context, std::slice::from_ref(&response_item))
-            .await;
-
-        // Derive a turn item and emit lifecycle events if applicable.
-        if let Some(item) = parse_turn_item(&response_item) {
-            self.emit_turn_item_started(turn_context, &item).await;
-            self.emit_turn_item_completed(turn_context, item).await;
-        }
-    }
-
-    pub(crate) async fn record_user_prompt_and_emit_turn_item(
-        &self,
-        turn_context: &TurnContext,
-        input: &[UserInput],
-    ) {
-        // Persist the user message to history, but emit the turn item from `UserInput` so
-        // UI-only `text_elements` are preserved. `ResponseItem::Message` does not carry
-        // those spans, and `record_response_item_and_emit_turn_item` would drop them.
-        let response_item = ResponseItem::from(ResponseInputItem::from(input.to_vec()));
-        self.record_conversation_items(turn_context, std::slice::from_ref(&response_item))
-            .await;
-        let turn_item = TurnItem::UserMessage(UserMessageItem::new(input));
-        self.emit_turn_item_started(turn_context, &turn_item).await;
-        self.emit_turn_item_completed(turn_context, turn_item).await;
-        self.ensure_rollout_materialized().await;
-    }
-
-    pub(crate) async fn notify_stream_error(
-        &self,
-        turn_context: &TurnContext,
-        message: impl Into<String>,
-        codex_error: CodexErr,
-    ) {
-        let additional_details = codex_error.to_string();
-        let codex_error_info = CodexErrorInfo::ResponseStreamDisconnected {
-            http_status_code: codex_error.http_status_code_value(),
-        };
-        let event = EventMsg::StreamError(StreamErrorEvent {
-            message: message.into(),
-            codex_error_info: Some(codex_error_info),
-            additional_details: Some(additional_details),
-        });
-        self.send_event(turn_context, event).await;
-    }
-
-    /// Inject additional user input into the currently active turn.
-    ///
-    /// Returns the active turn id when accepted.
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "active turn checks and turn state updates must remain atomic"
-    )]
-    pub async fn steer_input(
-        &self,
-        input: Vec<UserInput>,
-        expected_turn_id: Option<&str>,
-        responsesapi_client_metadata: Option<HashMap<String, String>>,
-    ) -> Result<String, SteerInputError> {
-        let mut active = self.active_turn.lock().await;
-        let Some(active_turn) = active.as_mut() else {
-            return Err(SteerInputError::NoActiveTurn(input));
-        };
-
-        let Some((active_turn_id, _)) = active_turn.tasks.first() else {
-            return Err(SteerInputError::NoActiveTurn(input));
-        };
-
-        if let Some(expected_turn_id) = expected_turn_id
-            && expected_turn_id != active_turn_id
-        {
-            return Err(SteerInputError::ExpectedTurnMismatch {
-                expected: expected_turn_id.to_string(),
-                actual: active_turn_id.clone(),
-            });
-        }
-
-        match active_turn.tasks.first().map(|(_, task)| task.kind) {
-            Some(crate::state::TaskKind::Regular) => {}
-            Some(crate::state::TaskKind::Review) => {
-                return Err(SteerInputError::ActiveTurnNotSteerable {
-                    turn_kind: NonSteerableTurnKind::Review,
-                });
-            }
-            Some(crate::state::TaskKind::Compact) => {
-                return Err(SteerInputError::ActiveTurnNotSteerable {
-                    turn_kind: NonSteerableTurnKind::Compact,
-                });
-            }
-            None => return Err(SteerInputError::NoActiveTurn(input)),
-        }
-
-        if input.is_empty() {
-            return Err(SteerInputError::EmptyInput);
-        }
-
-        if let Some(responsesapi_client_metadata) = responsesapi_client_metadata
-            && let Some((_, active_task)) = active_turn.tasks.first()
-        {
-            active_task
-                .turn_context
-                .turn_metadata_state
-                .set_responsesapi_client_metadata(responsesapi_client_metadata);
-        }
-
-        self.input_queue
-            .push_pending_input_and_accept_mailbox_delivery_for_turn_state(
-                active_turn.turn_state.as_ref(),
-                TurnInput::UserInput(input),
-            )
-            .await;
-        Ok(active_turn_id.clone())
-    }
-
-    /// Returns the input if there was no task running to inject into.
     pub async fn inject_response_items(
         &self,
         input: Vec<ResponseInputItem>,
@@ -2658,24 +1291,137 @@ impl Session {
             .await
     }
 
-    pub(crate) async fn record_memory_citation_for_turn(&self, sub_id: &str) {
-        let turn_state = self
-            .input_queue
-            .turn_state_for_sub_id(&self.active_turn, sub_id)
-            .await;
-        let Some(turn_state) = turn_state else {
-            return;
+    pub async fn steer_input(
+        self: &Arc<Self>,
+        input: Vec<UserInput>,
+        expected_turn_id: Option<&str>,
+        responsesapi_client_metadata: Option<HashMap<String, String>>,
+    ) -> Result<String, SteerInputError> {
+        if input.is_empty() {
+            return Err(SteerInputError::EmptyInput);
+        }
+        let turn_state = {
+            let active = self.active_turn.lock().await;
+            let Some(active_turn) = active.as_ref() else {
+                return Err(SteerInputError::NoActiveTurn(input));
+            };
+            if let Some(expected_turn_id) = expected_turn_id
+                && !active_turn.tasks.contains_key(expected_turn_id)
+            {
+                let actual = active_turn
+                    .tasks
+                    .first()
+                    .map(|(id, _)| id.clone())
+                    .unwrap_or_default();
+                return Err(SteerInputError::ExpectedTurnMismatch {
+                    expected: expected_turn_id.to_string(),
+                    actual,
+                });
+            }
+            if active_turn
+                .tasks
+                .values()
+                .any(|task| task.kind == TaskKind::Compact)
+            {
+                return Err(SteerInputError::ActiveTurnNotSteerable {
+                    turn_kind: NonSteerableTurnKind::Compact,
+                });
+            }
+            Arc::clone(&active_turn.turn_state)
         };
-        turn_state.lock().await.has_memory_citation = true;
+        if let Some(metadata) = responsesapi_client_metadata
+            && let Some((turn_context, _)) = self.active_turn_context_and_cancellation_token().await
+        {
+            turn_context
+                .turn_metadata_state
+                .set_responsesapi_client_metadata(metadata);
+        }
+        self.input_queue
+            .extend_pending_input_for_turn_state(
+                turn_state.as_ref(),
+                vec![TurnInput::UserInput(input)],
+            )
+            .await;
+        Ok(expected_turn_id.unwrap_or_default().to_string())
+    }
+
+    pub(crate) async fn notify_dynamic_tool_response(
+        &self,
+        id: &str,
+        response: DynamicToolResponse,
+    ) {
+        let tx = {
+            let active = self.active_turn.lock().await;
+            let Some(active_turn) = active.as_ref() else {
+                return;
+            };
+            active_turn
+                .turn_state
+                .lock()
+                .await
+                .remove_pending_dynamic_tool(id)
+        };
+        if let Some(tx) = tx {
+            let _ = tx.send(response);
+        }
+    }
+
+    pub(crate) async fn set_total_tokens_full(&self, turn_context: &TurnContext) {
+        let mut state = self.state.lock().await;
+        let total_tokens = turn_context
+            .model_context_window()
+            .unwrap_or_else(|| state.get_total_token_usage(state.server_reasoning_included()));
+        let mut info = state.token_info().unwrap_or(TokenUsageInfo {
+            total_token_usage: TokenUsage::default(),
+            last_token_usage: TokenUsage::default(),
+            model_context_window: turn_context.model_context_window(),
+        });
+        info.last_token_usage.total_tokens = total_tokens;
+        info.total_token_usage.total_tokens = total_tokens;
+        state.set_token_info(Some(info));
+    }
+
+    pub(crate) async fn notify_stream_error(
+        &self,
+        turn_context: &TurnContext,
+        message: String,
+        _err: CodexErr,
+    ) {
+        self.send_event(
+            turn_context,
+            EventMsg::StreamError(StreamErrorEvent {
+                message,
+                codex_error_info: None,
+                additional_details: None,
+            }),
+        )
+        .await;
+    }
+
+    pub(crate) async fn maybe_warn_on_server_model_mismatch(
+        &self,
+        _turn_context: &TurnContext,
+        _server_model: &str,
+    ) -> bool {
+        false
+    }
+
+    pub(crate) async fn emit_model_verification(
+        &self,
+        turn_context: &TurnContext,
+        verifications: Vec<ModelVerification>,
+    ) {
+        self.send_event(
+            turn_context,
+            EventMsg::ModelVerification(ModelVerificationEvent { verifications }),
+        )
+        .await;
     }
 
     pub async fn interrupt_task(self: &Arc<Self>) {
         info!("interrupt received: abort current task, if any");
-        let had_active_turn = self.active_turn.lock().await.is_some();
+        let _had_active_turn = self.active_turn.lock().await.is_some();
         self.abort_all_tasks(TurnAbortReason::Interrupted).await;
-        if !had_active_turn {
-            self.cancel_mcp_startup().await;
-        }
     }
 
     pub(crate) fn user_shell(&self) -> Arc<shell::Shell> {
@@ -2697,6 +1443,3 @@ impl Session {
 fn normalize_host(host: &str) -> String {
     host.trim().trim_end_matches('.').to_ascii_lowercase()
 }
-
-#[cfg(test)]
-pub(crate) mod tests;

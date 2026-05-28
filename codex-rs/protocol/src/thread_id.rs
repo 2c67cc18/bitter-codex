@@ -77,7 +77,6 @@ impl<'de> Deserialize<'de> for ThreadId {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -8,9 +8,8 @@ use std::sync::OnceLock;
 use async_trait::async_trait;
 use chrono::Utc;
 use codex_protocol::ThreadId;
-use codex_protocol::protocol::AskForApproval;
+use codex_protocol::protocol::GitSha;
 use codex_protocol::protocol::RolloutItem;
-use codex_protocol::protocol::SandboxPolicy;
 
 use crate::AppendThreadItemsParams;
 use crate::ArchiveThreadParams;
@@ -94,7 +93,6 @@ fn stores_guard() -> MutexGuard<'static, HashMap<String, Arc<InMemoryThreadStore
     }
 }
 
-/// Recorded call counts for [`InMemoryThreadStore`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct InMemoryThreadStoreCalls {
     pub create_thread: usize,
@@ -113,11 +111,6 @@ pub struct InMemoryThreadStoreCalls {
     pub unarchive_thread: usize,
 }
 
-/// In-memory [`ThreadStore`] implementation for tests and debug configs.
-///
-/// Test and debug configs can select this store by id, letting tests exercise
-/// config-driven non-local persistence without requiring the real remote gRPC
-/// service.
 #[derive(Default)]
 pub struct InMemoryThreadStore {
     state: tokio::sync::Mutex<InMemoryThreadStoreState>,
@@ -134,7 +127,6 @@ struct InMemoryThreadStoreState {
 }
 
 impl InMemoryThreadStore {
-    /// Returns the store associated with `id`, creating it if needed.
     pub fn for_id(id: impl Into<String>) -> Arc<Self> {
         let id = id.into();
         let mut stores = stores_guard();
@@ -144,12 +136,10 @@ impl InMemoryThreadStore {
             .clone()
     }
 
-    /// Removes a shared in-memory store for `id`.
     pub fn remove_id(id: &str) -> Option<Arc<Self>> {
         stores_guard().remove(id)
     }
 
-    /// Returns the calls observed by this store.
     pub async fn calls(&self) -> InMemoryThreadStoreCalls {
         self.state.lock().await.calls.clone()
     }
@@ -256,9 +246,7 @@ impl ThreadStore for InMemoryThreadStore {
         let mut items = state
             .created_threads
             .keys()
-            .map(|thread_id| {
-                stored_thread_from_state(&state, *thread_id, /*include_history*/ false)
-            })
+            .map(|thread_id| stored_thread_from_state(&state, *thread_id, false))
             .collect::<ThreadStoreResult<Vec<_>>>()?;
         items.sort_by_key(|item| item.thread_id.to_string());
         Ok(ThreadPage {
@@ -281,7 +269,7 @@ impl ThreadStore for InMemoryThreadStore {
             .entry(params.thread_id)
             .or_default()
             .merge(params.patch);
-        stored_thread_from_state(&state, params.thread_id, /*include_history*/ false)
+        stored_thread_from_state(&state, params.thread_id, false)
     }
 
     async fn archive_thread(&self, _params: ArchiveThreadParams) -> ThreadStoreResult<()> {
@@ -295,7 +283,7 @@ impl ThreadStore for InMemoryThreadStore {
     ) -> ThreadStoreResult<StoredThread> {
         let mut state = self.state.lock().await;
         state.calls.unarchive_thread += 1;
-        stored_thread_from_state(&state, params.thread_id, /*include_history*/ false)
+        stored_thread_from_state(&state, params.thread_id, false)
     }
 }
 
@@ -353,19 +341,7 @@ fn stored_thread_from_state(
         source: metadata
             .and_then(|metadata| metadata.source.clone())
             .unwrap_or_else(|| created.source.clone()),
-        thread_source: metadata
-            .and_then(|metadata| metadata.thread_source)
-            .unwrap_or(created.thread_source),
-        agent_nickname: metadata.and_then(|metadata| metadata.agent_nickname.clone().flatten()),
-        agent_role: metadata.and_then(|metadata| metadata.agent_role.clone().flatten()),
-        agent_path: metadata.and_then(|metadata| metadata.agent_path.clone().flatten()),
         git_info: metadata.and_then(git_info_from_patch),
-        approval_mode: metadata
-            .and_then(|metadata| metadata.approval_mode)
-            .unwrap_or(AskForApproval::Never),
-        sandbox_policy: metadata
-            .and_then(|metadata| metadata.sandbox_policy.clone())
-            .unwrap_or_else(SandboxPolicy::new_read_only_policy),
         token_usage: metadata.and_then(|metadata| metadata.token_usage.clone()),
         first_user_message: metadata.and_then(|metadata| metadata.first_user_message.clone()),
         history,
@@ -381,7 +357,7 @@ fn git_info_from_patch(patch: &ThreadMetadataPatch) -> Option<codex_protocol::pr
         return None;
     }
     Some(codex_protocol::protocol::GitInfo {
-        commit_hash: sha.as_deref().map(codex_git_utils::GitSha::new),
+        commit_hash: sha.as_ref().map(|sha| GitSha(sha.clone())),
         branch,
         repository_url: origin_url,
     })

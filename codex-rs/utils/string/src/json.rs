@@ -1,6 +1,3 @@
-//! JSON serialization helpers for output that must remain parseable as JSON
-//! while staying safe for ASCII-only transports.
-
 use std::io;
 
 use serde::Serialize;
@@ -8,8 +5,6 @@ use serde::Serialize;
 struct AsciiJsonFormatter;
 
 impl serde_json::ser::Formatter for AsciiJsonFormatter {
-    // serde_json has no ensure_ascii flag; this formatter keeps its serializer
-    // in charge and only escapes non-ASCII string fragments.
     fn write_string_fragment<W>(&mut self, writer: &mut W, fragment: &str) -> io::Result<()>
     where
         W: ?Sized + io::Write,
@@ -39,10 +34,6 @@ impl serde_json::ser::Formatter for AsciiJsonFormatter {
     }
 }
 
-/// Serialize JSON while escaping non-ASCII string content as `\uXXXX`.
-///
-/// This is useful when JSON needs to remain parseable as JSON but must be
-/// carried through ASCII-safe transports such as HTTP headers.
 pub fn to_ascii_json_string<T>(value: &T) -> serde_json::Result<String>
 where
     T: Serialize + ?Sized,

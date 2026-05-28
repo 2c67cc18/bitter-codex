@@ -57,7 +57,7 @@ pub(super) fn write_session_file_with(
         uuid,
         first_user_message,
         model_provider,
-        /*forked_from_id*/ None,
+        None,
     )
 }
 

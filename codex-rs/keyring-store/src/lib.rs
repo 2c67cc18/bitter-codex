@@ -38,7 +38,6 @@ impl fmt::Display for CredentialStoreError {
 
 impl Error for CredentialStoreError {}
 
-/// Shared credential store abstraction for keyring-backed implementations.
 pub trait KeyringStore: Debug + Send + Sync {
     fn load(&self, service: &str, account: &str) -> Result<Option<String>, CredentialStoreError>;
     fn save(&self, service: &str, account: &str, value: &str) -> Result<(), CredentialStoreError>;

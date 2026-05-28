@@ -1,9 +1,6 @@
 use std::sync::Arc;
 
-use codex_exec_server::EnvironmentManager;
-use codex_exec_server::ExecServerRuntimePaths;
 use codex_login::AuthManager;
-use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
@@ -20,7 +17,6 @@ use crate::state_db_bridge::StateDbHandle;
 use crate::thread_manager::ThreadManager;
 use crate::thread_manager::thread_store_from_config;
 
-/// Build the model-visible `input` list for a single debug turn.
 #[doc(hidden)]
 pub async fn build_prompt_input(
     mut config: Config,
@@ -29,13 +25,7 @@ pub async fn build_prompt_input(
 ) -> CodexResult<Vec<ResponseItem>> {
     config.ephemeral = true;
 
-    let auth_manager =
-        AuthManager::shared_from_config(&config, /*enable_codex_api_key_env*/ false).await;
-
-    let local_runtime_paths = ExecServerRuntimePaths::from_optional_paths(
-        config.codex_self_exe.clone(),
-        config.codex_linux_sandbox_exe.clone(),
-    )?;
+    let auth_manager = AuthManager::shared_from_config(&config, false).await;
 
     let thread_store = thread_store_from_config(&config, state_db.clone());
     let installation_id = resolve_installation_id(&config.codex_home).await?;
@@ -43,14 +33,6 @@ pub async fn build_prompt_input(
         &config,
         Arc::clone(&auth_manager),
         SessionSource::Exec,
-        Arc::new(
-            EnvironmentManager::from_codex_home(
-                config.codex_home.clone(),
-                Some(local_runtime_paths),
-            )
-            .await
-            .map_err(|err| CodexErr::Fatal(err.to_string()))?,
-        ),
         thread_store,
         state_db.clone(),
         installation_id,

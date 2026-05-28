@@ -1,18 +1,18 @@
-//! Persistence layer for the global, append-only *message history* file.
-//!
-//! The history is stored at `~/.codex/history.jsonl` with **one JSON object per
-//! line** so that it can be efficiently appended to and parsed with standard
-//! JSON-Lines tooling. Each record has the following schema:
-//!
-//! ````text
-//! {"session_id":"<uuid>","ts":<unix_seconds>,"text":"<message>"}
-//! ````
-//!
-//! To minimize the chance of interleaved writes when multiple processes are
-//! appending concurrently, callers should *prepare the full line* (record +
-//! trailing `\n`) and write it with a **single `write(2)` system call** while
-//! the file descriptor is opened with the `O_APPEND` flag. POSIX guarantees
-//! that writes up to `PIPE_BUF` bytes are atomic in that case.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 use std::fs::File;
 use std::fs::OpenOptions;
@@ -41,10 +41,10 @@ use std::os::unix::fs::OpenOptionsExt;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-/// Filename that stores the message history inside `~/.codex`.
+
 const HISTORY_FILENAME: &str = "history.jsonl";
 
-/// When history exceeds the hard cap, trim it down to this fraction of `max_bytes`.
+
 const HISTORY_SOFT_CAP_RATIO: f64 = 0.8;
 
 const MAX_RETRIES: usize = 10;
@@ -78,21 +78,21 @@ fn history_filepath(config: &HistoryConfig) -> PathBuf {
     config.codex_home.join(HISTORY_FILENAME)
 }
 
-/// Append a `text` entry associated with `conversation_id` to the history file.
-///
-/// Uses advisory file locking (`File::try_lock`) with a retry loop to ensure
-/// concurrent writes from multiple TUI processes do not interleave. The lock
-/// acquisition and write are performed inside `spawn_blocking` so the caller's
-/// async runtime is not blocked.
-///
-/// The entry is silently skipped when `config.history.persistence` is
-/// [`HistoryPersistence::None`].
-///
-/// # Errors
-///
-/// Returns an I/O error if the history file cannot be opened/created, the
-/// system clock is before the Unix epoch, or the exclusive lock cannot be
-/// acquired after [`MAX_RETRIES`] attempts.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 pub async fn append_entry(
     text: &str,
     conversation_id: impl std::fmt::Display,
@@ -100,29 +100,29 @@ pub async fn append_entry(
 ) -> Result<()> {
     match config.persistence {
         HistoryPersistence::SaveAll => {
-            // Save everything: proceed.
+
         }
         HistoryPersistence::None => {
-            // No history persistence requested.
+
             return Ok(());
         }
     }
 
-    // TODO: check `text` for sensitive patterns
 
-    // Resolve `~/.codex/history.jsonl` and ensure the parent directory exists.
+
+
     let path = history_filepath(config);
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
 
-    // Compute timestamp (seconds since the Unix epoch).
+
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| std::io::Error::other(format!("system clock before Unix epoch: {e}")))?
         .as_secs();
 
-    // Construct the JSON line first so we can write it in a single syscall.
+
     let entry = HistoryEntry {
         session_id: conversation_id.to_string(),
         ts,
@@ -132,7 +132,7 @@ pub async fn append_entry(
         .map_err(|e| std::io::Error::other(format!("failed to serialise history entry: {e}")))?;
     line.push('\n');
 
-    // Open the history file for read/write access (append-only on Unix).
+
     let mut options = OpenOptions::new();
     options.read(true).write(true).create(true);
     #[cfg(unix)]
@@ -143,20 +143,20 @@ pub async fn append_entry(
 
     let mut history_file = options.open(&path)?;
 
-    // Ensure permissions.
+
     ensure_owner_only_permissions(&history_file).await?;
 
     let history_max_bytes = config.max_bytes;
 
-    // Perform a blocking write under an advisory write lock using std::fs.
+
     tokio::task::spawn_blocking(move || -> Result<()> {
-        // Retry a few times to avoid indefinite blocking when contended.
+
         for _ in 0..MAX_RETRIES {
             match history_file.try_lock() {
                 Ok(()) => {
-                    // While holding the exclusive lock, write the full line.
-                    // We do not open the file with `append(true)` on Windows, so ensure the
-                    // cursor is positioned at the end before writing.
+
+
+
                     history_file.seek(SeekFrom::End(0))?;
                     history_file.write_all(line.as_bytes())?;
                     history_file.flush()?;
@@ -180,10 +180,10 @@ pub async fn append_entry(
     Ok(())
 }
 
-/// Trim the history file to honor `max_bytes`, dropping the oldest lines while holding
-/// the write lock so the newest entry is always retained. When the file exceeds the
-/// hard cap, it rewrites the remaining tail to a soft cap to avoid trimming again
-/// immediately on the next write.
+
+
+
+
 fn enforce_history_limit(file: &mut File, max_bytes: Option<usize>) -> Result<()> {
     let Some(max_bytes) = max_bytes else {
         return Ok(());
@@ -267,36 +267,35 @@ fn trim_target_bytes(max_bytes: u64, newest_entry_len: u64) -> u64 {
     soft_cap_bytes.max(newest_entry_len)
 }
 
-/// Asynchronously fetch the history file's *identifier* and current entry count.
-///
-/// The identifier is the file's inode on Unix or creation time on Windows.
-/// The entry count is derived by counting newline bytes in the file. Returns
-/// `(0, 0)` when the file does not exist or its metadata cannot be read. If
-/// metadata succeeds but the file cannot be opened or scanned, returns
-/// `(log_id, 0)` so callers can still detect that a history file exists.
+
+
+
+
+
+
+
 pub async fn history_metadata(config: &HistoryConfig) -> (u64, usize) {
     let path = history_filepath(config);
     history_metadata_for_file(&path).await
 }
 
-/// Look up a single history entry by file identity and zero-based offset.
-///
-/// Returns `Some(entry)` when the current history file's identifier (inode on
-/// Unix, creation time on Windows) matches `log_id` **and** a valid JSON
-/// record exists at `offset`. Returns `None` on any mismatch, I/O error, or
-/// parse failure, all of which are logged at `warn` level.
-///
-/// This function is synchronous because it acquires a shared advisory file lock
-/// via `File::try_lock_shared`. Callers on an async runtime should wrap it in
-/// `spawn_blocking`.
+
+
+
+
+
+
+
+
+
+
 pub fn lookup(log_id: u64, offset: usize, config: &HistoryConfig) -> Option<HistoryEntry> {
     let path = history_filepath(config);
     lookup_history_entry(&path, log_id, offset)
 }
 
-/// On Unix systems, ensure the file permissions are `0o600` (rw-------). If the
-/// permissions cannot be changed the error is propagated to the caller.
-#[cfg(unix)]
+
+
 async fn ensure_owner_only_permissions(file: &File) -> Result<()> {
     let metadata = file.metadata()?;
     let current_mode = metadata.permissions().mode() & 0o777;
@@ -310,12 +309,6 @@ async fn ensure_owner_only_permissions(file: &File) -> Result<()> {
     Ok(())
 }
 
-#[cfg(windows)]
-// On Windows, simply succeed.
-async fn ensure_owner_only_permissions(_file: &File) -> Result<()> {
-    Ok(())
-}
-
 async fn history_metadata_for_file(path: &Path) -> (u64, usize) {
     let log_id = match fs::metadata(path).await {
         Ok(metadata) => log_identity(&metadata).unwrap_or(0),
@@ -323,13 +316,13 @@ async fn history_metadata_for_file(path: &Path) -> (u64, usize) {
         Err(_) => return (0, 0),
     };
 
-    // Open the file.
+
     let mut file = match fs::File::open(path).await {
         Ok(f) => f,
         Err(_) => return (log_id, 0),
     };
 
-    // Count newline bytes.
+
     let mut buf = [0u8; 8192];
     let mut count = 0usize;
     loop {
@@ -371,8 +364,8 @@ fn lookup_history_entry(path: &Path, log_id: u64, offset: usize) -> Option<Histo
         return None;
     }
 
-    // Open & lock file for reading using a shared lock.
-    // Retry a few times to avoid indefinite blocking.
+
+
     for _ in 0..MAX_RETRIES {
         let lock_result = file.try_lock_shared();
 
@@ -398,7 +391,7 @@ fn lookup_history_entry(path: &Path, log_id: u64, offset: usize) -> Option<Histo
                         }
                     }
                 }
-                // Not found at requested offset.
+
                 return None;
             }
             Err(std::fs::TryLockError::WouldBlock) => {
@@ -414,21 +407,9 @@ fn lookup_history_entry(path: &Path, log_id: u64, offset: usize) -> Option<Histo
     None
 }
 
-#[cfg(unix)]
 fn log_identity(metadata: &std::fs::Metadata) -> Option<u64> {
     use std::os::unix::fs::MetadataExt;
     Some(metadata.ino())
-}
-
-#[cfg(windows)]
-fn log_identity(metadata: &std::fs::Metadata) -> Option<u64> {
-    use std::os::windows::fs::MetadataExt;
-    Some(metadata.creation_time())
-}
-
-#[cfg(not(any(unix, windows)))]
-fn log_identity(_metadata: &std::fs::Metadata) -> Option<u64> {
-    None
 }
 
 #[cfg(test)]

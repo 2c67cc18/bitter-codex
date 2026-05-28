@@ -1,35 +1,26 @@
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use crate::SkillInjections;
-use crate::build_skill_injections;
 use crate::client::ModelClientSession;
 use crate::client_common::Prompt;
 use crate::client_common::ResponseEvent;
-use crate::collect_explicit_skill_mentions;
 use crate::compact::CompactionPhase;
 use crate::compact::CompactionReason;
 use crate::compact::InitialContextInjection;
 use crate::compact::run_inline_auto_compact_task;
 use crate::compact::should_use_remote_compact_task;
 use crate::compact_remote::run_inline_remote_auto_compact_task;
-use crate::compact_remote_v2::run_inline_remote_auto_compact_task as run_inline_remote_auto_compact_task_v2;
 use crate::context::ContextualUserFragment;
-use crate::feedback_tags;
 use crate::session::PreviousTurnSettings;
 use crate::session::TurnInput;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
 use crate::stream_events_utils::HandleOutputCtx;
-use crate::stream_events_utils::finalize_non_tool_response_item;
 use crate::stream_events_utils::handle_non_tool_response_item;
 use crate::stream_events_utils::handle_output_item_done;
 use crate::stream_events_utils::last_assistant_message_from_item;
-use crate::stream_events_utils::mark_thread_memory_mode_polluted_if_external_context;
 use crate::stream_events_utils::raw_assistant_output_text_from_item;
-use crate::stream_events_utils::record_completed_response_item_with_finalized_facts;
 use crate::tools::ToolRouter;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::context::TurnDiffTracker;
@@ -44,14 +35,10 @@ use codex_features::Feature;
 use codex_git_utils::get_git_repo_root;
 use codex_git_utils::get_git_repo_root_abs;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
-use codex_protocol::config_types::ModeKind;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
-use codex_protocol::items::PlanItem;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::BaseInstructions;
-use codex_protocol::models::ContentItem;
-use codex_protocol::models::MessagePhase;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::AgentMessageContentDeltaEvent;
@@ -59,17 +46,12 @@ use codex_protocol::protocol::AgentReasoningSectionBreakEvent;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::ErrorEvent;
 use codex_protocol::protocol::EventMsg;
-use codex_protocol::protocol::PlanDeltaEvent;
 use codex_protocol::protocol::ReasoningContentDeltaEvent;
 use codex_protocol::protocol::ReasoningRawContentDeltaEvent;
 use codex_protocol::protocol::TurnDiffEvent;
 use codex_protocol::protocol::WarningEvent;
-use codex_tools::ToolName;
 use codex_utils_stream_parser::AssistantTextChunk;
 use codex_utils_stream_parser::AssistantTextStreamParser;
-use codex_utils_stream_parser::ProposedPlanSegment;
-use codex_utils_stream_parser::extract_proposed_plan_text;
-use codex_utils_stream_parser::strip_citations;
 use futures::future::BoxFuture;
 use futures::prelude::*;
 use futures::stream::FuturesOrdered;
@@ -83,20 +65,6 @@ use tracing::trace;
 use tracing::trace_span;
 use tracing::warn;
 
-/// Takes initial turn input and runs a loop where, at each sampling request,
-/// the model replies with either:
-///
-/// - requested function calls
-/// - an assistant message
-///
-/// While it is possible for the model to return multiple of these items in a
-/// single sampling request, in practice, we generally one item per sampling request:
-///
-/// - If the model requests a function call, we execute it and send the output
-///   back to the model in the next sampling request.
-/// - If the model sends only an assistant message, we record it in the
-///   conversation history and consider the turn complete.
-///
 pub(crate) async fn run_turn(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
@@ -106,11 +74,8 @@ pub(crate) async fn run_turn(
 ) -> Option<String> {
     let mut client_session =
         prewarmed_client_session.unwrap_or_else(|| sess.services.model_client.new_session());
-    // TODO(ccunningham): Pre-turn compaction runs before context updates and the
-    // new user message are recorded. Estimate pending incoming items (context
-    // diffs/full reinjection + user input) and trigger compaction preemptively
-    // when they would push the thread over the compaction threshold.
-    if let Err(err) = run_pre_sampling_compact(&sess, &turn_context, &mut client_session).await {
+
+    if let Err(_err) = run_pre_sampling_compact(&sess, &turn_context, &mut client_session).await {
         error!("Failed to run pre-sampling compact");
         return None;
     }
@@ -118,24 +83,16 @@ pub(crate) async fn run_turn(
     sess.record_context_updates_and_set_reference_context_item(turn_context.as_ref())
         .await;
 
-    let injection_items = build_skill_injection_items(&sess, turn_context.as_ref(), &input).await;
-
     let mut can_drain_pending_input = input.is_empty();
     record_turn_inputs(&sess, &turn_context, &input).await;
 
     sess.set_previous_turn_settings(Some(PreviousTurnSettings {
         model: turn_context.model_info.slug.clone(),
-        realtime_active: Some(turn_context.realtime_active),
     }))
     .await;
-    for response_item in injection_items {
-        sess.record_conversation_items(&turn_context, std::slice::from_ref(&response_item))
-            .await;
-    }
 
     let mut last_agent_message: Option<String> = None;
-    // Although from the perspective of codex.rs, TurnDiffTracker has the lifecycle of a Task which contains
-    // many turns, from the perspective of the user, it is a single turn.
+
     #[allow(deprecated)]
     let display_root = match turn_context.environments.primary() {
         Some(turn_environment) => get_git_repo_root_abs(&turn_environment.cwd)
@@ -148,17 +105,7 @@ pub(crate) async fn run_turn(
         display_root,
     )));
 
-    // `ModelClientSession` is turn-scoped and caches WebSocket + sticky routing state, so we reuse
-    // one instance across retries within this turn.
-    // Pending input is drained into history before building the next model request.
-    // However, we defer that drain until after sampling in two cases:
-    // 1. At the start of a turn, so the fresh turn input in `input` gets sampled first.
-    // 2. After auto-compact, when model/tool continuation needs to resume before any steer.
-
     loop {
-        // Note that pending_input would be something like a message the user
-        // submitted through the UI while the model was running. Though the UI
-        // may support this, the model might not.
         let pending_input = if can_drain_pending_input {
             sess.input_queue.get_pending_input(&sess.active_turn).await
         } else {
@@ -167,7 +114,6 @@ pub(crate) async fn run_turn(
 
         record_turn_inputs(&sess, &turn_context, &pending_input).await;
 
-        // Construct the input that we will send to the model.
         let sampling_request_input: Vec<ResponseItem> = {
             sess.clone_history()
                 .await
@@ -219,9 +165,8 @@ pub(crate) async fn run_turn(
                     "post sampling token usage"
                 );
 
-                // as long as compaction works well in getting us way below the token limit, we shouldn't worry about being in an infinite loop.
                 if token_limit_reached && needs_follow_up {
-                    if let Err(err) = run_auto_compact(
+                    if let Err(_err) = run_auto_compact(
                         &sess,
                         &turn_context,
                         &mut client_session,
@@ -244,7 +189,6 @@ pub(crate) async fn run_turn(
                 continue;
             }
             Err(CodexErr::TurnAborted) => {
-                // Aborted turn is reported via a different event.
                 break;
             }
             Err(CodexErr::InvalidImageRequest()) => {
@@ -268,9 +212,12 @@ pub(crate) async fn run_turn(
             }
             Err(e) => {
                 info!("Turn error: {e:#}");
-                let event = EventMsg::Error(e.to_error_event(/*message_prefix*/ None));
+                let event = EventMsg::Error(ErrorEvent {
+                    message: e.to_string(),
+                    codex_error_info: Some(CodexErrorInfo::Other),
+                });
                 sess.send_event(&turn_context, event).await;
-                // let the user continue the conversation
+
                 break;
             }
         }
@@ -301,65 +248,10 @@ async fn record_turn_inputs(
     }
 }
 
-async fn build_skill_injection_items(
-    sess: &Arc<Session>,
-    turn_context: &TurnContext,
-    input: &[TurnInput],
-) -> Vec<ResponseItem> {
-    let user_input = input
-        .iter()
-        .filter_map(|item| match item {
-            TurnInput::UserInput(content) => Some(content.as_slice()),
-            TurnInput::ResponseInputItem(_) => None,
-        })
-        .flatten()
-        .cloned()
-        .collect::<Vec<_>>();
-    let skills_outcome = turn_context.turn_skills.outcome.as_ref();
-    let mentioned_skills = user_input
-        .iter()
-        .flat_map(|input| {
-            collect_explicit_skill_mentions(
-                input,
-                &skills_outcome.skills,
-                &skills_outcome.disabled_paths,
-                &HashMap::new(),
-            )
-        })
-        .collect::<Vec<_>>();
-
-    let SkillInjections {
-        items: skill_injections,
-        warnings: skill_warnings,
-    } = build_skill_injections(
-        &mentioned_skills,
-        Some(skills_outcome),
-        Some(&turn_context.session_telemetry),
-    )
-    .await;
-
-    for message in skill_warnings {
-        sess.send_event(turn_context, EventMsg::Warning(WarningEvent { message }))
-            .await;
-    }
-
-    skill_injections
-        .iter()
-        .map(|skill| {
-            ContextualUserFragment::into(crate::context::SkillInstructions::new(
-                skill.name.clone(),
-                skill.path.clone(),
-                skill.contents.clone(),
-            ))
-        })
-        .collect()
-}
-
 #[derive(Debug)]
 struct AutoCompactTokenStatus {
-    // Full active context usage, independent of the configured auto-compact scope.
     active_context_tokens: i64,
-    // Usage counted against `model_auto_compact_token_limit` for the current scope.
+
     auto_compact_scope_tokens: i64,
     auto_compact_scope_limit: i64,
     full_context_window_limit: Option<i64>,
@@ -428,7 +320,7 @@ async fn run_pre_sampling_compact(
 ) -> CodexResult<()> {
     maybe_run_previous_model_inline_compact(sess, turn_context, client_session).await?;
     let token_status = auto_compact_token_status(sess.as_ref(), turn_context.as_ref()).await;
-    // Compact if the configured auto-compaction budget or usable context window is exhausted.
+
     if token_status.token_limit_reached {
         run_auto_compact(
             sess,
@@ -443,10 +335,6 @@ async fn run_pre_sampling_compact(
     Ok(())
 }
 
-/// Runs pre-sampling compaction against the previous model when switching to a smaller
-/// context-window model.
-///
-/// Returns `Err(_)` only when compaction was attempted and failed.
 async fn maybe_run_previous_model_inline_compact(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
@@ -502,24 +390,12 @@ async fn maybe_run_previous_model_inline_compact(
 async fn run_auto_compact(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
-    client_session: &mut ModelClientSession,
+    _client_session: &mut ModelClientSession,
     initial_context_injection: InitialContextInjection,
     reason: CompactionReason,
     phase: CompactionPhase,
 ) -> CodexResult<()> {
     if should_use_remote_compact_task(turn_context.provider.info()) {
-        if turn_context.features.enabled(Feature::RemoteCompactionV2) {
-            run_inline_remote_auto_compact_task_v2(
-                Arc::clone(sess),
-                Arc::clone(turn_context),
-                client_session,
-                initial_context_injection,
-                reason,
-                phase,
-            )
-            .await?;
-            return Ok(());
-        }
         run_inline_remote_auto_compact_task(
             Arc::clone(sess),
             Arc::clone(turn_context),
@@ -552,11 +428,8 @@ pub(crate) fn build_prompt(
         tools: router.model_visible_specs(),
         parallel_tool_calls: turn_context.model_info.supports_parallel_tool_calls,
         base_instructions,
-        personality: turn_context.personality,
         output_schema: turn_context.final_output_json_schema.clone(),
-        output_schema_strict: !crate::guardian::is_guardian_reviewer_source(
-            &turn_context.session_source,
-        ),
+        output_schema_strict: true,
     }
 }
 
@@ -638,7 +511,6 @@ async fn run_sampling_request(
             return Err(err);
         }
 
-        // Use the configured provider-specific stream retry budget.
         let max_retries = turn_context.provider.info().stream_max_retries();
         if retries >= max_retries
             && client_session.try_switch_fallback_transport(
@@ -668,15 +540,10 @@ async fn run_sampling_request(
                 "stream disconnected - retrying sampling request ({retries}/{max_retries} in {delay:?})...",
             );
 
-            // In release builds, hide the first websocket retry notification to reduce noisy
-            // transient reconnect messages. In debug builds, keep full visibility for diagnosis.
             let report_error = retries > 1
                 || cfg!(debug_assertions)
                 || !sess.services.model_client.responses_websocket_enabled();
             if report_error {
-                // Surface retry information to any UI/front‑end so the
-                // user understands what is happening instead of staring
-                // at a seemingly frozen screen.
                 sess.notify_stream_error(
                     &turn_context,
                     format!("Reconnecting... {retries}/{max_retries}"),
@@ -703,7 +570,6 @@ pub(crate) async fn built_tools(
     Ok(Arc::new(ToolRouter::from_turn_context(
         turn_context,
         ToolRouterParams {
-            discoverable_tools: None,
             dynamic_tools: turn_context.dynamic_tools.as_slice(),
         },
     )))
@@ -715,62 +581,24 @@ struct SamplingRequestResult {
     last_agent_message: Option<String>,
 }
 
-/// Ephemeral per-response state for streaming a single proposed plan.
-/// This is intentionally not persisted or stored in session/state since it
-/// only exists while a response is actively streaming. The final plan text
-/// is extracted from the completed assistant message.
-/// Tracks a single proposed plan item across a streaming response.
-struct ProposedPlanItemState {
-    item_id: String,
-    started: bool,
-    completed: bool,
-}
-
-/// Aggregated state used only while streaming a plan-mode response.
-/// Includes per-item parsers, deferred agent message bookkeeping, and the plan item lifecycle.
-struct PlanModeStreamState {
-    /// Agent message items started by the model but deferred until we see non-plan text.
-    pending_agent_message_items: HashMap<String, TurnItem>,
-    /// Agent message items whose start notification has been emitted.
-    started_agent_message_items: HashSet<String>,
-    /// Leading whitespace buffered until we see non-whitespace text for an item.
-    leading_whitespace_by_item: HashMap<String, String>,
-    /// Tracks plan item lifecycle while streaming plan output.
-    plan_item_state: ProposedPlanItemState,
-}
-
-impl PlanModeStreamState {
-    fn new(turn_id: &str) -> Self {
-        Self {
-            pending_agent_message_items: HashMap::new(),
-            started_agent_message_items: HashSet::new(),
-            leading_whitespace_by_item: HashMap::new(),
-            plan_item_state: ProposedPlanItemState::new(turn_id),
-        }
-    }
-}
-
 #[derive(Debug, Default)]
 pub(super) struct AssistantMessageStreamParsers {
-    plan_mode: bool,
     parsers_by_item: HashMap<String, AssistantTextStreamParser>,
 }
 
 type ParsedAssistantTextDelta = AssistantTextChunk;
 
 impl AssistantMessageStreamParsers {
-    pub(super) fn new(plan_mode: bool) -> Self {
+    pub(super) fn new() -> Self {
         Self {
-            plan_mode,
             parsers_by_item: HashMap::new(),
         }
     }
 
     fn parser_mut(&mut self, item_id: &str) -> &mut AssistantTextStreamParser {
-        let plan_mode = self.plan_mode;
         self.parsers_by_item
             .entry(item_id.to_string())
-            .or_insert_with(|| AssistantTextStreamParser::new(plan_mode))
+            .or_insert_with(|| AssistantTextStreamParser::new(false))
     }
 
     pub(super) fn seed_item_text(&mut self, item_id: &str, text: &str) -> ParsedAssistantTextDelta {
@@ -800,83 +628,6 @@ impl AssistantMessageStreamParsers {
     }
 }
 
-impl ProposedPlanItemState {
-    fn new(turn_id: &str) -> Self {
-        Self {
-            item_id: format!("{turn_id}-plan"),
-            started: false,
-            completed: false,
-        }
-    }
-
-    async fn start(&mut self, sess: &Session, turn_context: &TurnContext) {
-        if self.started || self.completed {
-            return;
-        }
-        self.started = true;
-        let item = TurnItem::Plan(PlanItem {
-            id: self.item_id.clone(),
-            text: String::new(),
-        });
-        sess.emit_turn_item_started(turn_context, &item).await;
-    }
-
-    async fn push_delta(&mut self, sess: &Session, turn_context: &TurnContext, delta: &str) {
-        if self.completed {
-            return;
-        }
-        if delta.is_empty() {
-            return;
-        }
-        let event = PlanDeltaEvent {
-            thread_id: sess.conversation_id.to_string(),
-            turn_id: turn_context.sub_id.clone(),
-            item_id: self.item_id.clone(),
-            delta: delta.to_string(),
-        };
-        sess.send_event(turn_context, EventMsg::PlanDelta(event))
-            .await;
-    }
-
-    async fn complete_with_text(
-        &mut self,
-        sess: &Session,
-        turn_context: &TurnContext,
-        text: String,
-    ) {
-        if self.completed || !self.started {
-            return;
-        }
-        self.completed = true;
-        let item = TurnItem::Plan(PlanItem {
-            id: self.item_id.clone(),
-            text,
-        });
-        sess.emit_turn_item_completed(turn_context, item).await;
-    }
-}
-
-/// In plan mode we defer agent message starts until the parser emits non-plan
-/// text. The parser buffers each line until it can rule out a tag prefix, so
-/// plan-only outputs never show up as empty assistant messages.
-async fn maybe_emit_pending_agent_message_start(
-    sess: &Session,
-    turn_context: &TurnContext,
-    state: &mut PlanModeStreamState,
-    item_id: &str,
-) {
-    if state.started_agent_message_items.contains(item_id) {
-        return;
-    }
-    if let Some(item) = state.pending_agent_message_items.remove(item_id) {
-        sess.emit_turn_item_started(turn_context, &item).await;
-        state
-            .started_agent_message_items
-            .insert(item_id.to_string());
-    }
-}
-
-/// Agent messages are text-only today; concatenate all text entries.
 fn agent_message_text(item: &codex_protocol::items::AgentMessageItem) -> String {
     item.content
         .iter()
@@ -886,170 +637,13 @@ fn agent_message_text(item: &codex_protocol::items::AgentMessageItem) -> String 
         .collect()
 }
 
-pub(super) fn realtime_text_for_event(msg: &EventMsg) -> Option<String> {
-    match msg {
-        EventMsg::AgentMessage(event) => Some(event.message.clone()),
-        EventMsg::ItemCompleted(event) => match &event.item {
-            TurnItem::AgentMessage(item) => Some(agent_message_text(item)),
-            _ => None,
-        },
-        EventMsg::Error(_)
-        | EventMsg::Warning(_)
-        | EventMsg::GuardianWarning(_)
-        | EventMsg::RealtimeConversationStarted(_)
-        | EventMsg::RealtimeConversationSdp(_)
-        | EventMsg::RealtimeConversationRealtime(_)
-        | EventMsg::RealtimeConversationClosed(_)
-        | EventMsg::ModelReroute(_)
-        | EventMsg::ModelVerification(_)
-        | EventMsg::ContextCompacted(_)
-        | EventMsg::ThreadRolledBack(_)
-        | EventMsg::TurnStarted(_)
-        | EventMsg::ThreadSettingsApplied(_)
-        | EventMsg::TurnComplete(_)
-        | EventMsg::TokenCount(_)
-        | EventMsg::UserMessage(_)
-        | EventMsg::AgentReasoning(_)
-        | EventMsg::AgentReasoningRawContent(_)
-        | EventMsg::AgentReasoningSectionBreak(_)
-        | EventMsg::SessionConfigured(_)
-        | EventMsg::ThreadGoalUpdated(_)
-        | EventMsg::McpStartupUpdate(_)
-        | EventMsg::McpStartupComplete(_)
-        | EventMsg::McpToolCallBegin(_)
-        | EventMsg::McpToolCallEnd(_)
-        | EventMsg::WebSearchBegin(_)
-        | EventMsg::WebSearchEnd(_)
-        | EventMsg::ExecCommandBegin(_)
-        | EventMsg::ExecCommandOutputDelta(_)
-        | EventMsg::TerminalInteraction(_)
-        | EventMsg::ExecCommandEnd(_)
-        | EventMsg::PatchApplyBegin(_)
-        | EventMsg::PatchApplyUpdated(_)
-        | EventMsg::PatchApplyEnd(_)
-        | EventMsg::ImageGenerationBegin(_)
-        | EventMsg::ImageGenerationEnd(_)
-        | EventMsg::ViewImageToolCall(_)
-        | EventMsg::ExecApprovalRequest(_)
-        | EventMsg::RequestUserInput(_)
-        | EventMsg::DynamicToolCallRequest(_)
-        | EventMsg::DynamicToolCallResponse(_)
-        | EventMsg::GuardianAssessment(_)
-        | EventMsg::ElicitationRequest(_)
-        | EventMsg::ApplyPatchApprovalRequest(_)
-        | EventMsg::DeprecationNotice(_)
-        | EventMsg::StreamError(_)
-        | EventMsg::TurnDiff(_)
-        | EventMsg::RealtimeConversationListVoicesResponse(_)
-        | EventMsg::PlanUpdate(_)
-        | EventMsg::TurnAborted(_)
-        | EventMsg::ShutdownComplete
-        | EventMsg::EnteredReviewMode(_)
-        | EventMsg::ExitedReviewMode(_)
-        | EventMsg::RawResponseItem(_)
-        | EventMsg::ItemStarted(_)
-        | EventMsg::AgentMessageContentDelta(_)
-        | EventMsg::PlanDelta(_)
-        | EventMsg::ReasoningContentDelta(_)
-        | EventMsg::ReasoningRawContentDelta(_)
-        | EventMsg::CollabAgentSpawnBegin(_)
-        | EventMsg::CollabAgentSpawnEnd(_)
-        | EventMsg::CollabAgentInteractionBegin(_)
-        | EventMsg::CollabAgentInteractionEnd(_)
-        | EventMsg::CollabWaitingBegin(_)
-        | EventMsg::CollabWaitingEnd(_)
-        | EventMsg::CollabCloseBegin(_)
-        | EventMsg::CollabCloseEnd(_)
-        | EventMsg::CollabResumeBegin(_)
-        | EventMsg::CollabResumeEnd(_) => None,
-    }
-}
-
-/// Split the stream into normal assistant text vs. proposed plan content.
-/// Normal text becomes AgentMessage deltas; plan content becomes PlanDelta +
-/// TurnItem::Plan.
-async fn handle_plan_segments(
-    sess: &Session,
-    turn_context: &TurnContext,
-    state: &mut PlanModeStreamState,
-    item_id: &str,
-    segments: Vec<ProposedPlanSegment>,
-) {
-    for segment in segments {
-        match segment {
-            ProposedPlanSegment::Normal(delta) => {
-                if delta.is_empty() {
-                    continue;
-                }
-                let has_non_whitespace = delta.chars().any(|ch| !ch.is_whitespace());
-                if !has_non_whitespace && !state.started_agent_message_items.contains(item_id) {
-                    let entry = state
-                        .leading_whitespace_by_item
-                        .entry(item_id.to_string())
-                        .or_default();
-                    entry.push_str(&delta);
-                    continue;
-                }
-                let delta = if !state.started_agent_message_items.contains(item_id) {
-                    if let Some(prefix) = state.leading_whitespace_by_item.remove(item_id) {
-                        format!("{prefix}{delta}")
-                    } else {
-                        delta
-                    }
-                } else {
-                    delta
-                };
-                maybe_emit_pending_agent_message_start(sess, turn_context, state, item_id).await;
-
-                let event = AgentMessageContentDeltaEvent {
-                    thread_id: sess.conversation_id.to_string(),
-                    turn_id: turn_context.sub_id.clone(),
-                    item_id: item_id.to_string(),
-                    delta,
-                };
-                sess.send_event(turn_context, EventMsg::AgentMessageContentDelta(event))
-                    .await;
-            }
-            ProposedPlanSegment::ProposedPlanStart => {
-                if !state.plan_item_state.completed {
-                    state.plan_item_state.start(sess, turn_context).await;
-                }
-            }
-            ProposedPlanSegment::ProposedPlanDelta(delta) => {
-                if !state.plan_item_state.completed {
-                    if !state.plan_item_state.started {
-                        state.plan_item_state.start(sess, turn_context).await;
-                    }
-                    state
-                        .plan_item_state
-                        .push_delta(sess, turn_context, &delta)
-                        .await;
-                }
-            }
-            ProposedPlanSegment::ProposedPlanEnd => {}
-        }
-    }
-}
-
 async fn emit_streamed_assistant_text_delta(
     sess: &Session,
     turn_context: &TurnContext,
-    plan_mode_state: Option<&mut PlanModeStreamState>,
     item_id: &str,
     parsed: ParsedAssistantTextDelta,
 ) {
     if parsed.is_empty() {
-        return;
-    }
-    if !parsed.citations.is_empty() {
-        // Citation extraction is intentionally local for now; we strip citations from display text
-        // but do not yet surface them in protocol events.
-        let _citations = parsed.citations;
-    }
-    if let Some(state) = plan_mode_state {
-        if !parsed.plan_segments.is_empty() {
-            handle_plan_segments(sess, turn_context, state, item_id, parsed.plan_segments).await;
-        }
         return;
     }
     if parsed.visible_text.is_empty() {
@@ -1065,180 +659,24 @@ async fn emit_streamed_assistant_text_delta(
         .await;
 }
 
-/// Flush buffered assistant text parser state when an assistant message item ends.
 async fn flush_assistant_text_segments_for_item(
     sess: &Session,
     turn_context: &TurnContext,
-    plan_mode_state: Option<&mut PlanModeStreamState>,
     parsers: &mut AssistantMessageStreamParsers,
     item_id: &str,
 ) {
     let parsed = parsers.finish_item(item_id);
-    emit_streamed_assistant_text_delta(sess, turn_context, plan_mode_state, item_id, parsed).await;
+    emit_streamed_assistant_text_delta(sess, turn_context, item_id, parsed).await;
 }
 
-/// Flush any remaining buffered assistant text parser state at response completion.
 async fn flush_assistant_text_segments_all(
     sess: &Session,
     turn_context: &TurnContext,
-    mut plan_mode_state: Option<&mut PlanModeStreamState>,
     parsers: &mut AssistantMessageStreamParsers,
 ) {
     for (item_id, parsed) in parsers.drain_finished() {
-        emit_streamed_assistant_text_delta(
-            sess,
-            turn_context,
-            plan_mode_state.as_deref_mut(),
-            &item_id,
-            parsed,
-        )
-        .await;
+        emit_streamed_assistant_text_delta(sess, turn_context, &item_id, parsed).await;
     }
-}
-
-/// Emit completion for plan items by parsing the finalized assistant message.
-async fn maybe_complete_plan_item_from_message(
-    sess: &Session,
-    turn_context: &TurnContext,
-    state: &mut PlanModeStreamState,
-    item: &ResponseItem,
-) {
-    if let ResponseItem::Message { role, content, .. } = item
-        && role == "assistant"
-    {
-        let mut text = String::new();
-        for entry in content {
-            if let ContentItem::OutputText { text: chunk } = entry {
-                text.push_str(chunk);
-            }
-        }
-        if let Some(plan_text) = extract_proposed_plan_text(&text) {
-            let (plan_text, _citations) = strip_citations(&plan_text);
-            if !state.plan_item_state.started {
-                state.plan_item_state.start(sess, turn_context).await;
-            }
-            state
-                .plan_item_state
-                .complete_with_text(sess, turn_context, plan_text)
-                .await;
-        }
-    }
-}
-
-/// Emit a completed agent message in plan mode, respecting deferred starts.
-async fn emit_agent_message_in_plan_mode(
-    sess: &Session,
-    turn_context: &TurnContext,
-    agent_message: codex_protocol::items::AgentMessageItem,
-    state: &mut PlanModeStreamState,
-) {
-    let agent_message_id = agent_message.id.clone();
-    let text = agent_message_text(&agent_message);
-    if text.trim().is_empty() {
-        state.pending_agent_message_items.remove(&agent_message_id);
-        state.started_agent_message_items.remove(&agent_message_id);
-        return;
-    }
-
-    maybe_emit_pending_agent_message_start(sess, turn_context, state, &agent_message_id).await;
-
-    if !state
-        .started_agent_message_items
-        .contains(&agent_message_id)
-    {
-        let start_item = state
-            .pending_agent_message_items
-            .remove(&agent_message_id)
-            .unwrap_or_else(|| {
-                TurnItem::AgentMessage(codex_protocol::items::AgentMessageItem {
-                    id: agent_message_id.clone(),
-                    content: Vec::new(),
-                    phase: None,
-                    memory_citation: None,
-                })
-            });
-        sess.emit_turn_item_started(turn_context, &start_item).await;
-        state
-            .started_agent_message_items
-            .insert(agent_message_id.clone());
-    }
-
-    sess.emit_turn_item_completed(turn_context, TurnItem::AgentMessage(agent_message))
-        .await;
-    state.started_agent_message_items.remove(&agent_message_id);
-}
-
-/// Emit completion for a plan-mode turn item, handling agent messages specially.
-async fn emit_turn_item_in_plan_mode(
-    sess: &Session,
-    turn_context: &TurnContext,
-    turn_item: TurnItem,
-    previously_active_item: Option<&TurnItem>,
-    state: &mut PlanModeStreamState,
-) {
-    match turn_item {
-        TurnItem::AgentMessage(agent_message) => {
-            emit_agent_message_in_plan_mode(sess, turn_context, agent_message, state).await;
-        }
-        _ => {
-            if previously_active_item.is_none() {
-                sess.emit_turn_item_started(turn_context, &turn_item).await;
-            }
-            sess.emit_turn_item_completed(turn_context, turn_item).await;
-        }
-    }
-}
-
-/// Handle a completed assistant response item in plan mode, returning true if handled.
-async fn handle_assistant_item_done_in_plan_mode(
-    sess: &Session,
-    turn_context: &TurnContext,
-    item: &ResponseItem,
-    state: &mut PlanModeStreamState,
-    previously_active_item: Option<&TurnItem>,
-    last_agent_message: &mut Option<String>,
-) -> bool {
-    if let ResponseItem::Message { role, .. } = item
-        && role == "assistant"
-    {
-        maybe_complete_plan_item_from_message(sess, turn_context, state, item).await;
-
-        let mut finalized_facts = None;
-        if let Some(finalized_turn_item) = finalize_non_tool_response_item(
-            sess,
-            turn_context,
-            item,
-            /*plan_mode*/ true,
-        )
-        .await
-        {
-            finalized_facts = Some(finalized_turn_item.facts.clone());
-            emit_turn_item_in_plan_mode(
-                sess,
-                turn_context,
-                finalized_turn_item.turn_item,
-                previously_active_item,
-                state,
-            )
-            .await;
-        }
-        let final_last_agent_message = finalized_facts
-            .as_ref()
-            .and_then(|facts| facts.last_agent_message.clone());
-
-        record_completed_response_item_with_finalized_facts(
-            sess,
-            turn_context,
-            item,
-            finalized_facts.as_ref(),
-        )
-        .await;
-        if let Some(agent_message) = final_last_agent_message {
-            *last_agent_message = Some(agent_message);
-        }
-        return true;
-    }
-    false
 }
 
 async fn drain_in_flight(
@@ -1252,12 +690,6 @@ async fn drain_in_flight(
                 let response_item = response_input.into();
                 sess.record_conversation_items(&turn_context, std::slice::from_ref(&response_item))
                     .await;
-                mark_thread_memory_mode_polluted_if_external_context(
-                    sess.as_ref(),
-                    turn_context.as_ref(),
-                    &response_item,
-                )
-                .await;
             }
             Err(err) => {
                 error_or_panic(format!("in-flight tool future failed during drain: {err}"));
@@ -1285,14 +717,6 @@ async fn try_run_sampling_request(
     prompt: &Prompt,
     cancellation_token: CancellationToken,
 ) -> CodexResult<SamplingRequestResult> {
-    feedback_tags!(
-        model = turn_context.model_info.slug.clone(),
-        approval_policy = turn_context.approval_policy.value(),
-        sandbox_policy = &turn_context.sandbox_policy(),
-        effort = turn_context.reasoning_effort,
-        auth_mode = sess.services.auth_manager.auth_mode(),
-        features = sess.features.enabled_features(),
-    );
     let mut stream = client_session
         .stream(
             prompt,
@@ -1318,9 +742,7 @@ async fn try_run_sampling_request(
     let mut should_emit_turn_diff = false;
     let mut should_emit_token_count = false;
     let reasoning_effort = turn_context.effective_reasoning_effort_for_tracing();
-    let plan_mode = turn_context.collaboration_mode.mode == ModeKind::Plan;
-    let mut assistant_message_stream_parsers = AssistantMessageStreamParsers::new(plan_mode);
-    let mut plan_mode_state = plan_mode.then(|| PlanModeStreamState::new(&turn_context.sub_id));
+    let mut assistant_message_stream_parsers = AssistantMessageStreamParsers::new();
     let mut active_item_is_streaming_to_client = false;
     let receiving_span = trace_span!("receiving_stream");
     let mut completed_response_id: Option<String> = None;
@@ -1387,24 +809,10 @@ async fn try_run_sampling_request(
                     flush_assistant_text_segments_for_item(
                         &sess,
                         &turn_context,
-                        plan_mode_state.as_mut(),
                         &mut assistant_message_stream_parsers,
                         &item_id,
                     )
                     .await;
-                }
-                if let Some(state) = plan_mode_state.as_mut()
-                    && handle_assistant_item_done_in_plan_mode(
-                        &sess,
-                        &turn_context,
-                        &item,
-                        state,
-                        previously_streamed_item.as_ref(),
-                        &mut last_agent_message,
-                    )
-                    .await
-                {
-                    continue;
                 }
 
                 let mut ctx = HandleOutputCtx {
@@ -1412,26 +820,6 @@ async fn try_run_sampling_request(
                     turn_context: turn_context.clone(),
                     tool_runtime: tool_runtime.clone(),
                     cancellation_token: cancellation_token.child_token(),
-                };
-
-                let preempt_for_mailbox_mail = match &item {
-                    ResponseItem::Message { role, phase, .. } => {
-                        role == "assistant" && matches!(phase, Some(MessagePhase::Commentary))
-                    }
-                    ResponseItem::Reasoning { .. } => true,
-                    ResponseItem::LocalShellCall { .. }
-                    | ResponseItem::FunctionCall { .. }
-                    | ResponseItem::ToolSearchCall { .. }
-                    | ResponseItem::FunctionCallOutput { .. }
-                    | ResponseItem::CustomToolCall { .. }
-                    | ResponseItem::CustomToolCallOutput { .. }
-                    | ResponseItem::ToolSearchOutput { .. }
-                    | ResponseItem::WebSearchCall { .. }
-                    | ResponseItem::ImageGenerationCall { .. }
-                    | ResponseItem::Compaction { .. }
-                    | ResponseItem::CompactionTrigger
-                    | ResponseItem::ContextCompaction { .. }
-                    | ResponseItem::Other => false,
                 };
 
                 let output_result =
@@ -1449,34 +837,22 @@ async fn try_run_sampling_request(
                     last_agent_message = Some(agent_message);
                 }
                 needs_follow_up |= output_result.needs_follow_up;
-                // todo: remove before stabilizing multi-agent v2
-                if preempt_for_mailbox_mail && sess.input_queue.has_pending_mailbox_items().await {
-                    break Ok(SamplingRequestResult {
-                        needs_follow_up: true,
-                        last_agent_message,
-                    });
-                }
             }
             ResponseEvent::OutputItemAdded(item) => {
-                if let ResponseItem::CustomToolCall { call_id, name, .. } = &item {
-                    let tool_name = ToolName::plain(name.as_str());
-                    active_tool_argument_diff_consumer = tool_runtime
-                        .create_diff_consumer(&tool_name)
-                        .map(|consumer| (call_id.clone(), consumer));
-                } else if matches!(&item, ResponseItem::FunctionCall { .. }) {
+                if matches!(&item, ResponseItem::FunctionCall { .. }) {
                     active_tool_argument_diff_consumer = None;
                 }
                 if let Some(turn_item) = handle_non_tool_response_item(
                     sess.as_ref(),
                     turn_context.as_ref(),
                     &item,
-                    plan_mode,
+                    false,
                 )
                 .await
                 {
                     let mut turn_item = turn_item;
                     let stream_item_to_client = true;
-                    let mut seeded_parsed: Option<ParsedAssistantTextDelta> = None;
+                    let seeded_parsed: Option<ParsedAssistantTextDelta> = None;
                     let mut seeded_item_id: Option<String> = None;
                     if stream_item_to_client
                         && matches!(turn_item, TurnItem::AgentMessage(_))
@@ -1488,36 +864,19 @@ async fn try_run_sampling_request(
                         if let TurnItem::AgentMessage(agent_message) = &mut turn_item {
                             agent_message.content =
                                 vec![codex_protocol::items::AgentMessageContent::Text {
-                                    text: if plan_mode {
-                                        String::new()
-                                    } else {
-                                        std::mem::take(&mut seeded.visible_text)
-                                    },
+                                    text: std::mem::take(&mut seeded.visible_text),
                                 }];
                         }
-                        seeded_parsed = plan_mode.then_some(seeded);
                         seeded_item_id = Some(item_id);
                     }
                     if stream_item_to_client {
-                        if let Some(state) = plan_mode_state.as_mut()
-                            && matches!(turn_item, TurnItem::AgentMessage(_))
+                        sess.emit_turn_item_started(&turn_context, &turn_item).await;
+                        if let (Some(item_id), Some(parsed)) =
+                            (seeded_item_id.as_deref(), seeded_parsed)
                         {
-                            let item_id = turn_item.id();
-                            state
-                                .pending_agent_message_items
-                                .insert(item_id, turn_item.clone());
-                        } else {
-                            sess.emit_turn_item_started(&turn_context, &turn_item).await;
-                        }
-                        if let (Some(state), Some(item_id), Some(parsed)) = (
-                            plan_mode_state.as_mut(),
-                            seeded_item_id.as_deref(),
-                            seeded_parsed,
-                        ) {
                             emit_streamed_assistant_text_delta(
                                 &sess,
                                 &turn_context,
-                                Some(state),
                                 item_id,
                                 parsed,
                             )
@@ -1533,7 +892,7 @@ async fn try_run_sampling_request(
                     .server_model_warning_emitted
                     .load(Ordering::Relaxed)
                     && sess
-                        .maybe_warn_on_server_model_mismatch(&turn_context, server_model)
+                        .maybe_warn_on_server_model_mismatch(&turn_context, &server_model)
                         .await
                 {
                     turn_context
@@ -1554,13 +913,10 @@ async fn try_run_sampling_request(
                 sess.set_server_reasoning_included(included).await;
             }
             ResponseEvent::RateLimits(snapshot) => {
-                // Update internal state with latest rate limits, but defer sending until
-                // token usage is available to avoid duplicate TokenCount events.
                 sess.record_rate_limits_info(snapshot).await;
                 should_emit_token_count = true;
             }
             ResponseEvent::ModelsEtag(etag) => {
-                // Update internal state with latest models etag
                 sess.services.models_manager.refresh_if_new_etag(etag).await;
             }
             ResponseEvent::Completed {
@@ -1571,7 +927,6 @@ async fn try_run_sampling_request(
                 flush_assistant_text_segments_all(
                     &sess,
                     &turn_context,
-                    plan_mode_state.as_mut(),
                     &mut assistant_message_stream_parsers,
                 )
                 .await;
@@ -1589,8 +944,6 @@ async fn try_run_sampling_request(
                 });
             }
             ResponseEvent::OutputTextDelta(delta) => {
-                // In review child threads, suppress assistant text deltas; the
-                // UI will show a selection popup from the final ReviewOutput.
                 if let Some(active) = active_item.as_ref() {
                     if !active_item_is_streaming_to_client {
                         continue;
@@ -1598,14 +951,8 @@ async fn try_run_sampling_request(
                     let item_id = active.id();
                     if matches!(active, TurnItem::AgentMessage(_)) {
                         let parsed = assistant_message_stream_parsers.parse_delta(&item_id, &delta);
-                        emit_streamed_assistant_text_delta(
-                            &sess,
-                            &turn_context,
-                            plan_mode_state.as_mut(),
-                            &item_id,
-                            parsed,
-                        )
-                        .await;
+                        emit_streamed_assistant_text_delta(&sess, &turn_context, &item_id, parsed)
+                            .await;
                     } else {
                         let event = AgentMessageContentDeltaEvent {
                             thread_id: sess.conversation_id.to_string(),
@@ -1698,13 +1045,8 @@ async fn try_run_sampling_request(
         }
     };
 
-    flush_assistant_text_segments_all(
-        &sess,
-        &turn_context,
-        plan_mode_state.as_mut(),
-        &mut assistant_message_stream_parsers,
-    )
-    .await;
+    flush_assistant_text_segments_all(&sess, &turn_context, &mut assistant_message_stream_parsers)
+        .await;
 
     if sess
         .features
@@ -1718,10 +1060,6 @@ async fn try_run_sampling_request(
     drain_in_flight(&mut in_flight, sess.clone(), turn_context.clone()).await?;
 
     if should_emit_token_count {
-        // A tool call such as request_user_input can intentionally pause the turn. Emit token
-        // counts only after pending tools resolve so clients do not see progress events while the
-        // turn is waiting on the user. This also needs to happen before returning cancellation so
-        // token usage already recorded from the completed response is still persisted.
         sess.send_token_count_event(&turn_context).await;
     }
 
@@ -1745,13 +1083,9 @@ async fn try_run_sampling_request(
 
 pub(crate) fn get_last_assistant_message_from_turn(responses: &[ResponseItem]) -> Option<String> {
     for item in responses.iter().rev() {
-        if let Some(message) = last_assistant_message_from_item(item, /*plan_mode*/ false) {
+        if let Some(message) = last_assistant_message_from_item(item, false) {
             return Some(message);
         }
     }
     None
 }
-
-#[cfg(test)]
-#[path = "turn_tests.rs"]
-mod tests;

@@ -1,42 +1,23 @@
 use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_tools::dynamic_tool_to_responses_api_tool;
 use pretty_assertions::assert_eq;
-use serde::Deserialize;
-use serde::de::DeserializeOwned;
 use serde_json::Value;
 use serde_json::json;
-use std::fs;
 
-const FIXTURE_PATHS: [&str; 5] = [
-    "tests/fixtures/json_schema_policy/slack.json",
-    "tests/fixtures/json_schema_policy/google_calendar.json",
-    "tests/fixtures/json_schema_policy/google_drive.json",
-    "tests/fixtures/json_schema_policy/notion.json",
-    "tests/fixtures/json_schema_policy/microsoft_outlook_email.json",
-];
-const OVERSIZED_NOTION_CREATE_PAGE_SCHEMA_PATH: &str =
-    "tests/fixtures/json_schema_policy/oversized_notion_create_page_input_schema.json";
-
-#[derive(Debug, Deserialize)]
 struct FixtureFile {
-    source: String,
+    source: &'static str,
     tools: Vec<FixtureTool>,
 }
 
-#[derive(Debug, Deserialize)]
 struct FixtureTool {
-    name: String,
-    description: String,
+    name: &'static str,
+    description: &'static str,
     input_schema: Value,
-    #[serde(default)]
     expected_preserved: Vec<ExpectedValue>,
-    #[serde(default)]
     expected_pruned: Vec<String>,
-    #[serde(default)]
     expected_dropped_fields: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
 struct ExpectedValue {
     pointer: String,
     value: Value,
@@ -44,7 +25,7 @@ struct ExpectedValue {
 
 #[test]
 fn json_schema_policy_fixtures_convert_to_responses_tools() {
-    for fixture in FIXTURE_PATHS.into_iter().map(load_fixture::<FixtureFile>) {
+    for fixture in generic_schema_fixtures() {
         for fixture_tool in &fixture.tools {
             let responses_tool = convert_fixture_tool(&fixture, fixture_tool);
             let parameters = serde_json::to_value(&responses_tool.parameters)
@@ -117,8 +98,8 @@ fn json_schema_policy_fixtures_convert_to_responses_tools() {
 }
 
 #[test]
-fn json_schema_policy_oversized_golden_schema_triggers_compaction() {
-    let fixture: FixtureFile = load_fixture(OVERSIZED_NOTION_CREATE_PAGE_SCHEMA_PATH);
+fn json_schema_policy_oversized_schema_triggers_compaction() {
+    let fixture = oversized_schema_fixture();
     let fixture_tool = fixture
         .tools
         .first()
@@ -159,7 +140,7 @@ fn json_schema_policy_oversized_golden_schema_triggers_compaction() {
         (
             "/properties/children/items",
             json!({}),
-            "rewrite nested local refs before dropping root definitions",
+            "rewrite array local refs before dropping root definitions",
         ),
         (
             "/properties/markdown/type",
@@ -181,24 +162,15 @@ fn json_schema_policy_oversized_golden_schema_triggers_compaction() {
     }
 }
 
-fn load_fixture<T: DeserializeOwned>(path: &str) -> T {
-    let path = codex_utils_cargo_bin::find_resource!(path)
-        .unwrap_or_else(|err| panic!("resolve fixture {path}: {err}"));
-    let fixture = fs::read_to_string(&path)
-        .unwrap_or_else(|err| panic!("read fixture {}: {err}", path.display()));
-    serde_json::from_str(&fixture)
-        .unwrap_or_else(|err| panic!("parse fixture {}: {err}", path.display()))
-}
-
 fn convert_fixture_tool(
     fixture: &FixtureFile,
     fixture_tool: &FixtureTool,
 ) -> codex_tools::ResponsesApiTool {
     let name = &fixture_tool.name;
     let tool = DynamicToolSpec {
-        namespace: Some(fixture.source.clone()),
+        namespace: Some(fixture.source.to_string()),
         name: name.to_string(),
-        description: fixture_tool.description.clone(),
+        description: fixture_tool.description.to_string(),
         input_schema: fixture_tool.input_schema.clone(),
         defer_loading: false,
     };
@@ -211,4 +183,149 @@ fn compact_json_len(value: &Value) -> usize {
     serde_json::to_vec(value)
         .unwrap_or_else(|err| panic!("serialize compact JSON: {err}"))
         .len()
+}
+
+fn generic_schema_fixtures() -> Vec<FixtureFile> {
+    vec![
+        FixtureFile {
+            source: "generic/document",
+            tools: vec![FixtureTool {
+                name: "document_create",
+                description: "Create a document with metadata",
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "title": { "type": "string" },
+                        "metadata": { "$ref": "#/$defs/metadata" }
+                    },
+                    "$defs": {
+                        "metadata": {
+                            "type": "object",
+                            "properties": {
+                                "owner": { "type": "string" },
+                                "priority": { "enum": ["low", "normal", "high"] }
+                            }
+                        },
+                        "unused": {
+                            "type": "object",
+                            "properties": {
+                                "debug": { "type": "boolean" }
+                            }
+                        }
+                    }
+                }),
+                expected_preserved: vec![
+                    ExpectedValue {
+                        pointer: "/properties/title/type".to_string(),
+                        value: json!("string"),
+                    },
+                    ExpectedValue {
+                        pointer: "/$defs/metadata/properties/priority/enum/2".to_string(),
+                        value: json!("high"),
+                    },
+                ],
+                expected_pruned: vec!["/$defs/unused".to_string()],
+                expected_dropped_fields: Vec::new(),
+            }],
+        },
+        FixtureFile {
+            source: "generic/messaging",
+            tools: vec![FixtureTool {
+                name: "message_schedule",
+                description: "Schedule a message",
+                input_schema: json!({
+                    "type": "object",
+                    "title": "Message schedule input",
+                    "description": "Input for scheduling a generic message.",
+                    "properties": {
+                        "body": {
+                            "type": "string",
+                            "description": "Message body"
+                        },
+                        "send_at": {
+                            "type": "string",
+                            "format": "date-time",
+                            "examples": ["2026-01-01T12:00:00Z"]
+                        }
+                    },
+                    "required": ["body", "send_at"]
+                }),
+                expected_preserved: vec![
+                    ExpectedValue {
+                        pointer: "/properties/body/type".to_string(),
+                        value: json!("string"),
+                    },
+                    ExpectedValue {
+                        pointer: "/required/1".to_string(),
+                        value: json!("send_at"),
+                    },
+                ],
+                expected_pruned: Vec::new(),
+                expected_dropped_fields: vec![
+                    "/title".to_string(),
+                    "/properties/send_at/examples".to_string(),
+                ],
+            }],
+        },
+    ]
+}
+
+fn oversized_schema_fixture() -> FixtureFile {
+    let long_description = "generic schema description ".repeat(2000);
+    let large_enum: Vec<Value> = (0..1000)
+        .map(|index| json!(format!("choice-{index}")))
+        .collect();
+    let input_schema = json!({
+        "type": "object",
+        "description": long_description,
+        "properties": {
+            "parent": {
+                "description": "Parent document reference.",
+                "$ref": "#/$defs/parent"
+            },
+            "children": {
+                "type": "array",
+                "items": {
+                    "$ref": "#/$defs/child"
+                }
+            },
+            "markdown": {
+                "type": "string",
+                "description": "Markdown body."
+            },
+            "properties": {
+                "type": "object",
+                "additionalProperties": true
+            }
+        },
+        "$defs": {
+            "parent": {
+                "type": "object",
+                "description": "Parent definition.",
+                "properties": {
+                    "id": { "type": "string" },
+                    "kind": { "enum": large_enum }
+                }
+            },
+            "child": {
+                "type": "object",
+                "description": "Child definition.",
+                "properties": {
+                    "text": { "type": "string" }
+                }
+            }
+        }
+    });
+
+    FixtureFile {
+        source: "generic/oversized",
+        tools: vec![FixtureTool {
+            name: "document_create_page",
+            description: "Create a document page",
+            input_schema,
+            expected_preserved: Vec::new(),
+            expected_pruned: Vec::new(),
+            expected_dropped_fields: Vec::new(),
+        }],
+    }
 }

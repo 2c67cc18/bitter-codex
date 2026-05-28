@@ -63,16 +63,12 @@ impl ResponseMock {
         self.requests.lock().unwrap().last().cloned()
     }
 
-    /// Returns true if any captured request contains a `function_call` with the
-    /// provided `call_id`.
     pub fn saw_function_call(&self, call_id: &str) -> bool {
         self.requests()
             .iter()
             .any(|req| req.has_function_call(call_id))
     }
 
-    /// Returns the `output` string for a matching `function_call_output` with
-    /// the provided `call_id`, searching across all captured requests.
     pub fn function_call_output_text(&self, call_id: &str) -> Option<String> {
         self.requests()
             .iter()
@@ -134,7 +130,6 @@ impl ResponsesRequest {
             .to_string()
     }
 
-    /// Returns all `input_text` spans from `message` inputs for the provided role.
     pub fn message_input_texts(&self, role: &str) -> Vec<String> {
         self.inputs_of_type("message")
             .into_iter()
@@ -146,7 +141,6 @@ impl ResponsesRequest {
             .collect()
     }
 
-    /// Returns `input_text` spans grouped by `message` input for the provided role.
     pub fn message_input_text_groups(&self, role: &str) -> Vec<Vec<String>> {
         self.inputs_of_type("message")
             .into_iter()
@@ -172,7 +166,6 @@ impl ResponsesRequest {
             .any(|texts| predicate(texts))
     }
 
-    /// Returns all `input_image` `image_url` spans from `message` inputs for the provided role.
     pub fn message_input_image_urls(&self, role: &str) -> Vec<String> {
         self.inputs_of_type("message")
             .into_iter()
@@ -211,10 +204,6 @@ impl ResponsesRequest {
         self.call_output(call_id, "custom_tool_call_output")
     }
 
-    pub fn tool_search_output(&self, call_id: &str) -> Value {
-        self.call_output(call_id, "tool_search_output")
-    }
-
     pub fn call_output(&self, call_id: &str, call_type: &str) -> Value {
         self.input()
             .iter()
@@ -225,8 +214,6 @@ impl ResponsesRequest {
             .unwrap_or_else(|| panic!("function call output {call_id} item not found in request"))
     }
 
-    /// Returns true if this request's `input` contains a `function_call` with
-    /// the specified `call_id`.
     pub fn has_function_call(&self, call_id: &str) -> bool {
         self.input().iter().any(|item| {
             item.get("type").and_then(Value::as_str) == Some("function_call")
@@ -234,8 +221,6 @@ impl ResponsesRequest {
         })
     }
 
-    /// If present, returns the `output` string of the `function_call_output`
-    /// entry matching `call_id` in this request's `input`.
     pub fn function_call_output_text(&self, call_id: &str) -> Option<String> {
         let binding = self.input();
         let item = binding.iter().find(|item| {
@@ -444,15 +429,9 @@ impl WebSocketHandshake {
 pub struct WebSocketConnectionConfig {
     pub requests: Vec<Vec<Value>>,
     pub response_headers: Vec<(String, String)>,
-    /// Optional delay inserted before accepting the websocket handshake.
-    ///
-    /// Tests use this to force websocket setup into an in-flight state so first-turn warmup paths
-    /// can be exercised deterministically.
+
     pub accept_delay: Option<Duration>,
-    /// Whether the server should send a websocket close frame after all scripted responses.
-    ///
-    /// Tests can disable this to simulate a peer that surfaces a terminal event but never
-    /// completes the close handshake.
+
     pub close_after_requests: bool,
 }
 
@@ -506,10 +485,6 @@ impl WebSocketTestServer {
         self.handshakes.lock().unwrap().clone()
     }
 
-    /// Waits until at least `expected` websocket handshakes have been observed or timeout elapses.
-    ///
-    /// Uses a short bounded polling interval so tests can deterministically wait for background
-    /// websocket activity without busy-spinning.
     pub async fn wait_for_handshakes(&self, expected: usize, timeout: Duration) -> bool {
         if self.handshakes.lock().unwrap().len() >= expected {
             return true;
@@ -589,14 +564,11 @@ impl Match for ResponseMock {
             .unwrap()
             .push(ResponsesRequest(request.clone()));
 
-        // Enforce invariant checks on every request body captured by the mock.
-        // Panic on orphan tool outputs to catch regressions early.
         validate_request_body_invariants(request);
         true
     }
 }
 
-/// Build an SSE stream body from a list of JSON events.
 pub fn sse(events: Vec<Value>) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
@@ -616,7 +588,6 @@ pub fn sse_completed(id: &str) -> String {
     sse(vec![ev_response_created(id), ev_completed(id)])
 }
 
-/// Convenience: SSE event for a completed response with a specific id.
 pub fn ev_completed(id: &str) -> Value {
     serde_json::json!({
         "type": "response.completed",
@@ -627,7 +598,6 @@ pub fn ev_completed(id: &str) -> Value {
     })
 }
 
-/// Convenience: SSE event for a created response with a specific id.
 pub fn ev_response_created(id: &str) -> Value {
     serde_json::json!({
         "type": "response.created",
@@ -664,7 +634,6 @@ pub fn ev_completed_with_tokens(id: &str, total_tokens: i64) -> Value {
     })
 }
 
-/// Convenience: SSE event for a single assistant message output item.
 pub fn ev_assistant_message(id: &str, text: &str) -> Value {
     serde_json::json!({
         "type": "response.output_item.done",
@@ -842,18 +811,6 @@ pub fn ev_function_call_with_namespace(
     })
 }
 
-pub fn ev_tool_search_call(call_id: &str, arguments: &serde_json::Value) -> Value {
-    serde_json::json!({
-        "type": "response.output_item.done",
-        "item": {
-            "type": "tool_search_call",
-            "call_id": call_id,
-            "execution": "client",
-            "arguments": arguments,
-        }
-    })
-}
-
 pub fn ev_custom_tool_call(call_id: &str, name: &str, input: &str) -> Value {
     serde_json::json!({
         "type": "response.output_item.done",
@@ -880,22 +837,6 @@ pub fn ev_local_shell_call(call_id: &str, status: &str, command: Vec<&str>) -> V
         }
     })
 }
-
-/// Convenience: SSE event for an `apply_patch` custom tool call with raw patch
-/// text. This mirrors the payload produced by the Responses API when the model
-/// invokes `apply_patch` directly.
-pub fn ev_apply_patch_custom_tool_call(call_id: &str, patch: &str) -> Value {
-    serde_json::json!({
-        "type": "response.output_item.done",
-        "item": {
-            "type": "custom_tool_call",
-            "name": "apply_patch",
-            "input": patch,
-            "call_id": call_id
-        }
-    })
-}
-
 pub fn ev_shell_command_call(call_id: &str, command: &str) -> Value {
     let args = serde_json::json!({ "command": command });
     ev_shell_command_call_with_args(call_id, &args)
@@ -905,14 +846,6 @@ pub fn ev_shell_command_call_with_args(call_id: &str, args: &serde_json::Value) 
     let arguments = serde_json::to_string(args).expect("serialize shell command arguments");
     ev_function_call(call_id, "shell_command", &arguments)
 }
-
-pub fn ev_apply_patch_shell_command_call_via_heredoc(call_id: &str, patch: &str) -> Value {
-    let args = serde_json::json!({ "command": format!("apply_patch <<'EOF'\n{patch}\nEOF\n") });
-    let arguments = serde_json::to_string(&args).expect("serialize apply_patch arguments");
-
-    ev_function_call(call_id, "shell_command", &arguments)
-}
-
 pub fn sse_failed(id: &str, code: &str, message: &str) -> String {
     sse(vec![serde_json::json!({
         "type": "response.failed",
@@ -1032,9 +965,6 @@ pub async fn mount_compact_json_once(server: &MockServer, body: serde_json::Valu
     .await
 }
 
-/// Mount a `/responses/compact` mock that mirrors the default remote compaction shape:
-/// keep user+developer messages from the request, drop assistant/tool artifacts, and append one
-/// compaction item carrying the provided summary text.
 pub async fn mount_compact_user_history_with_summary_once(
     server: &MockServer,
     summary_text: &str,
@@ -1042,8 +972,6 @@ pub async fn mount_compact_user_history_with_summary_once(
     mount_compact_user_history_with_summary_sequence(server, vec![summary_text.to_string()]).await
 }
 
-/// Same as [`mount_compact_user_history_with_summary_once`], but for multiple compact calls.
-/// Each incoming compact request receives the next summary text in order.
 pub async fn mount_compact_user_history_with_summary_sequence(
     server: &MockServer,
     summary_texts: Vec<String>,
@@ -1078,11 +1006,6 @@ pub async fn mount_compact_user_history_with_summary_sequence(
                 .cloned()
                 .unwrap_or_default()
                 .into_iter()
-                // TODO(ccunningham): Update this mock to match future compaction model behavior:
-                // return user/developer/assistant messages since the last compaction item, then
-                // append a single newest compaction item.
-                // Match current remote compaction behavior: keep user/developer messages and
-                // omit assistant/tool history entries.
                 .filter(|item| {
                     item.get("type").and_then(Value::as_str) == Some("message")
                         && matches!(
@@ -1091,7 +1014,7 @@ pub async fn mount_compact_user_history_with_summary_sequence(
                         )
                 })
                 .collect::<Vec<Value>>();
-            // Append a synthetic compaction item as the newest item.
+
             output.push(serde_json::json!({
                 "type": "compaction",
                 "encrypted_content": summary_text,
@@ -1168,7 +1091,6 @@ pub async fn mount_models_once_with_etag(
     mock.respond_with(
         ResponseTemplate::new(200)
             .insert_header("content-type", "application/json")
-            // ModelsClient reads the ETag header, not a JSON field.
             .insert_header("ETag", etag)
             .set_body_json(body.clone()),
     )
@@ -1184,17 +1106,11 @@ pub async fn start_mock_server() -> MockServer {
         .start()
         .await;
 
-    // Provide a default `/models` response so tests remain hermetic when the client queries it.
     let _ = mount_models_once(&server, ModelsResponse { models: Vec::new() }).await;
 
     server
 }
 
-/// Starts a lightweight WebSocket server for `/v1/responses` tests.
-///
-/// Each connection consumes a queue of request/event sequences. For each
-/// request message, the server records the payload and streams the matching
-/// events as WebSocket text frames before moving to the next request.
 pub async fn start_websocket_server(connections: Vec<Vec<Vec<Value>>>) -> WebSocketTestServer {
     let connections = connections
         .into_iter()
@@ -1431,9 +1347,6 @@ pub async fn mount_function_call_agent_response(
     }
 }
 
-/// Mounts a sequence of SSE response bodies and serves them in order for each
-/// POST to `/v1/responses`. Panics if more requests are received than bodies
-/// provided. Also asserts the exact number of expected calls.
 pub async fn mount_sse_sequence(server: &MockServer, bodies: Vec<String>) -> ResponseMock {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
@@ -1471,8 +1384,6 @@ pub async fn mount_sse_sequence(server: &MockServer, bodies: Vec<String>) -> Res
     response_mock
 }
 
-/// Mounts a sequence of responses for each POST to `/v1/responses`.
-/// Panics if more requests are received than responses provided.
 pub async fn mount_response_sequence(
     server: &MockServer,
     responses: Vec<ResponseTemplate>,
@@ -1510,18 +1421,7 @@ pub async fn mount_response_sequence(
     response_mock
 }
 
-/// Validate invariants on the request body sent to `/v1/responses`.
-///
-/// - No `function_call_output`/`custom_tool_call_output` with missing/empty `call_id`.
-/// - `tool_search_output` must have a `call_id` unless it is a server-executed legacy item.
-/// - Every `function_call_output` must match a prior `function_call` or
-///   `local_shell_call` with the same `call_id` in the same `input`.
-/// - Every `custom_tool_call_output` must match a prior `custom_tool_call`.
-/// - Every `tool_search_output` must match a prior `tool_search_call`.
-/// - Additionally, enforce symmetry: every `function_call`/`custom_tool_call`/
-///   `tool_search_call` in the `input` must have a matching output entry.
 fn validate_request_body_invariants(request: &wiremock::Request) {
-    // Skip GET requests (e.g., /models)
     if request.method != "POST" || !request.url.path().ends_with("/responses") {
         return;
     }
@@ -1569,24 +1469,7 @@ fn validate_request_body_invariants(request: &wiremock::Request) {
             .collect()
     }
 
-    fn gather_tool_search_output_ids(items: &[Value]) -> HashSet<String> {
-        items
-            .iter()
-            .filter(|item| item.get("type").and_then(Value::as_str) == Some("tool_search_output"))
-            .filter_map(|item| {
-                if let Some(id) = get_call_id(item) {
-                    return Some(id.to_string());
-                }
-                if item.get("execution").and_then(Value::as_str) == Some("server") {
-                    return None;
-                }
-                panic!("orphan tool_search_output with empty call_id should be dropped");
-            })
-            .collect()
-    }
-
     let function_calls = gather_ids(items, "function_call");
-    let tool_search_calls = gather_ids(items, "tool_search_call");
     let custom_tool_calls = gather_ids(items, "custom_tool_call");
     let local_shell_calls = gather_ids(items, "local_shell_call");
     let function_call_outputs = gather_output_ids(
@@ -1594,7 +1477,6 @@ fn validate_request_body_invariants(request: &wiremock::Request) {
         "function_call_output",
         "orphan function_call_output with empty call_id should be dropped",
     );
-    let tool_search_outputs = gather_tool_search_output_ids(items);
     let custom_tool_call_outputs = gather_output_ids(
         items,
         "custom_tool_call_output",
@@ -1613,13 +1495,6 @@ fn validate_request_body_invariants(request: &wiremock::Request) {
             "custom_tool_call_output without matching call in input: {cid}",
         );
     }
-    for cid in &tool_search_outputs {
-        assert!(
-            tool_search_calls.contains(cid),
-            "tool_search_output without matching call in input: {cid}",
-        );
-    }
-
     for cid in &function_calls {
         assert!(
             function_call_outputs.contains(cid),
@@ -1630,12 +1505,6 @@ fn validate_request_body_invariants(request: &wiremock::Request) {
         assert!(
             custom_tool_call_outputs.contains(cid),
             "Custom tool call output is missing for call id: {cid}",
-        );
-    }
-    for cid in &tool_search_calls {
-        assert!(
-            tool_search_outputs.contains(cid),
-            "Tool search output is missing for call id: {cid}",
         );
     }
 }

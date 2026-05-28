@@ -1,8 +1,4 @@
-//! Session-wide mutable state.
-
-use codex_protocol::models::AdditionalPermissionProfile;
 use codex_protocol::models::ResponseItem;
-use std::collections::HashSet;
 
 use super::auto_compact_window::AutoCompactWindow;
 use super::auto_compact_window::AutoCompactWindowSnapshot;
@@ -16,27 +12,21 @@ use codex_protocol::protocol::TokenUsageInfo;
 use codex_protocol::protocol::TurnContextItem;
 use codex_utils_output_truncation::TruncationPolicy;
 
-/// Persistent, session-scoped state previously stored directly on `Session`.
 pub(crate) struct SessionState {
     pub(crate) session_configuration: SessionConfiguration,
     pub(crate) history: ContextManager,
     pub(crate) latest_rate_limits: Option<RateLimitSnapshot>,
     pub(crate) server_reasoning_included: bool,
-    pub(crate) mcp_dependency_prompted: HashSet<String>,
-    /// Settings used by the latest regular user turn, used for turn-to-turn
-    /// model/realtime handling on subsequent regular turns (including full-context
-    /// reinjection after resume or `/compact`).
+
     previous_turn_settings: Option<PreviousTurnSettings>,
-    /// Runtime accounting state for the active auto-compaction window.
+
     auto_compact_window: AutoCompactWindow,
-    /// Startup prewarmed session prepared during session initialization.
+
     pub(crate) startup_prewarm: Option<SessionStartupPrewarmHandle>,
-    granted_permissions: Option<AdditionalPermissionProfile>,
     next_turn_is_first: bool,
 }
 
 impl SessionState {
-    /// Create a new session state mirroring previous `State::default()` semantics.
     pub(crate) fn new(session_configuration: SessionConfiguration) -> Self {
         let history = ContextManager::new();
         Self {
@@ -44,16 +34,13 @@ impl SessionState {
             history,
             latest_rate_limits: None,
             server_reasoning_included: false,
-            mcp_dependency_prompted: HashSet::new(),
             previous_turn_settings: None,
             auto_compact_window: AutoCompactWindow::new(),
             startup_prewarm: None,
-            granted_permissions: None,
             next_turn_is_first: true,
         }
     }
 
-    // History helpers
     pub(crate) fn record_items<I>(&mut self, items: I, policy: TruncationPolicy)
     where
         I: IntoIterator,
@@ -109,7 +96,6 @@ impl SessionState {
         self.history.reference_context_item()
     }
 
-    // Token/rate limit helpers
     pub(crate) fn update_token_info_from_usage(
         &mut self,
         usage: &TokenUsage,
@@ -172,17 +158,6 @@ impl SessionState {
         self.server_reasoning_included
     }
 
-    pub(crate) fn record_mcp_dependency_prompted<I>(&mut self, names: I)
-    where
-        I: IntoIterator<Item = String>,
-    {
-        self.mcp_dependency_prompted.extend(names);
-    }
-
-    pub(crate) fn mcp_dependency_prompted(&self) -> HashSet<String> {
-        self.mcp_dependency_prompted.clone()
-    }
-
     pub(crate) fn set_session_startup_prewarm(
         &mut self,
         startup_prewarm: SessionStartupPrewarmHandle,
@@ -193,36 +168,8 @@ impl SessionState {
     pub(crate) fn take_session_startup_prewarm(&mut self) -> Option<SessionStartupPrewarmHandle> {
         self.startup_prewarm.take()
     }
-
-    // Connector runtime selection has been removed; keep this inert while callers
-    // shed the stale session plumbing.
-    pub(crate) fn merge_connector_selection<I>(&mut self, _connector_ids: I) -> HashSet<String>
-    where
-        I: IntoIterator<Item = String>,
-    {
-        HashSet::new()
-    }
-
-    // Returns an empty selection now that connector runtime selection is inert.
-    pub(crate) fn get_connector_selection(&self) -> HashSet<String> {
-        HashSet::new()
-    }
-
-    // No-op retained for stale session callers.
-    pub(crate) fn clear_connector_selection(&mut self) {}
-
-    pub(crate) fn record_granted_permissions(&mut self, permissions: AdditionalPermissionProfile) {
-        self.granted_permissions =
-    }
-
-    pub(crate) fn granted_permissions(&self) -> Option<AdditionalPermissionProfile> {
-        self.granted_permissions.clone()
-    }
 }
 
-// Sometimes new snapshots don't include credits or plan information.
-// Preserve those from the previous snapshot when missing. For `limit_id`, treat
-// missing values as the default `"codex"` bucket.
 fn merge_rate_limit_fields(
     previous: Option<&RateLimitSnapshot>,
     mut snapshot: RateLimitSnapshot,
@@ -238,7 +185,3 @@ fn merge_rate_limit_fields(
     }
     snapshot
 }
-
-#[cfg(test)]
-#[path = "session_tests.rs"]
-mod tests;

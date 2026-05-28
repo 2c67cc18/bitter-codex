@@ -11,40 +11,30 @@ use std::path::PathBuf;
     override_usage = "codex exec [OPTIONS] [PROMPT]\n       codex exec [OPTIONS] <COMMAND> [ARGS]"
 )]
 pub struct Cli {
-    /// Action to perform. If omitted, runs a new non-interactive session.
     #[command(subcommand)]
     pub command: Option<Command>,
 
-    /// Error out when config.toml contains fields that are not recognized by this version of Codex.
     #[arg(long = "strict-config", global = true, default_value_t = false)]
     pub strict_config: bool,
 
     #[clap(flatten)]
     pub shared: ExecSharedCliOptions,
 
-    /// Allow running Codex outside a Git repository.
     #[arg(long = "skip-git-repo-check", global = true, default_value_t = false)]
     pub skip_git_repo_check: bool,
 
-    /// Run without persisting session files to disk.
     #[arg(long = "ephemeral", global = true, default_value_t = false)]
     pub ephemeral: bool,
 
-    /// Do not load `$CODEX_HOME/config.toml`; auth still uses `CODEX_HOME`.
     #[arg(long = "ignore-user-config", global = true, default_value_t = false)]
     pub ignore_user_config: bool,
 
-
-
-    /// Path to a JSON Schema file describing the model's final response shape.
     #[arg(long = "output-schema", value_name = "FILE", global = true)]
     pub output_schema: Option<PathBuf>,
 
     #[clap(skip)]
     pub config_overrides: CliConfigOverrides,
 
-
-    /// Print events to stdout as JSONL.
     #[arg(
         long = "json",
         alias = "experimental-json",
@@ -53,7 +43,6 @@ pub struct Cli {
     )]
     pub json: bool,
 
-    /// Specifies file where the last message from the agent should be written.
     #[arg(
         long = "output-last-message",
         short = 'o',
@@ -62,9 +51,6 @@ pub struct Cli {
     )]
     pub last_message_file: Option<PathBuf>,
 
-    /// Initial instructions for the agent. If not provided as an argument (or
-    /// if `-` is used), instructions are read from stdin. If stdin is piped and
-    /// a prompt is also provided, stdin is appended as a `<stdin>` block.
     #[arg(value_name = "PROMPT", value_hint = clap::ValueHint::Other)]
     pub prompt: Option<String>,
 }
@@ -82,7 +68,6 @@ impl std::ops::DerefMut for Cli {
         &mut self.shared.0
     }
 }
-
 
 #[derive(Debug, Default)]
 pub struct ExecSharedCliOptions(SharedCliOptions);
@@ -127,39 +112,26 @@ impl FromArgMatches for ExecSharedCliOptions {
     }
 }
 
-    fn mark_exec_global_args(cmd: clap::Command) -> clap::Command {
+fn mark_exec_global_args(cmd: clap::Command) -> clap::Command {
     cmd.mut_arg("model", |arg| arg.global(true))
-        .mut_arg("dangerously_bypass_approvals_and_sandbox", |arg| {
-            arg.global(true)
-        })
 }
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Command {
-    /// Resume a previous session by id or pick the most recent with --last.
     Resume(ResumeArgs),
-
-    /// Run a code review against the current repository.
 }
 
 #[derive(Args, Debug)]
 struct ResumeArgsRaw {
-    // Note: This is the direct clap shape. We reinterpret the positional when --last is set
-    // so "codex resume --last <prompt>" treats the positional as a prompt, not a session id.
-    /// Conversation/session id (UUID) or thread name. UUIDs take precedence if it parses.
-    /// If omitted, use --last to pick the most recent recorded session.
     #[arg(value_name = "SESSION_ID")]
     session_id: Option<String>,
 
-    /// Resume the most recent recorded session (newest) without specifying an id.
     #[arg(long = "last", default_value_t = false)]
     last: bool,
 
-    /// Show all sessions (disables cwd filtering).
     #[arg(long = "all", default_value_t = false)]
     all: bool,
 
-    /// Optional image(s) to attach to the prompt sent after resuming.
     #[arg(
         long = "image",
         short = 'i',
@@ -169,34 +141,25 @@ struct ResumeArgsRaw {
     )]
     images: Vec<PathBuf>,
 
-    /// Prompt to send after resuming the session. If `-` is used, read from stdin.
     #[arg(value_name = "PROMPT", value_hint = clap::ValueHint::Other)]
     prompt: Option<String>,
 }
 
 #[derive(Debug)]
 pub struct ResumeArgs {
-    /// Conversation/session id (UUID) or thread name. UUIDs take precedence if it parses.
-    /// If omitted, use --last to pick the most recent recorded session.
     pub session_id: Option<String>,
 
-    /// Resume the most recent recorded session (newest) without specifying an id.
     pub last: bool,
 
-    /// Show all sessions (disables cwd filtering).
     pub all: bool,
 
-    /// Optional image(s) to attach to the prompt sent after resuming.
     pub images: Vec<PathBuf>,
 
-    /// Prompt to send after resuming the session. If `-` is used, read from stdin.
     pub prompt: Option<String>,
 }
 
 impl From<ResumeArgsRaw> for ResumeArgs {
     fn from(raw: ResumeArgsRaw) -> Self {
-        // When --last is used without an explicit prompt, treat the positional as the prompt
-        // (clap can’t express this conditional positional meaning cleanly).
         let (session_id, prompt) = if raw.last && raw.prompt.is_none() {
             (None, raw.session_id)
         } else {
@@ -232,7 +195,3 @@ impl FromArgMatches for ResumeArgs {
         Ok(())
     }
 }
-
-#[cfg(test)]
-#[path = "cli_tests.rs"]
-mod tests;

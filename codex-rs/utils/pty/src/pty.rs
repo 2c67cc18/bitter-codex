@@ -22,7 +22,6 @@ use std::time::Duration;
 
 use anyhow::Result;
 use portable_pty::CommandBuilder;
-#[cfg(not(windows))]
 use portable_pty::native_pty_system;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -35,14 +34,6 @@ use crate::process::PtyMasterHandle;
 use crate::process::SpawnedProcess;
 use crate::process::TerminalSize;
 
-/// Returns true when ConPTY support is available (Windows only).
-#[cfg(windows)]
-pub fn conpty_supported() -> bool {
-    crate::win::conpty_supported()
-}
-
-/// Returns true when ConPTY support is available (non-Windows always true).
-#[cfg(not(windows))]
 pub fn conpty_supported() -> bool {
     true
 }
@@ -57,9 +48,6 @@ impl ChildTerminator for PtyChildTerminator {
     fn kill(&mut self) -> std::io::Result<()> {
         #[cfg(unix)]
         if let Some(process_group_id) = self.process_group_id {
-            // Match the pipe backend's hard-kill behavior so descendant
-            // processes from interactive shells/REPLs do not survive shutdown.
-            // Also try the direct child killer in case the cached PGID is stale.
             let process_group_kill_result =
                 crate::process_group::kill_process_group(process_group_id);
             let child_kill_result = self.killer.kill();
@@ -87,18 +75,9 @@ impl ChildTerminator for RawPidTerminator {
 }
 
 fn platform_native_pty_system() -> Box<dyn portable_pty::PtySystem + Send> {
-    #[cfg(windows)]
-    {
-        Box::new(crate::win::ConPtySystem::default())
-    }
-
-    #[cfg(not(windows))]
-    {
-        native_pty_system()
-    }
+    native_pty_system()
 }
 
-/// Spawn a process attached to a PTY, returning handles for stdin, split output, and exit.
 pub async fn spawn_process(
     program: &str,
     args: &[String],
@@ -110,8 +89,6 @@ pub async fn spawn_process(
     spawn_process_with_inherited_fds(program, args, cwd, env, arg0, size, &[]).await
 }
 
-/// Spawn a process attached to a PTY, preserving any inherited file
-/// descriptors listed in `inherited_fds` across exec on Unix.
 pub async fn spawn_process_with_inherited_fds(
     program: &str,
     args: &[String],
@@ -160,9 +137,6 @@ async fn spawn_process_portable(
 
     let mut child = pair.slave.spawn_command(command_builder)?;
     #[cfg(unix)]
-    // portable-pty establishes the spawned PTY child as a new session leader on
-    // Unix, so PID == PGID and we can reuse the pipe backend's process-group
-    // hard-kill semantics for descendants.
     let process_group_id = child.process_id();
     let killer = child.clone_killer();
 
@@ -220,11 +194,7 @@ async fn spawn_process_portable(
     });
 
     let handles = PtyHandles {
-        _slave: if cfg!(windows) {
-            Some(pair.slave)
-        } else {
-            None
-        },
+        _slave: None,
         _master: PtyMasterHandle::Resizable(pair.master),
     };
 
@@ -242,7 +212,7 @@ async fn spawn_process_portable(
         exit_status,
         exit_code,
         Some(handles),
-        /*resizer*/ None,
+        None,
     );
 
     Ok(SpawnedProcess {
@@ -277,9 +247,6 @@ async fn spawn_process_preserving_fds(
         command.env(key, value);
     }
 
-    // The child should see one terminal on all three stdio streams. Cloning
-    // the slave fd gives us three owned handles to the same PTY slave device
-    // so Command can wire them up independently as stdin/stdout/stderr.
     let stdin = slave.try_clone()?;
     let stdout = slave.try_clone()?;
     let stderr = slave.try_clone()?;
@@ -309,9 +276,6 @@ async fn spawn_process_preserving_fds(
                     return Err(std::io::Error::last_os_error());
                 }
 
-                // stdin now refers to the PTY slave, so make that fd the
-                // controlling terminal for the child's new session. stdout and
-                // stderr point at clones of the same slave device.
                 #[allow(clippy::cast_lossless)]
                 if libc::ioctl(0, libc::TIOCSCTTY as _, 0) == -1 {
                     return Err(std::io::Error::last_os_error());
@@ -396,7 +360,7 @@ async fn spawn_process_preserving_fds(
         exit_status,
         exit_code,
         Some(handles),
-        /*resizer*/ None,
+        None,
     );
 
     Ok(SpawnedProcess {
@@ -465,8 +429,7 @@ pub(crate) fn close_inherited_fds_except(preserved_fds: &[RawFd]) {
                 if num <= 2 || preserved_fds.contains(&num) {
                     continue;
                 }
-                // Keep CLOEXEC descriptors open so std::process can still use
-                // its internal exec-error pipe to report spawn failures.
+
                 let flags = unsafe { libc::fcntl(num, libc::F_GETFD) };
                 if flags == -1 || flags & libc::FD_CLOEXEC != 0 {
                     continue;

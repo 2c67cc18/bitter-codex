@@ -2,32 +2,20 @@ use crate::config::ConstraintResult;
 use crate::session::Codex;
 use crate::session::SessionSettingsUpdate;
 use crate::session::SteerInputError;
+use crate::session::Submission;
 use codex_features::Feature;
 use codex_otel::SessionTelemetry;
-use codex_protocol::config_types::ApprovalsReviewer;
-use codex_protocol::config_types::CollaborationMode;
-use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary;
-use codex_protocol::config_types::WindowsSandboxLevel;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
-use codex_protocol::mcp::CallToolResult;
-use codex_protocol::models::ActivePermissionProfile;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort;
-use codex_protocol::protocol::AskForApproval;
-use codex_protocol::protocol::AgentStatus;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::Op;
-use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::SessionConfiguredEvent;
 use codex_protocol::protocol::SessionSource;
-use codex_protocol::protocol::Submission;
-use codex_protocol::protocol::ThreadMemoryMode;
-use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TokenUsageInfo;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::protocol::W3cTraceContext;
@@ -38,12 +26,9 @@ use codex_thread_store::ThreadMetadataPatch;
 use codex_thread_store::ThreadStoreError;
 use codex_thread_store::ThreadStoreResult;
 use codex_utils_absolute_path::AbsolutePathBuf;
-use rmcp::model::ReadResourceRequestParams;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::Mutex;
-use tokio::sync::watch;
 
 use codex_rollout::state_db::StateDbHandle;
 
@@ -52,51 +37,22 @@ pub struct ThreadConfigSnapshot {
     pub model: String,
     pub model_provider_id: String,
     pub service_tier: Option<String>,
-    pub approval_policy: AskForApproval,
-    pub approvals_reviewer: ApprovalsReviewer,
-    pub permission_profile: PermissionProfile,
-    pub active_permission_profile: Option<ActivePermissionProfile>,
     pub cwd: AbsolutePathBuf,
     pub workspace_roots: Vec<AbsolutePathBuf>,
-    pub profile_workspace_roots: Vec<AbsolutePathBuf>,
     pub ephemeral: bool,
     pub reasoning_effort: Option<ReasoningEffort>,
     pub reasoning_summary: Option<ReasoningSummary>,
-    pub personality: Option<Personality>,
-    pub collaboration_mode: CollaborationMode,
     pub session_source: SessionSource,
-    pub thread_source: Option<ThreadSource>,
 }
 
-impl ThreadConfigSnapshot {
-    pub fn sandbox_policy(&self) -> SandboxPolicy {
-        let network_sandbox_policy = self.permission_profile.network_sandbox_policy();
-        self.permission_profile
-            .to_legacy_sandbox_policy(self.cwd.as_path())
-            .unwrap_or_else(|_| SandboxPolicy::ReadOnly {
-                network_access: network_sandbox_policy.is_enabled(),
-            })
-    }
-}
-
-/// Thread settings overrides that app-server validates before starting a turn.
 #[derive(Clone, Default)]
 pub struct CodexThreadSettingsOverrides {
     pub cwd: Option<PathBuf>,
     pub workspace_roots: Option<Vec<AbsolutePathBuf>>,
-    pub profile_workspace_roots: Option<Vec<AbsolutePathBuf>>,
-    pub approval_policy: Option<AskForApproval>,
-    pub approvals_reviewer: Option<ApprovalsReviewer>,
-    pub sandbox_policy: Option<SandboxPolicy>,
-    pub permission_profile: Option<PermissionProfile>,
-    pub active_permission_profile: Option<ActivePermissionProfile>,
-    pub windows_sandbox_level: Option<WindowsSandboxLevel>,
     pub model: Option<String>,
     pub effort: Option<Option<ReasoningEffort>>,
     pub summary: Option<ReasoningSummary>,
     pub service_tier: Option<Option<String>>,
-    pub collaboration_mode: Option<CollaborationMode>,
-    pub personality: Option<Personality>,
 }
 
 pub struct CodexThread {
@@ -104,11 +60,8 @@ pub struct CodexThread {
     pub(crate) session_source: SessionSource,
     session_configured: SessionConfiguredEvent,
     rollout_path: Option<PathBuf>,
-    out_of_band_elicitation_count: Mutex<u64>,
 }
 
-/// Conduit for the bidirectional stream of messages that compose a thread
-/// (formerly called a conversation) in Codex.
 impl CodexThread {
     pub(crate) fn new(
         codex: Codex,
@@ -121,7 +74,6 @@ impl CodexThread {
             session_source,
             session_configured,
             rollout_path,
-            out_of_band_elicitation_count: Mutex::new(0),
         }
     }
 
@@ -129,7 +81,6 @@ impl CodexThread {
         self.codex.submit(op).await
     }
 
-    /// Returns the session telemetry handle for thread-scoped production instrumentation.
     pub fn session_telemetry(&self) -> SessionTelemetry {
         self.codex.session.services.session_telemetry.clone()
     }
@@ -138,24 +89,9 @@ impl CodexThread {
         self.codex.shutdown_and_wait().await
     }
 
-    /// Wait until the underlying session loop has terminated.
     pub async fn wait_until_terminated(&self) {
         self.codex.session_loop_termination.clone().await;
     }
-
-    pub async fn apply_goal_resume_runtime_effects(&self) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    pub async fn continue_active_goal_if_idle(&self) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    pub async fn prepare_external_goal_mutation(&self) {}
-
-    pub async fn apply_external_goal_set<T>(&self, _external_set: T) {}
-
-    pub async fn apply_external_goal_clear(&self) {}
 
     #[doc(hidden)]
     pub async fn ensure_rollout_materialized(&self) {
@@ -175,11 +111,6 @@ impl CodexThread {
         self.codex.submit_with_trace(op, trace).await
     }
 
-    /// Persist whether this thread is eligible for future memory generation.
-    pub async fn set_thread_memory_mode(&self, mode: ThreadMemoryMode) -> anyhow::Result<()> {
-        self.codex.set_thread_memory_mode(mode).await
-    }
-
     pub async fn steer_input(
         &self,
         input: Vec<UserInput>,
@@ -195,18 +126,12 @@ impl CodexThread {
         &self,
         app_server_client_name: Option<String>,
         app_server_client_version: Option<String>,
-        mcp_elicitations_auto_deny: bool,
     ) -> ConstraintResult<()> {
         self.codex
-            .set_app_server_client_info(
-                app_server_client_name,
-                app_server_client_version,
-                mcp_elicitations_auto_deny,
-            )
+            .set_app_server_client_info(app_server_client_name, app_server_client_version)
             .await
     }
 
-    /// Preview persistent thread settings overrides without committing them.
     pub async fn preview_thread_settings_overrides(
         &self,
         overrides: CodexThreadSettingsOverrides,
@@ -222,49 +147,20 @@ impl CodexThread {
         let CodexThreadSettingsOverrides {
             cwd,
             workspace_roots,
-            profile_workspace_roots,
-            approval_policy,
-            approvals_reviewer,
-            sandbox_policy,
-            permission_profile,
-            active_permission_profile,
-            windows_sandbox_level,
-            model,
-            effort,
+            model: _,
+            effort: _,
             summary,
             service_tier,
-            collaboration_mode,
-            personality,
         } = overrides;
-        let collaboration_mode = if let Some(collaboration_mode) = collaboration_mode {
-            collaboration_mode
-        } else {
-            self.codex
-                .session
-                .collaboration_mode()
-                .await
-                .with_updates(model, effort, /*developer_instructions*/ None)
-        };
-
         SessionSettingsUpdate {
             cwd,
             workspace_roots,
-            profile_workspace_roots,
-            approval_policy,
-            approvals_reviewer,
-            sandbox_policy,
-            permission_profile,
-            active_permission_profile,
-            windows_sandbox_level,
-            collaboration_mode: Some(collaboration_mode),
             reasoning_summary: summary,
             service_tier,
-            personality,
             ..Default::default()
         }
     }
 
-    /// Use sparingly: this is intended to be removed soon.
     pub async fn submit_with_id(&self, sub: Submission) -> CodexResult<()> {
         self.codex.submit_with_id(sub).await
     }
@@ -273,26 +169,10 @@ impl CodexThread {
         self.codex.next_event().await
     }
 
-    pub async fn agent_status(&self) -> AgentStatus {
-        self.codex.agent_status().await
-    }
-
-    pub(crate) fn subscribe_status(&self) -> watch::Receiver<AgentStatus> {
-        self.codex.agent_status.clone()
-    }
-
-    /// Returns the complete token usage snapshot currently cached for this thread.
-    ///
-    /// This accessor is intentionally narrower than direct session access: it lets
-    /// app-server lifecycle paths replay restored usage after resume or fork without
-    /// exposing broader session mutation authority. A caller that only reads
-    /// `total_token_usage` would drop last-turn usage and make the v2
-    /// `thread/tokenUsage/updated` payload incomplete.
     pub async fn token_usage_info(&self) -> Option<TokenUsageInfo> {
         self.codex.session.token_usage_info().await
     }
 
-    /// Records a user-role session-prefix message without creating a new user turn boundary.
     pub(crate) async fn inject_user_message_without_turn(&self, message: String) {
         let message = ResponseItem::Message {
             id: None,
@@ -322,11 +202,6 @@ impl CodexThread {
         }
     }
 
-    /// Append a prebuilt message to the thread history without treating it as a user turn.
-    ///
-    /// If the thread already has an active turn, the message is queued as pending input for that
-    /// turn. Otherwise it is queued at session scope and a regular turn is started so the agent
-    /// can consume that pending input through the normal turn pipeline.
     #[cfg(test)]
     pub(crate) async fn append_message(&self, message: ResponseItem) -> CodexResult<String> {
         let submission_id = uuid::Uuid::new_v4().to_string();
@@ -348,7 +223,6 @@ impl CodexThread {
         Ok(submission_id)
     }
 
-    /// Append raw Responses API items to the thread's model-visible history.
     pub async fn inject_response_items(&self, items: Vec<ResponseItem>) -> CodexResult<()> {
         if items.is_empty() {
             return Err(CodexErr::InvalidRequest(
@@ -381,14 +255,6 @@ impl CodexThread {
 
     pub(crate) fn is_running(&self) -> bool {
         !self.codex.tx_sub.is_closed()
-    }
-
-    pub async fn guardian_trunk_rollout_path(&self) -> Option<PathBuf> {
-        self.codex
-            .session
-            .guardian_review_session
-            .trunk_rollout_path()
-            .await
     }
 
     pub async fn load_history(
@@ -449,9 +315,6 @@ impl CodexThread {
         self.codex.session.get_config().await
     }
 
-    /// Refresh the thread's layer-backed user config state from a caller-supplied
-    /// config snapshot. Thread-scoped layers and session-static settings remain
-    /// unchanged.
     pub async fn refresh_runtime_config(&self, next_config: crate::config::Config) {
         self.codex.session.refresh_runtime_config(next_config).await;
     }
@@ -460,76 +323,8 @@ impl CodexThread {
         self.codex.thread_environment_selections().await
     }
 
-    pub async fn read_mcp_resource(
-        &self,
-        server: &str,
-        uri: &str,
-    ) -> anyhow::Result<serde_json::Value> {
-        let result = self
-            .codex
-            .session
-            .read_resource(
-                server,
-                ReadResourceRequestParams {
-                    meta: None,
-                    uri: uri.to_string(),
-                },
-            )
-            .await?;
-
-        Ok(serde_json::to_value(result)?)
-    }
-
-    pub async fn call_mcp_tool(
-        &self,
-        server: &str,
-        tool: &str,
-        arguments: Option<serde_json::Value>,
-        meta: Option<serde_json::Value>,
-    ) -> anyhow::Result<CallToolResult> {
-        self.codex
-            .session
-            .call_tool(server, tool, arguments, meta)
-            .await
-    }
-
     pub fn enabled(&self, feature: Feature) -> bool {
         self.codex.enabled(feature)
-    }
-
-    pub async fn increment_out_of_band_elicitation_count(&self) -> CodexResult<u64> {
-        let mut guard = self.out_of_band_elicitation_count.lock().await;
-        let was_zero = *guard == 0;
-        *guard = guard.checked_add(1).ok_or_else(|| {
-            CodexErr::Fatal("out-of-band elicitation count overflowed".to_string())
-        })?;
-
-        if was_zero {
-            self.codex
-                .session
-                .set_out_of_band_elicitation_pause_state(/*paused*/ true);
-        }
-
-        Ok(*guard)
-    }
-
-    pub async fn decrement_out_of_band_elicitation_count(&self) -> CodexResult<u64> {
-        let mut guard = self.out_of_band_elicitation_count.lock().await;
-        if *guard == 0 {
-            return Err(CodexErr::InvalidRequest(
-                "out-of-band elicitation count is already zero".to_string(),
-            ));
-        }
-
-        *guard -= 1;
-        let now_zero = *guard == 0;
-        if now_zero {
-            self.codex
-                .session
-                .set_out_of_band_elicitation_pause_state(/*paused*/ false);
-        }
-
-        Ok(*guard)
     }
 }
 

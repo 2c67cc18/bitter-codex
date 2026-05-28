@@ -11,7 +11,6 @@ use base64::Engine;
 use codex_config::types::AuthCredentialsStoreMode;
 use codex_login::ServerOptions;
 use codex_login::run_login_server;
-use core_test_support::skip_if_no_network;
 use pretty_assertions::assert_eq;
 use tempfile::tempdir;
 use url::Url;
@@ -22,10 +21,7 @@ const WORKSPACE_ID_ALLOWED: &str = "123e4567-e89b-42d3-a456-426614174000";
 const WORKSPACE_ID_SECOND_ALLOWED: &str = "123e4567-e89b-42d3-a456-426614174001";
 const WORKSPACE_ID_DISALLOWED: &str = "123e4567-e89b-42d3-a456-426614174002";
 
-// See spawn.rs for details
-
 fn start_mock_issuer(chatgpt_account_id: &str) -> (SocketAddr, thread::JoinHandle<()>) {
-    // Bind to a random available port
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tiny_http::Server::from_listener(listener, None).unwrap();
@@ -35,10 +31,9 @@ fn start_mock_issuer(chatgpt_account_id: &str) -> (SocketAddr, thread::JoinHandl
         while let Ok(mut req) = server.recv() {
             let url = req.url().to_string();
             if url.starts_with("/oauth/token") {
-                // Read body
                 let mut body = String::new();
                 let _ = req.as_reader().read_to_string(&mut body);
-                // Build minimal JWT with plan=pro
+
                 #[derive(serde::Serialize)]
                 struct Header {
                     alg: &'static str,
@@ -89,8 +84,6 @@ fn start_mock_issuer(chatgpt_account_id: &str) -> (SocketAddr, thread::JoinHandl
 
 #[tokio::test]
 async fn end_to_end_login_flow_persists_auth_json() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-
     let chatgpt_account_id = "12345678-0000-0000-0000-000000000000";
     let (issuer_addr, issuer_handle) = start_mock_issuer(chatgpt_account_id);
     let issuer = format!("http://{}:{}", issuer_addr.ip(), issuer_addr.port());
@@ -98,7 +91,6 @@ async fn end_to_end_login_flow_persists_auth_json() -> Result<()> {
     let tmp = tempdir()?;
     let codex_home = tmp.path().to_path_buf();
 
-    // Seed auth.json with stale API key + tokens that should be overwritten.
     let stale_auth = serde_json::json!({
         "OPENAI_API_KEY": "sk-stale",
         "tokens": {
@@ -115,7 +107,6 @@ async fn end_to_end_login_flow_persists_auth_json() -> Result<()> {
 
     let state = "test_state_123".to_string();
 
-    // Run server in background
     let server_home = codex_home.clone();
 
     let opts = ServerOptions {
@@ -138,7 +129,6 @@ async fn end_to_end_login_flow_persists_auth_json() -> Result<()> {
     );
     let login_port = server.actual_port;
 
-    // Simulate browser callback, and follow redirect to /success
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::limited(5))
         .build()?;
@@ -146,39 +136,31 @@ async fn end_to_end_login_flow_persists_auth_json() -> Result<()> {
     let resp = client.get(&url).send().await?;
     assert!(resp.status().is_success());
 
-    // Wait for server shutdown
     server.block_until_done().await?;
 
-    // Validate auth.json
     let auth_path = codex_home.join("auth.json");
     let data = std::fs::read_to_string(&auth_path)?;
     let json: serde_json::Value = serde_json::from_str(&data)?;
-    // The following assert is here because of the old oauth flow that exchanges tokens for an
-    // API key. See obtain_api_key in server.rs for details. Once we remove this old mechanism
-    // from the code, this test should be updated to expect that the API key is no longer present.
+
     assert_eq!(json["OPENAI_API_KEY"], "access-123");
     assert_eq!(json["tokens"]["access_token"], "access-123");
     assert_eq!(json["tokens"]["refresh_token"], "refresh-123");
     assert_eq!(json["tokens"]["account_id"], chatgpt_account_id);
 
-    // Stop mock issuer
     drop(issuer_handle);
     Ok(())
 }
 
 #[tokio::test]
 async fn creates_missing_codex_home_dir() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-
     let (issuer_addr, _issuer_handle) = start_mock_issuer(WORKSPACE_ID_ALLOWED);
     let issuer = format!("http://{}:{}", issuer_addr.ip(), issuer_addr.port());
 
     let tmp = tempdir()?;
-    let codex_home = tmp.path().join("missing-subdir"); // does not exist
+    let codex_home = tmp.path().join("missing-subdir");
 
     let state = "state2".to_string();
 
-    // Run server in background
     let server_home = codex_home.clone();
     let opts = ServerOptions {
         codex_home: server_home,
@@ -211,8 +193,6 @@ async fn creates_missing_codex_home_dir() -> Result<()> {
 
 #[tokio::test]
 async fn login_server_includes_forced_workspaces_as_one_query_param() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-
     let (issuer_addr, _issuer_handle) = start_mock_issuer(WORKSPACE_ID_ALLOWED);
     let issuer = format!("http://{}:{}", issuer_addr.ip(), issuer_addr.port());
 
@@ -252,8 +232,6 @@ async fn login_server_includes_forced_workspaces_as_one_query_param() -> Result<
 
 #[tokio::test]
 async fn forced_chatgpt_workspace_id_mismatch_blocks_login() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-
     let (issuer_addr, _issuer_handle) = start_mock_issuer(WORKSPACE_ID_DISALLOWED);
     let issuer = format!("http://{}:{}", issuer_addr.ip(), issuer_addr.port());
 
@@ -312,8 +290,6 @@ async fn forced_chatgpt_workspace_id_mismatch_blocks_login() -> Result<()> {
 
 #[tokio::test]
 async fn oauth_access_denied_missing_entitlement_blocks_login_with_clear_error() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-
     let (issuer_addr, _issuer_handle) = start_mock_issuer(WORKSPACE_ID_ALLOWED);
     let issuer = format!("http://{}:{}", issuer_addr.ip(), issuer_addr.port());
 
@@ -380,8 +356,6 @@ async fn oauth_access_denied_missing_entitlement_blocks_login_with_clear_error()
 
 #[tokio::test]
 async fn oauth_access_denied_unknown_reason_uses_generic_error_page() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-
     let (issuer_addr, _issuer_handle) = start_mock_issuer(WORKSPACE_ID_ALLOWED);
     let issuer = format!("http://{}:{}", issuer_addr.ip(), issuer_addr.port());
 
@@ -460,8 +434,6 @@ async fn oauth_access_denied_unknown_reason_uses_generic_error_page() -> Result<
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn falls_back_to_registered_fallback_port_when_default_port_is_in_use() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-
     match TcpListener::bind(("127.0.0.1", FALLBACK_LOGIN_PORT)) {
         Ok(listener) => drop(listener),
         Err(err) if err.kind() == io::ErrorKind::AddrInUse => {
@@ -497,7 +469,7 @@ async fn falls_back_to_registered_fallback_port_when_default_port_is_in_use() ->
     let mut opts = ServerOptions::new(
         tmp.path().to_path_buf(),
         codex_login::CLIENT_ID.to_string(),
-        /*forced_chatgpt_workspace_id*/ None,
+        None,
         AuthCredentialsStoreMode::File,
     );
     opts.issuer = issuer;
@@ -526,8 +498,6 @@ async fn falls_back_to_registered_fallback_port_when_default_port_is_in_use() ->
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cancels_previous_login_server_when_port_is_in_use() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-
     let (issuer_addr, _issuer_handle) = start_mock_issuer(WORKSPACE_ID_ALLOWED);
     let issuer = format!("http://{}:{}", issuer_addr.ip(), issuer_addr.port());
 

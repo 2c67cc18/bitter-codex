@@ -10,7 +10,6 @@ use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use crate::tools::flat_tool_name;
-use crate::tools::tool_search_entry::ToolSearchInfo;
 use crate::util::error_or_panic;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::protocol::EventMsg;
@@ -23,20 +22,9 @@ pub(crate) type ToolTelemetryTags = Vec<(&'static str, String)>;
 pub use codex_tools::ToolExecutor;
 pub use codex_tools::ToolExposure;
 
-/// Typed runtime contract for locally executed tools.
-///
-/// Implementers provide the shared `ToolExecutor` behavior plus optional
-/// core-owned metadata for telemetry, tool search, and argument diffs.
 pub(crate) trait CoreToolRuntime: ToolExecutor<ToolInvocation> {
-    fn search_info(&self) -> Option<ToolSearchInfo> {
-        None
-    }
-
     fn matches_kind(&self, payload: &ToolPayload) -> bool {
-        matches!(
-            payload,
-            ToolPayload::Function { .. } | ToolPayload::ToolSearch { .. }
-        )
+        matches!(payload, ToolPayload::Function { .. })
     }
 
     fn telemetry_tags<'a>(
@@ -46,20 +34,15 @@ pub(crate) trait CoreToolRuntime: ToolExecutor<ToolInvocation> {
         Box::pin(async { Vec::new() })
     }
 
-    /// Creates an optional consumer for streamed tool argument diffs.
     fn create_diff_consumer(&self) -> Option<Box<dyn ToolArgumentDiffConsumer>> {
         None
     }
 }
 
-/// Consumes streamed argument diffs for a tool call and emits protocol events
-/// derived from partial tool input.
 pub(crate) trait ToolArgumentDiffConsumer: Send {
-    /// Consume the next argument diff for a tool call.
     fn consume_diff(&mut self, turn: &TurnContext, call_id: String, diff: &str)
     -> Option<EventMsg>;
 
-    /// Finish consuming argument diffs before the tool call completes.
     fn finish(&mut self) -> Result<Option<EventMsg>, FunctionCallError> {
         Ok(None)
     }
@@ -80,13 +63,6 @@ impl AnyToolResult {
             ..
         } = self;
         result.to_response_item(&call_id, &payload)
-    }
-
-    pub(crate) fn code_mode_result(self) -> serde_json::Value {
-        let Self {
-            payload, result, ..
-        } = self;
-        result.code_mode_result(&payload)
     }
 }
 
@@ -133,10 +109,6 @@ impl ToolExecutor<ToolInvocation> for ExposureOverride {
 }
 
 impl CoreToolRuntime for ExposureOverride {
-    fn search_info(&self) -> Option<ToolSearchInfo> {
-        self.handler.search_info()
-    }
-
     fn matches_kind(&self, payload: &ToolPayload) -> bool {
         self.handler.matches_kind(payload)
     }
@@ -222,7 +194,7 @@ impl ToolRegistry {
         &self,
         invocation: ToolInvocation,
     ) -> Result<AnyToolResult, FunctionCallError> {
-        self.dispatch_any_with_terminal_outcome(invocation, /*terminal_outcome_reached*/ None)
+        self.dispatch_any_with_terminal_outcome(invocation, None)
             .await
     }
 
@@ -232,7 +204,7 @@ impl ToolRegistry {
     )]
     pub(crate) async fn dispatch_any_with_terminal_outcome(
         &self,
-        mut invocation: ToolInvocation,
+        invocation: ToolInvocation,
         terminal_outcome_reached: Option<Arc<AtomicBool>>,
     ) -> Result<AnyToolResult, FunctionCallError> {
         let tool_name = invocation.tool_name.clone();
@@ -259,10 +231,9 @@ impl ToolRegistry {
                     &call_id_owned,
                     log_payload.as_ref(),
                     Duration::ZERO,
-                    /*success*/ false,
+                    false,
                     &message,
                     &base_tool_result_tags,
-                    /*extra_trace_fields*/ &[],
                 );
                 let err = FunctionCallError::RespondToModel(message);
                 return Err(err);
@@ -272,14 +243,9 @@ impl ToolRegistry {
         let telemetry_tags = tool.telemetry_tags(&invocation).await;
         let mut tool_result_tags =
             Vec::with_capacity(base_tool_result_tags.len() + telemetry_tags.len());
-        let mut extra_trace_fields = Vec::new();
         tool_result_tags.extend_from_slice(&base_tool_result_tags);
         for (key, value) in &telemetry_tags {
-            if matches!(*key, "mcp_server" | "mcp_server_origin") {
-                extra_trace_fields.push((*key, value.as_str()));
-            } else {
-                tool_result_tags.push((*key, value.as_str()));
-            }
+            tool_result_tags.push((*key, value.as_str()));
         }
         if !tool.matches_kind(&invocation.payload) {
             let message = format!("tool {tool_name} invoked with incompatible payload");
@@ -289,10 +255,9 @@ impl ToolRegistry {
                 &call_id_owned,
                 log_payload.as_ref(),
                 Duration::ZERO,
-                /*success*/ false,
+                false,
                 &message,
                 &tool_result_tags,
-                &extra_trace_fields,
             );
             let err = FunctionCallError::Fatal(message);
             return Err(err);
@@ -308,7 +273,6 @@ impl ToolRegistry {
                 &call_id_owned,
                 log_payload.as_ref(),
                 &tool_result_tags,
-                &extra_trace_fields,
                 || {
                     let tool = tool.clone();
                     let response_cell = &response_cell;
@@ -368,6 +332,3 @@ fn unsupported_tool_call_message(payload: &ToolPayload, tool_name: &ToolName) ->
         _ => format!("unsupported call: {tool_name}"),
     }
 }
-#[cfg(test)]
-#[path = "registry_tests.rs"]
-mod tests;

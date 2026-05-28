@@ -1,15 +1,3 @@
-/*
-This module implements the remote app-server client transport.
-
-It owns the remote connection lifecycle, including the initialize/initialized
-handshake, JSON-RPC request/response routing, server-request resolution, and
-notification streaming. Remote connections always carry WebSocket frames, over
-either TCP WebSocket URLs or local Unix sockets. The rest of the crate uses the
-same `AppServerEvent` surface for both in-process and remote transports, so
-callers such as the TUI can switch between them without changing their
-higher-level session logic.
-*/
-
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::io::Error as IoError;
@@ -39,45 +27,31 @@ use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
 use codex_uds::UnixStream;
 use codex_utils_absolute_path::AbsolutePathBuf;
-use codex_utils_rustls_provider::ensure_rustls_crypto_provider;
 use futures::SinkExt;
 use futures::StreamExt;
 use serde::de::DeserializeOwned;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
-use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
-use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::client_async_with_config;
-use tokio_tungstenite::connect_async_with_config;
 use tokio_tungstenite::tungstenite::Error as TungsteniteError;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::tungstenite::http::HeaderValue;
-use tokio_tungstenite::tungstenite::http::header::AUTHORIZATION;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tracing::warn;
-use url::Url;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(10);
 const REMOTE_APP_SERVER_MAX_WEBSOCKET_MESSAGE_SIZE: usize = 128 << 20;
-// Tungstenite still needs an HTTP request URI for the WebSocket handshake;
-// the bytes travel over the Unix socket, not TCP.
+
 const UDS_WEBSOCKET_HANDSHAKE_URL: &str = "ws://localhost/rpc";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoteAppServerEndpoint {
-    WebSocket {
-        websocket_url: String,
-        auth_token: Option<String>,
-    },
-    UnixSocket {
-        socket_path: AbsolutePathBuf,
-    },
+    UnixSocket { socket_path: AbsolutePathBuf },
 }
 
 #[derive(Debug, Clone)]
@@ -85,15 +59,12 @@ pub struct RemoteAppServerConnectArgs {
     pub endpoint: RemoteAppServerEndpoint,
     pub client_name: String,
     pub client_version: String,
-    pub experimental_api: bool,
     pub opt_out_notification_methods: Vec<String>,
     pub channel_capacity: usize,
 }
 impl RemoteAppServerConnectArgs {
     fn initialize_params(&self) -> InitializeParams {
         let capabilities = InitializeCapabilities {
-            experimental_api: self.experimental_api,
-            request_attestation: false,
             opt_out_notification_methods: if self.opt_out_notification_methods.is_empty() {
                 None
             } else {
@@ -109,16 +80,6 @@ impl RemoteAppServerConnectArgs {
             },
             capabilities: Some(capabilities),
         }
-    }
-}
-
-pub(crate) fn websocket_url_supports_auth_token(url: &Url) -> bool {
-    match (url.scheme(), url.host()) {
-        ("wss", Some(_)) => true,
-        ("ws", Some(url::Host::Domain(domain))) => domain.eq_ignore_ascii_case("localhost"),
-        ("ws", Some(url::Host::Ipv4(addr))) => addr.is_loopback(),
-        ("ws", Some(url::Host::Ipv6(addr))) => addr.is_loopback(),
-        _ => false,
     }
 }
 
@@ -163,15 +124,6 @@ impl RemoteAppServerClient {
         let channel_capacity = args.channel_capacity.max(1);
         let initialize_params = args.initialize_params();
         match args.endpoint {
-            RemoteAppServerEndpoint::WebSocket {
-                websocket_url,
-                auth_token,
-            } => {
-                let (endpoint, stream) =
-                    connect_websocket_endpoint(websocket_url, auth_token).await?;
-                Self::connect_with_stream(channel_capacity, endpoint, stream, initialize_params)
-                    .await
-            }
             RemoteAppServerEndpoint::UnixSocket { socket_path } => {
                 let (endpoint, stream) = connect_unix_socket_endpoint(socket_path).await?;
                 Self::connect_with_stream(channel_capacity, endpoint, stream, initialize_params)
@@ -670,69 +622,6 @@ impl RemoteAppServerRequestHandle {
         serde_json::from_value(result)
             .map_err(|source| TypedRequestError::Deserialize { method, source })
     }
-}
-
-async fn connect_websocket_endpoint(
-    websocket_url: String,
-    auth_token: Option<String>,
-) -> IoResult<(String, WebSocketStream<MaybeTlsStream<TcpStream>>)> {
-    let url = Url::parse(&websocket_url).map_err(|err| {
-        IoError::new(
-            ErrorKind::InvalidInput,
-            format!("invalid websocket URL `{websocket_url}`: {err}"),
-        )
-    })?;
-    if auth_token.is_some() && !websocket_url_supports_auth_token(&url) {
-        return Err(IoError::new(
-            ErrorKind::InvalidInput,
-            format!(
-                "remote auth tokens require `wss://` or loopback `ws://` URLs; got `{websocket_url}`"
-            ),
-        ));
-    }
-
-    let mut request = url.as_str().into_client_request().map_err(|err| {
-        IoError::new(
-            ErrorKind::InvalidInput,
-            format!("invalid websocket URL `{websocket_url}`: {err}"),
-        )
-    })?;
-    if let Some(auth_token) = auth_token.as_deref() {
-        let header_value =
-            HeaderValue::from_str(&format!("Bearer {auth_token}")).map_err(|err| {
-                IoError::new(
-                    ErrorKind::InvalidInput,
-                    format!("invalid remote authorization header value: {err}"),
-                )
-            })?;
-        request.headers_mut().insert(AUTHORIZATION, header_value);
-    }
-
-    ensure_rustls_crypto_provider();
-    let websocket_config = remote_websocket_config();
-    let stream = timeout(
-        CONNECT_TIMEOUT,
-        connect_async_with_config(
-            request,
-            Some(websocket_config),
-            /*disable_nagle*/ false,
-        ),
-    )
-    .await
-    .map_err(|_| {
-        IoError::new(
-            ErrorKind::TimedOut,
-            format!("timed out connecting to remote app server at `{websocket_url}`"),
-        )
-    })?
-    .map(|(stream, _response)| stream)
-    .map_err(|err| {
-        IoError::other(format!(
-            "failed to connect to remote app server at `{websocket_url}`: {err}"
-        ))
-    })?;
-
-    Ok((websocket_url, stream))
 }
 
 async fn connect_unix_socket_endpoint(

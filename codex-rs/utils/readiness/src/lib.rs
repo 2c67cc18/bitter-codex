@@ -1,5 +1,3 @@
-//! Readiness flag with token-based authorization and async waiting (Tokio).
-
 use std::collections::HashSet;
 use std::fmt;
 use std::sync::atomic::AtomicBool;
@@ -11,7 +9,6 @@ use tokio::sync::Mutex;
 use tokio::sync::watch;
 use tokio::time;
 
-/// Opaque subscription token returned by `subscribe()`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Token(i32);
 
@@ -19,45 +16,31 @@ const LOCK_TIMEOUT: Duration = Duration::from_millis(1000);
 
 #[async_trait::async_trait]
 pub trait Readiness: Send + Sync + 'static {
-    /// Returns true if the flag is currently marked ready. At least one token needs to be marked
-    /// as ready before.
-    /// `true` is not reversible.
     fn is_ready(&self) -> bool;
 
-    /// Subscribe to readiness and receive an authorization token.
-    ///
-    /// If the flag is already ready, returns `FlagAlreadyReady`.
     async fn subscribe(&self) -> Result<Token, errors::ReadinessError>;
 
-    /// Attempt to mark the flag ready, validated by the provided token.
-    ///
-    /// Returns `true` iff:
-    /// - `token` is currently subscribed, and
-    /// - the flag was not already ready.
     async fn mark_ready(&self, token: Token) -> Result<bool, errors::ReadinessError>;
 
-    /// Asynchronously wait until the flag becomes ready.
     async fn wait_ready(&self);
 }
 
 pub struct ReadinessFlag {
-    /// Atomic for cheap reads.
     ready: AtomicBool,
-    /// Used to generate the next i32 token.
+
     next_id: AtomicI32,
-    /// Set of active subscriptions.
+
     tokens: Mutex<HashSet<Token>>,
-    /// Broadcasts readiness to async waiters.
+
     tx: watch::Sender<bool>,
 }
 
 impl ReadinessFlag {
-    /// Create a new, not-yet-ready flag.
     pub fn new() -> Self {
         let (tx, _rx) = watch::channel(false);
         Self {
             ready: AtomicBool::new(false),
-            next_id: AtomicI32::new(1), // Reserve 0.
+            next_id: AtomicI32::new(1),
             tokens: Mutex::new(HashSet::new()),
             tx,
         }
@@ -118,9 +101,6 @@ impl Readiness for ReadinessFlag {
             return Err(errors::ReadinessError::FlagAlreadyReady);
         }
 
-        // Recheck readiness while holding the lock so mark_ready can't flip the flag between the
-        // check above and inserting the token. Also ensure the token is non-zero and unique in
-        // the presence of `i32` wrap-around.
         let token = self
             .with_tokens(|tokens| {
                 if self.load_ready() {
@@ -144,23 +124,23 @@ impl Readiness for ReadinessFlag {
             return Ok(false);
         }
         if token.0 == 0 {
-            return Ok(false); // Never authorize.
+            return Ok(false);
         }
 
         let marked = self
             .with_tokens(|set| {
                 if !set.remove(&token) {
-                    return false; // invalid or already used
+                    return false;
                 }
                 self.ready.store(true, Ordering::Release);
-                set.clear(); // no further tokens needed once ready
+                set.clear();
                 true
             })
             .await?;
         if !marked {
             return Ok(false);
         }
-        // Best-effort broadcast; ignore error if there are no receivers.
+
         let _ = self.tx.send(true);
         Ok(true)
     }
@@ -170,11 +150,11 @@ impl Readiness for ReadinessFlag {
             return;
         }
         let mut rx = self.tx.subscribe();
-        // Fast-path check before awaiting.
+
         if *rx.borrow() {
             return;
         }
-        // Await changes until true is observed.
+
         while rx.changed().await.is_ok() {
             if *rx.borrow() {
                 break;

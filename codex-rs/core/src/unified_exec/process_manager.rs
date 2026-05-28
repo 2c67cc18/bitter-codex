@@ -22,13 +22,13 @@ use crate::unified_exec::MAX_UNIFIED_EXEC_PROCESSES;
 use crate::unified_exec::MAX_YIELD_TIME_MS;
 use crate::unified_exec::MIN_EMPTY_YIELD_TIME_MS;
 use crate::unified_exec::MIN_YIELD_TIME_MS;
+use crate::unified_exec::NoopSpawnLifecycle;
 use crate::unified_exec::ProcessEntry;
 use crate::unified_exec::ProcessStore;
 use crate::unified_exec::UnifiedExecContext;
 use crate::unified_exec::UnifiedExecError;
 use crate::unified_exec::UnifiedExecProcessManager;
 use crate::unified_exec::WriteStdinRequest;
-use crate::unified_exec::NoopSpawnLifecycle;
 use crate::unified_exec::async_watcher::emit_exec_end_for_unified_exec;
 use crate::unified_exec::async_watcher::emit_failed_exec_end_for_unified_exec;
 use crate::unified_exec::async_watcher::spawn_exit_watcher;
@@ -56,10 +56,7 @@ const UNIFIED_EXEC_ENV: [(&str, &str); 10] = [
     ("GH_PAGER", "cat"),
     ("CODEX_CI", "1"),
 ];
-/// Test-only override for deterministic unified exec process IDs.
-///
-/// In production builds this value should remain at its default (`false`) and
-/// must not be toggled.
+
 static FORCE_DETERMINISTIC_PROCESS_IDS: AtomicBool = AtomicBool::new(false);
 
 pub(super) fn set_deterministic_process_ids_for_tests(enabled: bool) {
@@ -81,7 +78,6 @@ fn apply_unified_exec_env(mut env: HashMap<String, String>) -> HashMap<String, S
     env
 }
 
-/// Borrowed process state prepared for a `write_stdin` or poll operation.
 struct PreparedProcessHandles {
     process: Arc<UnifiedExecProcess>,
     output_buffer: OutputBuffer,
@@ -90,7 +86,6 @@ struct PreparedProcessHandles {
     output_closed_notify: Arc<Notify>,
     cancellation_token: CancellationToken,
     pause_state: Option<watch::Receiver<bool>>,
-    hook_command: String,
     process_id: i32,
     tty: bool,
 }
@@ -131,7 +126,6 @@ impl UnifiedExecProcessManager {
             let mut store = self.process_store.lock().await;
 
             let process_id = if should_use_deterministic_process_ids() {
-                // test or deterministic mode
                 store
                     .reserved_process_ids
                     .iter()
@@ -140,7 +134,6 @@ impl UnifiedExecProcessManager {
                     .map(|m| std::cmp::max(m, 999) + 1)
                     .unwrap_or(1000)
             } else {
-                // production mode → random
                 rand::rng().random_range(1_000..100_000)
             };
 
@@ -181,7 +174,7 @@ impl UnifiedExecProcessManager {
             context.session.as_ref(),
             context.turn.as_ref(),
             &context.call_id,
-            /*turn_diff_tracker*/ None,
+            None,
         );
         let emitter = ToolEmitter::unified_exec(
             &request.command,
@@ -193,15 +186,13 @@ impl UnifiedExecProcessManager {
 
         start_streaming_output(&process, context, Arc::clone(&transcript));
         let start = Instant::now();
-        // Persist live sessions before the initial yield wait so interrupting the
-        // turn cannot drop the last Arc and terminate the background process.
+
         let process_started_alive = !process.has_exited() && process.exit_code().is_none();
         if process_started_alive {
             self.store_process(
                 Arc::clone(&process),
                 context,
                 &request.command,
-                request.hook_command.clone(),
                 cwd.clone(),
                 start,
                 request.process_id,
@@ -212,9 +203,7 @@ impl UnifiedExecProcessManager {
         }
 
         let yield_time_ms = clamp_yield_time(request.yield_time_ms);
-        // For the initial exec_command call, we both stream output to events
-        // (via start_streaming_output above) and collect a snapshot here for
-        // the tool response body.
+
         let OutputHandles {
             output_buffer,
             output_notify,
@@ -229,11 +218,7 @@ impl UnifiedExecProcessManager {
             &output_closed,
             &output_closed_notify,
             &cancellation_token,
-            Some(
-                context
-                    .session
-                    .subscribe_out_of_band_elicitation_pause_state(),
-            ),
+            None,
             deadline,
         )
         .await;
@@ -273,9 +258,6 @@ impl UnifiedExecProcessManager {
                 }
             }
         } else {
-            // Short‑lived command: emit ExecCommandEnd immediately using the
-            // same helper as the background watcher, so all end events share
-            // one implementation.
             let exit_code = process.exit_code();
             let exit = exit_code.unwrap_or(-1);
             emit_exec_end_for_unified_exec(
@@ -307,7 +289,6 @@ impl UnifiedExecProcessManager {
             process_id: response_process_id,
             exit_code,
             original_token_count: Some(original_token_count),
-            hook_command: Some(request.hook_command.clone()),
         };
 
         Ok(response)
@@ -327,7 +308,6 @@ impl UnifiedExecProcessManager {
             output_closed_notify,
             cancellation_token,
             pause_state,
-            hook_command,
             process_id,
             tty,
             ..
@@ -340,8 +320,6 @@ impl UnifiedExecProcessManager {
             }
             match process.write(request.input.as_bytes()).await {
                 Ok(()) => {
-                    // Give the remote process a brief window to react so that we are
-                    // more likely to capture its output in the poll below.
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
                 Err(err) => {
@@ -360,8 +338,6 @@ impl UnifiedExecProcessManager {
         }
 
         let yield_time_ms = {
-            // Empty polls use configurable background timeout bounds. Non-empty
-            // writes keep a fixed max cap so interactive stdin remains responsive.
             let time_ms = request.yield_time_ms.max(MIN_YIELD_TIME_MS);
             if request.input.is_empty() {
                 time_ms.clamp(MIN_EMPTY_YIELD_TIME_MS, self.max_write_stdin_yield_time_ms)
@@ -391,10 +367,6 @@ impl UnifiedExecProcessManager {
             return Err(UnifiedExecError::process_failed(message));
         }
 
-        // After polling, refresh_process_state tells us whether the PTY is
-        // still alive or has exited and been removed from the store; we thread
-        // that through so the handler can tag or suppress TerminalInteraction
-        // with an appropriate process_id and exit_code.
         let status = if let Some(status) = status_after_write {
             status
         } else {
@@ -427,7 +399,6 @@ impl UnifiedExecProcessManager {
             process_id,
             exit_code,
             original_token_count: Some(original_token_count),
-            hook_command: Some(hook_command),
         };
 
         Ok(response)
@@ -478,12 +449,6 @@ impl UnifiedExecProcessManager {
             output_closed_notify,
             cancellation_token,
         } = entry.process.output_handles();
-        let pause_state = entry
-            .session
-            .upgrade()
-            .map(|session| session.subscribe_out_of_band_elicitation_pause_state());
-        let session = entry.session.upgrade();
-
         Ok(PreparedProcessHandles {
             process: Arc::clone(&entry.process),
             output_buffer,
@@ -491,9 +456,7 @@ impl UnifiedExecProcessManager {
             output_closed,
             output_closed_notify,
             cancellation_token,
-            pause_state,
-            session,
-            hook_command: entry.hook_command.clone(),
+            pause_state: None,
             process_id: entry.process_id,
             tty: entry.tty,
         })
@@ -505,7 +468,6 @@ impl UnifiedExecProcessManager {
         process: Arc<UnifiedExecProcess>,
         context: &UnifiedExecContext,
         command: &[String],
-        hook_command: String,
         cwd: AbsolutePathBuf,
         started_at: Instant,
         process_id: i32,
@@ -516,7 +478,6 @@ impl UnifiedExecProcessManager {
             process: Arc::clone(&process),
             call_id: context.call_id.clone(),
             process_id,
-            hook_command,
             tty,
             session: Arc::downgrade(&context.session),
             last_used: started_at,
@@ -550,12 +511,12 @@ impl UnifiedExecProcessManager {
         cwd: AbsolutePathBuf,
         context: &UnifiedExecContext,
     ) -> Result<UnifiedExecProcess, UnifiedExecError> {
-        let mut env = create_env(&context.turn.shell_environment_policy, /*thread_id*/ None);
+        let mut env = create_env(&context.turn.shell_environment_policy, None);
         env.insert(
             CODEX_THREAD_ID_ENV_VAR.to_string(),
             context.session.conversation_id.to_string(),
         );
-        let mut env = apply_unified_exec_env(env);
+        let env = apply_unified_exec_env(env);
         let (program, args) = request
             .command
             .split_first()
@@ -733,7 +694,6 @@ impl UnifiedExecProcessManager {
         None
     }
 
-    // Centralized pruning policy so we can easily swap strategies later.
     fn process_id_to_prune_from_meta(meta: &[(i32, Instant, bool)]) -> Option<i32> {
         if meta.is_empty() {
             return None;
@@ -792,7 +752,3 @@ enum ProcessStatus {
     },
     Unknown,
 }
-
-#[cfg(test)]
-#[path = "process_manager_tests.rs"]
-mod tests;

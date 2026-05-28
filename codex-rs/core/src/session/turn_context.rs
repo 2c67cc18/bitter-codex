@@ -1,34 +1,15 @@
 use super::*;
-use crate::SkillLoadOutcome;
 use crate::config::GhostSnapshotConfig;
 use codex_model_provider::SharedModelProvider;
 use codex_model_provider::create_model_provider;
 use codex_protocol::SessionId;
-use codex_protocol::models::AdditionalPermissionProfile;
-use codex_protocol::protocol::ThreadSource;
+use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
 #[derive(Clone, Debug)]
-pub(crate) struct TurnSkillsContext {
-    pub(crate) outcome: Arc<SkillLoadOutcome>,
-    pub(crate) implicit_invocation_seen_skills: Arc<Mutex<HashSet<String>>>,
-}
-
-impl TurnSkillsContext {
-    pub(crate) fn new(outcome: Arc<SkillLoadOutcome>) -> Self {
-        Self {
-            outcome,
-            implicit_invocation_seen_skills: Arc::new(Mutex::new(HashSet::new())),
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
 pub(crate) struct TurnEnvironment {
-    pub(crate) environment_id: String,
-    pub(crate) environment: Arc<Environment>,
     pub(crate) cwd: AbsolutePathBuf,
     pub(crate) shell: Option<String>,
 }
@@ -36,7 +17,6 @@ pub(crate) struct TurnEnvironment {
 impl TurnEnvironment {
     pub(crate) fn selection(&self) -> TurnEnvironmentSelection {
         TurnEnvironmentSelection {
-            environment_id: self.environment_id.clone(),
             cwd: self.cwd.clone(),
         }
     }
@@ -50,8 +30,15 @@ pub(crate) struct ResolvedTurnEnvironments {
 
 impl ResolvedTurnEnvironments {
     pub(crate) fn from_selections(selections: Vec<TurnEnvironmentSelection>) -> Self {
+        let turn_environments = selections
+            .iter()
+            .map(|selection| TurnEnvironment {
+                cwd: selection.cwd.clone(),
+                shell: None,
+            })
+            .collect();
         Self {
-            turn_environments: Vec::new(),
+            turn_environments,
             selections,
         }
     }
@@ -71,12 +58,10 @@ impl ResolvedTurnEnvironments {
     }
 }
 
-/// The context needed for a single turn of the thread.
 #[derive(Debug)]
 pub struct TurnContext {
     pub(crate) sub_id: String,
     pub(crate) trace_id: Option<String>,
-    pub(crate) realtime_active: bool,
     pub config: Arc<Config>,
     pub(crate) auth_manager: Option<Arc<AuthManager>>,
     pub(crate) model_info: ModelInfo,
@@ -85,11 +70,8 @@ pub struct TurnContext {
     pub(crate) reasoning_effort: Option<ReasoningEffortConfig>,
     pub(crate) reasoning_summary: ReasoningSummaryConfig,
     pub(crate) session_source: SessionSource,
-    pub(crate) thread_source: Option<ThreadSource>,
     pub(crate) environments: ResolvedTurnEnvironments,
-    /// The session's absolute working directory. All relative paths provided
-    /// by the model as well as sandbox policies are resolved against this path
-    /// instead of `std::env::current_dir()`.
+
     #[deprecated(note = "use the selected turn environment cwd instead")]
     pub(crate) cwd: AbsolutePathBuf,
     pub(crate) current_date: Option<String>,
@@ -97,51 +79,20 @@ pub struct TurnContext {
     pub(crate) app_server_client_name: Option<String>,
     pub(crate) developer_instructions: Option<String>,
     pub(crate) compact_prompt: Option<String>,
-    pub(crate) collaboration_mode: CollaborationMode,
-    pub(crate) personality: Option<Personality>,
-    pub(crate) approval_policy: Constrained<AskForApproval>,
-    pub(crate) permission_profile: PermissionProfile,
-    pub(crate) network: Option<NetworkProxy>,
-    pub(crate) windows_sandbox_level: WindowsSandboxLevel,
     pub(crate) shell_environment_policy: ShellEnvironmentPolicy,
     pub(crate) available_models: Vec<ModelPreset>,
-    pub(crate) unified_exec_shell_mode: UnifiedExecShellMode,
-    pub(crate) goal_tools_supported: bool,
     pub features: ManagedFeatures,
     pub(crate) ghost_snapshot: GhostSnapshotConfig,
     pub(crate) final_output_json_schema: Option<Value>,
     pub(crate) codex_self_exe: Option<PathBuf>,
-    pub(crate) codex_linux_sandbox_exe: Option<PathBuf>,
     pub(crate) truncation_policy: TruncationPolicy,
     pub(crate) dynamic_tools: Vec<DynamicToolSpec>,
     pub(crate) turn_metadata_state: Arc<TurnMetadataState>,
-    pub(crate) turn_skills: TurnSkillsContext,
     pub(crate) turn_timing_state: Arc<TurnTimingState>,
     pub(crate) server_model_warning_emitted: AtomicBool,
     pub(crate) model_verification_emitted: AtomicBool,
 }
 impl TurnContext {
-    pub(crate) fn permission_profile(&self) -> PermissionProfile {
-        self.permission_profile.clone()
-    }
-
-    pub(crate) fn file_system_sandbox_policy(&self) -> FileSystemSandboxPolicy {
-        self.permission_profile.file_system_sandbox_policy()
-    }
-
-    pub(crate) fn network_sandbox_policy(&self) -> NetworkSandboxPolicy {
-        self.permission_profile.network_sandbox_policy()
-    }
-
-    pub(crate) fn sandbox_policy(&self) -> SandboxPolicy {
-        let network_sandbox_policy = self.network_sandbox_policy();
-        self.permission_profile
-            .to_legacy_sandbox_policy(#[allow(deprecated)] &self.cwd)
-            .unwrap_or_else(|_| SandboxPolicy::ReadOnly {
-                network_access: network_sandbox_policy.is_enabled(),
-            })
-    }
-
     pub(crate) fn effective_reasoning_effort(&self) -> Option<ReasoningEffortConfig> {
         if self.model_info.supports_reasoning_summaries {
             self.reasoning_effort
@@ -164,22 +115,6 @@ impl TurnContext {
             .map(|context_window| {
                 context_window.saturating_mul(effective_context_window_percent) / 100
             })
-    }
-
-    pub(crate) fn apps_enabled(&self) -> bool {
-        let uses_codex_backend = self
-            .auth_manager
-            .as_deref()
-            .is_some_and(AuthManager::current_auth_uses_codex_backend);
-        self.features.apps_enabled_for_auth(uses_codex_backend)
-    }
-
-    pub(crate) fn tool_environment_mode(&self) -> ToolEnvironmentMode {
-        ToolEnvironmentMode::from_count(self.environments.turn_environments.len())
-    }
-
-    pub(crate) fn goal_tools_enabled(&self) -> bool {
-        self.goal_tools_supported && self.features.get().enabled(Feature::Goals)
     }
 
     pub(crate) async fn with_model(
@@ -215,11 +150,6 @@ impl TurnContext {
         };
         config.model_reasoning_effort = reasoning_effort;
 
-        let collaboration_mode = self.collaboration_mode.with_updates(
-            Some(model.clone()),
-            Some(reasoning_effort),
-            /*developer_instructions*/ None,
-        );
         let features = self.features.clone();
         let available_models = models_manager
             .list_models(RefreshStrategy::OnlineIfUncached)
@@ -228,7 +158,6 @@ impl TurnContext {
         Self {
             sub_id: self.sub_id.clone(),
             trace_id: self.trace_id.clone(),
-            realtime_active: self.realtime_active,
             config: Arc::new(config),
             auth_manager: self.auth_manager.clone(),
             model_info: model_info.clone(),
@@ -240,7 +169,6 @@ impl TurnContext {
             reasoning_effort,
             reasoning_summary: self.reasoning_summary,
             session_source: self.session_source.clone(),
-            thread_source: self.thread_source,
             environments: self.environments.clone(),
             #[allow(deprecated)]
             cwd: self.cwd.clone(),
@@ -249,25 +177,15 @@ impl TurnContext {
             app_server_client_name: self.app_server_client_name.clone(),
             developer_instructions: self.developer_instructions.clone(),
             compact_prompt: self.compact_prompt.clone(),
-            collaboration_mode,
-            personality: self.personality,
-            approval_policy: self.approval_policy.clone(),
-            permission_profile: self.permission_profile.clone(),
-            network: self.network.clone(),
-            windows_sandbox_level: self.windows_sandbox_level,
             shell_environment_policy: self.shell_environment_policy.clone(),
             available_models,
-            unified_exec_shell_mode: self.unified_exec_shell_mode.clone(),
-            goal_tools_supported: self.goal_tools_supported,
             features,
             ghost_snapshot: self.ghost_snapshot.clone(),
             final_output_json_schema: self.final_output_json_schema.clone(),
             codex_self_exe: self.codex_self_exe.clone(),
-            codex_linux_sandbox_exe: self.codex_linux_sandbox_exe.clone(),
             truncation_policy,
             dynamic_tools: self.dynamic_tools.clone(),
             turn_metadata_state: self.turn_metadata_state.clone(),
-            turn_skills: self.turn_skills.clone(),
             turn_timing_state: Arc::clone(&self.turn_timing_state),
             server_model_warning_emitted: AtomicBool::new(
                 self.server_model_warning_emitted.load(Ordering::Relaxed),
@@ -285,54 +203,6 @@ impl TurnContext {
             .map_or_else(|| self.cwd.clone(), |path| self.cwd.join(path))
     }
 
-    pub(crate) fn file_system_sandbox_context(
-        &self,
-        additional_permissions: Option<AdditionalPermissionProfile>,
-        cwd: &AbsolutePathBuf,
-    ) -> FileSystemSandboxContext {
-        let (base_file_system_sandbox_policy, base_network_sandbox_policy) =
-            self.permission_profile.to_runtime_permissions();
-        let file_system_sandbox_policy = effective_file_system_sandbox_policy(
-            &base_file_system_sandbox_policy,
-            additional_permissions.as_ref(),
-        );
-        let network_sandbox_policy = effective_network_sandbox_policy(
-            base_network_sandbox_policy,
-            additional_permissions.as_ref(),
-        );
-        let permissions = PermissionProfile::from_runtime_permissions_with_enforcement(
-            self.permission_profile.enforcement(),
-            &file_system_sandbox_policy,
-            network_sandbox_policy,
-        );
-        FileSystemSandboxContext {
-            permissions,
-            cwd: Some(cwd.clone()),
-            windows_sandbox_level: self.windows_sandbox_level,
-            windows_sandbox_private_desktop: self
-                .config
-                .permissions
-                .windows_sandbox_private_desktop,
-            use_legacy_landlock: self.features.use_legacy_landlock(),
-        }
-    }
-
-    fn non_legacy_file_system_sandbox_policy(&self) -> Option<FileSystemSandboxPolicy> {
-        // Omit the derived split filesystem policy when it is equivalent to
-        // the legacy sandbox policy. This keeps turn-context payloads stable
-        // while both fields exist; once callers consume only the split policy,
-        // this comparison and the legacy projection should go away.
-        let legacy_file_system_sandbox_policy =
-            FileSystemSandboxPolicy::from_legacy_sandbox_policy_for_cwd(
-                &self.sandbox_policy(),
-                #[allow(deprecated)]
-                &self.cwd,
-            );
-        let file_system_sandbox_policy = self.file_system_sandbox_policy();
-        (file_system_sandbox_policy != legacy_file_system_sandbox_policy)
-            .then_some(file_system_sandbox_policy)
-    }
-
     pub(crate) fn compact_prompt(&self) -> &str {
         self.compact_prompt
             .as_deref()
@@ -346,39 +216,10 @@ impl TurnContext {
             cwd: self.cwd.to_path_buf(),
             current_date: self.current_date.clone(),
             timezone: self.timezone.clone(),
-            approval_policy: self.approval_policy.value(),
-            sandbox_policy: self.sandbox_policy(),
-            permission_profile: Some(self.permission_profile()),
-            network: self.turn_context_network_item(),
-            file_system_sandbox_policy: self.non_legacy_file_system_sandbox_policy(),
             model: self.model_info.slug.clone(),
-            personality: self.personality,
-            collaboration_mode: Some(self.collaboration_mode.clone()),
-            realtime_active: Some(self.realtime_active),
             effort: self.reasoning_effort,
             summary: ReasoningSummaryConfig::Auto,
         }
-    }
-
-    fn turn_context_network_item(&self) -> Option<TurnContextNetworkItem> {
-        let network = self
-            .config
-            .config_layer_stack
-            .requirements()
-            .network
-            .as_ref()?;
-        Some(TurnContextNetworkItem {
-            allowed_domains: network
-                .domains
-                .as_ref()
-                .and_then(codex_config::NetworkDomainPermissionsToml::allowed_domains)
-                .unwrap_or_default(),
-            denied_domains: network
-                .domains
-                .as_ref()
-                .and_then(codex_config::NetworkDomainPermissionsToml::denied_domains)
-                .unwrap_or_default(),
-        })
     }
 }
 
@@ -393,42 +234,17 @@ fn local_time_context() -> (String, String) {
 }
 
 impl Session {
-    /// Don't expand the number of mutated arguments on config. We are in the process of getting rid of it.
     pub(crate) fn build_per_turn_config(
         session_configuration: &SessionConfiguration,
         cwd: AbsolutePathBuf,
     ) -> Config {
-        // todo(aibrahim): store this state somewhere else so we don't need to mut config
         let config = session_configuration.original_config_do_not_use.clone();
         let mut per_turn_config = (*config).clone();
         per_turn_config.cwd = cwd;
         per_turn_config.workspace_roots = session_configuration.workspace_roots.clone();
-        per_turn_config
-            .permissions
-            .set_workspace_roots(session_configuration.workspace_roots.clone());
-        per_turn_config.model_reasoning_effort =
-            session_configuration.collaboration_mode.reasoning_effort();
+        per_turn_config.model_reasoning_effort = session_configuration.model_reasoning_effort;
         per_turn_config.model_reasoning_summary = session_configuration.model_reasoning_summary;
         per_turn_config.service_tier = session_configuration.service_tier.clone();
-        per_turn_config.personality = session_configuration.personality;
-        per_turn_config.approvals_reviewer = session_configuration.approvals_reviewer;
-        session_configuration
-            .apply_permission_profile_to_permissions(&mut per_turn_config.permissions);
-        let permission_profile = session_configuration.permission_profile();
-        let resolved_web_search_mode =
-            resolve_web_search_mode_for_turn(&per_turn_config.web_search_mode, &permission_profile);
-        if let Err(err) = per_turn_config
-            .web_search_mode
-            .set(resolved_web_search_mode)
-        {
-            let fallback_value = per_turn_config.web_search_mode.value();
-            tracing::warn!(
-                error = %err,
-                ?resolved_web_search_mode,
-                ?fallback_value,
-                "resolved web_search_mode is disallowed by requirements; keeping constrained value"
-            );
-        }
         per_turn_config.features = config.features.clone();
         per_turn_config
     }
@@ -441,25 +257,22 @@ impl Session {
         session_telemetry: &SessionTelemetry,
         provider: ModelProviderInfo,
         session_configuration: &SessionConfiguration,
-        user_shell: &shell::Shell,
-        shell_zsh_path: Option<&PathBuf>,
-        main_execve_wrapper_exe: Option<&PathBuf>,
+        _user_shell: &shell::Shell,
+        _shell_zsh_path: Option<&PathBuf>,
+        _main_execve_wrapper_exe: Option<&PathBuf>,
         per_turn_config: Config,
         model_info: ModelInfo,
         models_manager: &SharedModelsManager,
-        network: Option<NetworkProxy>,
         environments: ResolvedTurnEnvironments,
         cwd: AbsolutePathBuf,
         sub_id: String,
-        skills_outcome: Arc<SkillLoadOutcome>,
-        goal_tools_supported: bool,
     ) -> TurnContext {
-        let reasoning_effort = session_configuration.collaboration_mode.reasoning_effort();
+        let reasoning_effort = session_configuration.model_reasoning_effort;
         let reasoning_summary = session_configuration
             .model_reasoning_summary
             .unwrap_or(model_info.default_reasoning_summary);
         let session_telemetry = session_telemetry.clone().with_model(
-            session_configuration.collaboration_mode.model(),
+            session_configuration.model.as_str(),
             model_info.slug.as_str(),
         );
         let session_source = session_configuration.session_source.clone();
@@ -467,15 +280,6 @@ impl Session {
         let provider_for_context = create_model_provider(provider, auth_manager);
         let session_telemetry_for_context = session_telemetry;
         let available_models = models_manager.try_list_models().unwrap_or_default();
-        let shell_command_backend =
-            shell_command_backend_for_features(per_turn_config.features.get());
-        let unified_exec_shell_mode = UnifiedExecShellMode::for_session(
-            shell_command_backend,
-            crate::tools::tool_user_shell_type(user_shell),
-            shell_zsh_path,
-            main_execve_wrapper_exe,
-        );
-
         let mut per_turn_config = per_turn_config;
         per_turn_config.service_tier = get_service_tier(
             per_turn_config.service_tier,
@@ -486,18 +290,13 @@ impl Session {
         let turn_metadata_state = Arc::new(TurnMetadataState::new(
             session_id.to_string(),
             thread_id.to_string(),
-            session_configuration.thread_source,
             sub_id.clone(),
             cwd.clone(),
-            &session_configuration.permission_profile(),
-            session_configuration.windows_sandbox_level,
-            network.is_some(),
         ));
         let (current_date, timezone) = local_time_context();
         TurnContext {
             sub_id,
             trace_id: current_span_trace_id(),
-            realtime_active: false,
             config: per_turn_config.clone(),
             auth_manager: auth_manager_for_context,
             model_info: model_info.clone(),
@@ -506,7 +305,6 @@ impl Session {
             reasoning_effort,
             reasoning_summary,
             session_source,
-            thread_source: session_configuration.thread_source,
             environments,
             #[allow(deprecated)]
             cwd,
@@ -515,25 +313,15 @@ impl Session {
             app_server_client_name: session_configuration.app_server_client_name.clone(),
             developer_instructions: session_configuration.developer_instructions.clone(),
             compact_prompt: session_configuration.compact_prompt.clone(),
-            collaboration_mode: session_configuration.collaboration_mode.clone(),
-            personality: session_configuration.personality,
-            approval_policy: session_configuration.approval_policy.clone(),
-            permission_profile: session_configuration.permission_profile(),
-            network,
-            windows_sandbox_level: session_configuration.windows_sandbox_level,
-            shell_environment_policy: per_turn_config.permissions.shell_environment_policy.clone(),
+            shell_environment_policy: per_turn_config.shell_environment_policy.clone(),
             available_models,
-            unified_exec_shell_mode,
-            goal_tools_supported,
             features: per_turn_config.features.clone(),
             ghost_snapshot: per_turn_config.ghost_snapshot.clone(),
             final_output_json_schema: None,
             codex_self_exe: per_turn_config.codex_self_exe.clone(),
-            codex_linux_sandbox_exe: per_turn_config.codex_linux_sandbox_exe.clone(),
             truncation_policy: model_info.truncation_policy.into(),
             dynamic_tools: session_configuration.dynamic_tools.clone(),
             turn_metadata_state,
-            turn_skills: TurnSkillsContext::new(skills_outcome),
             turn_timing_state: Arc::new(TurnTimingState::default()),
             server_model_warning_emitted: AtomicBool::new(false),
             model_verification_emitted: AtomicBool::new(false),
@@ -562,18 +350,12 @@ impl Session {
                     let turn_environments =
                         self.resolve_turn_environments(&effective_environments)?;
                     let previous_cwd = state.session_configuration.cwd.clone();
-                    let previous_permission_profile =
-                        state.session_configuration.permission_profile();
-                    let next_permission_profile = next.permission_profile();
-                    let permission_profile_changed =
-                        previous_permission_profile != next_permission_profile;
                     let codex_home = next.codex_home.clone();
                     let session_source = next.session_source.clone();
                     state.session_configuration = next.clone();
                     Ok((
                         next,
                         turn_environments,
-                        permission_profile_changed,
                         previous_cwd,
                         codex_home,
                         session_source,
@@ -583,40 +365,28 @@ impl Session {
             }
         };
 
-        let (
-            session_configuration,
-            turn_environments,
-            permission_profile_changed,
-            previous_cwd,
-            codex_home,
-            session_source,
-        ) = match update_result {
-            Ok(update) => update,
-            Err(err) => {
-                let message = err.to_string();
-                self.send_event_raw(Event {
-                    id: sub_id.clone(),
-                    msg: EventMsg::Error(ErrorEvent {
-                        message: message.clone(),
-                        codex_error_info: Some(CodexErrorInfo::BadRequest),
-                    }),
-                })
-                .await;
-                return Err(CodexErr::InvalidRequest(message));
-            }
-        };
+        let (session_configuration, turn_environments, previous_cwd, codex_home, _session_source) =
+            match update_result {
+                Ok(update) => update,
+                Err(err) => {
+                    let message = err.to_string();
+                    self.send_event_raw(Event {
+                        id: sub_id.clone(),
+                        msg: EventMsg::Error(ErrorEvent {
+                            message: message.clone(),
+                            codex_error_info: Some(CodexErrorInfo::BadRequest),
+                        }),
+                    })
+                    .await;
+                    return Err(CodexErr::InvalidRequest(message));
+                }
+            };
 
         self.maybe_refresh_shell_snapshot_for_cwd(
             &previous_cwd,
             &session_configuration.cwd,
             &codex_home,
-            &session_source,
         );
-
-        if permission_profile_changed {
-            self.refresh_managed_network_proxy_for_current_permission_profile()
-                .await;
-        }
 
         Ok(self
             .new_turn_from_configuration(
@@ -632,7 +402,9 @@ impl Session {
         &self,
         environments: &[TurnEnvironmentSelection],
     ) -> CodexResult<ResolvedTurnEnvironments> {
-        Ok(ResolvedTurnEnvironments::from_selections(environments.to_vec()))
+        Ok(ResolvedTurnEnvironments::from_selections(
+            environments.to_vec(),
+        ))
     }
 
     async fn new_turn_from_configuration(
@@ -647,30 +419,14 @@ impl Session {
             .map(|turn_environment| turn_environment.cwd.clone())
             .unwrap_or_else(|| session_configuration.cwd.clone());
         let per_turn_config = Self::build_per_turn_config(&session_configuration, cwd.clone());
-        {
-            let mcp_connection_manager = self.services.mcp_connection_manager.read().await;
-            mcp_connection_manager.set_approval_policy(&session_configuration.approval_policy);
-            mcp_connection_manager
-                .set_permission_profile(session_configuration.permission_profile());
-        }
-
         let model_info = self
             .services
             .models_manager
             .get_model_info(
-                session_configuration.collaboration_mode.model(),
+                session_configuration.model.as_str(),
                 &per_turn_config.to_models_manager_config(),
             )
             .await;
-        let fs = primary_turn_environment
-            .map(|turn_environment| turn_environment.environment.get_filesystem());
-        let skills_outcome = Arc::new(
-            self.services
-                .skills_manager
-                .skills_for_config(&skills_input, fs)
-                .await,
-        );
-        let goal_tools_supported = !per_turn_config.ephemeral && self.state_db().is_some();
         let mut turn_context: TurnContext = Self::make_turn_context(
             self.thread_id(),
             self.session_id(),
@@ -684,23 +440,10 @@ impl Session {
             per_turn_config,
             model_info,
             &self.services.models_manager,
-            self.services
-                .network_proxy
-                .load_full()
-                .as_ref()
-                .and_then(|started_proxy| {
-                    Self::managed_network_proxy_active_for_permission_profile(
-                        &session_configuration.permission_profile(),
-                    )
-                    .then(|| started_proxy.proxy())
-                }),
             turn_environments,
             cwd,
             sub_id,
-            skills_outcome,
-            goal_tools_supported,
         );
-        turn_context.realtime_active = false;
 
         if let Some(final_schema) = final_output_json_schema {
             turn_context.final_output_json_schema = final_schema;
@@ -748,13 +491,8 @@ impl Session {
             }
         };
 
-        self.new_turn_from_configuration(
-            sub_id,
-            session_configuration,
-            /*final_output_json_schema*/ None,
-            turn_environments,
-        )
-        .await
+        self.new_turn_from_configuration(sub_id, session_configuration, None, turn_environments)
+            .await
     }
 
     fn overlay_runtime_cwd_on_primary_environment(

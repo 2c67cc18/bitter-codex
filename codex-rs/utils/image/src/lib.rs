@@ -15,7 +15,7 @@ use image::codecs::jpeg::JpegEncoder;
 use image::codecs::png::PngEncoder;
 use image::codecs::webp::WebPEncoder;
 use image::imageops::FilterType;
-/// Maximum width or height used when resizing images before uploading.
+
 pub const MAX_DIMENSION: u32 = 2048;
 
 pub mod error;
@@ -119,8 +119,6 @@ pub fn load_for_prompt_bytes(
 }
 
 fn can_preserve_source_bytes(format: ImageFormat) -> bool {
-    // Public API docs explicitly call out non-animated GIF support only.
-    // Preserve byte-for-byte only for formats we can safely pass through.
     matches!(
         format,
         ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::WebP

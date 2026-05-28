@@ -1,4 +1,3 @@
-#![cfg(not(target_os = "windows"))]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use codex_login::default_client::CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR;
@@ -6,8 +5,6 @@ use core_test_support::responses;
 use core_test_support::test_codex_exec::test_codex_exec;
 use wiremock::matchers::header;
 
-/// Verify that when the server reports an error, `codex-exec` exits with a
-/// non-zero status code so automation can detect failures.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn send_codex_exec_originator() -> anyhow::Result<()> {
     let test = test_codex_exec();

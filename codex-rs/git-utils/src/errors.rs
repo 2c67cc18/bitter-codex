@@ -5,7 +5,6 @@ use std::string::FromUtf8Error;
 use thiserror::Error;
 use walkdir::Error as WalkdirError;
 
-/// Errors returned while managing git worktree snapshots.
 #[derive(Debug, Error)]
 pub enum GitToolingError {
     #[error("git command `{command}` failed with status {status}: {stderr}")]

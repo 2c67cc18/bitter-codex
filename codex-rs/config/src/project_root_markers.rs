@@ -4,15 +4,6 @@ use toml::Value as TomlValue;
 
 const DEFAULT_PROJECT_ROOT_MARKERS: &[&str] = &[".git"];
 
-/// Reads `project_root_markers` from a merged `config.toml` [toml::Value].
-///
-/// Invariants:
-/// - If `project_root_markers` is not specified, returns `Ok(None)`.
-/// - If `project_root_markers` is specified, returns `Ok(Some(markers))` where
-///   `markers` is a `Vec<String>` (including `Ok(Some(Vec::new()))` for an
-///   empty array, which indicates that root detection should be disabled).
-/// - Returns an error if `project_root_markers` is specified but is not an
-///   array of strings.
 pub fn project_root_markers_from_config(config: &TomlValue) -> io::Result<Option<Vec<String>>> {
     let Some(table) = config.as_table() else {
         return Ok(None);

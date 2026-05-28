@@ -11,7 +11,6 @@ use codex_login::logout_with_revoke;
 use codex_login::save_auth;
 use codex_login::token_data::IdTokenInfo;
 use codex_login::token_data::TokenData;
-use core_test_support::skip_if_no_network;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
@@ -29,8 +28,6 @@ const REFRESH_TOKEN: &str = "refresh-token";
 #[serial_test::serial(logout_revoke)]
 #[tokio::test]
 async fn logout_with_revoke_revokes_refresh_token_then_removes_auth() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/oauth/revoke"))
@@ -79,8 +76,6 @@ async fn logout_with_revoke_revokes_refresh_token_then_removes_auth() -> Result<
 #[serial_test::serial(logout_revoke)]
 #[tokio::test]
 async fn logout_with_revoke_removes_auth_when_revoke_fails() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/oauth/revoke"))
@@ -116,8 +111,6 @@ async fn logout_with_revoke_removes_auth_when_revoke_fails() -> Result<()> {
 #[serial_test::serial(logout_revoke)]
 #[tokio::test]
 async fn auth_manager_logout_with_revoke_uses_cached_auth() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/oauth/revoke"))
@@ -140,9 +133,9 @@ async fn auth_manager_logout_with_revoke_uses_cached_auth() -> Result<()> {
     )?;
     let manager = AuthManager::new(
         codex_home.path().to_path_buf(),
-        /*enable_codex_api_key_env*/ false,
+        false,
         AuthCredentialsStoreMode::File,
-        /*chatgpt_base_url*/ None,
+        None,
     )
     .await;
     save_auth(
@@ -213,7 +206,7 @@ struct EnvGuard {
 impl EnvGuard {
     fn set(key: &'static str, value: String) -> Self {
         let original = std::env::var_os(key);
-        // SAFETY: these tests execute serially, so updating the process environment is safe.
+
         unsafe {
             std::env::set_var(key, &value);
         }
@@ -223,7 +216,6 @@ impl EnvGuard {
 
 impl Drop for EnvGuard {
     fn drop(&mut self) {
-        // SAFETY: the guard restores the original environment value before other tests run.
         unsafe {
             match &self.original {
                 Some(value) => std::env::set_var(self.key, value),

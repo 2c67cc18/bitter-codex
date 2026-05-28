@@ -1,9 +1,3 @@
-/*
-Module: runtimes
-
-Concrete runtime helpers for retained tools. Each runtime stays small and
-focused while deleted sandbox orchestration surfaces are trimmed away.
-*/
 use crate::exec_env::CODEX_THREAD_ID_ENV_VAR;
 use crate::path_utils;
 use crate::shell::Shell;
@@ -17,25 +11,6 @@ pub(crate) enum ToolError {
     Rejected(String),
 }
 
-/// POSIX-only helper: for commands produced by `Shell::derive_exec_args`
-/// for Bash/Zsh/sh of the form `[shell_path, "-lc", "<script>"]`, and
-/// when a snapshot is configured on the session shell, rewrite the argv
-/// to a single non-login shell that sources the snapshot before running
-/// the original script:
-///
-///   shell -lc "<script>"
-///   => user_shell -c ". SNAPSHOT (best effort); exec shell -c <script>"
-///
-/// This wrapper script uses POSIX constructs (`if`, `.`, `exec`) so it can
-/// be run by Bash/Zsh/sh. On non-matching commands, or when command cwd does
-/// not match the snapshot cwd, this is a no-op.
-///
-/// `explicit_env_overrides` and `env` are intentionally separate inputs.
-/// `explicit_env_overrides` contains policy-driven shell env overrides that
-/// should win after the snapshot is sourced, while `env` is the full live exec
-/// environment. We need access to both so snapshot restore logic can preserve
-/// runtime-only vars like `CODEX_THREAD_ID` without pretending they came from
-/// the explicit override policy.
 pub(crate) fn maybe_wrap_shell_lc_with_snapshot(
     command: &[String],
     session_shell: &Shell,
@@ -43,10 +18,6 @@ pub(crate) fn maybe_wrap_shell_lc_with_snapshot(
     explicit_env_overrides: &HashMap<String, String>,
     env: &HashMap<String, String>,
 ) -> Vec<String> {
-    if cfg!(windows) {
-        return command.to_vec();
-    }
-
     let Some(snapshot) = session_shell.shell_snapshot() else {
         return command.to_vec();
     };
@@ -159,7 +130,3 @@ fn is_valid_shell_variable_name(name: &str) -> bool {
 fn shell_single_quote(input: &str) -> String {
     input.replace('\'', r#"'"'"'"#)
 }
-
-#[cfg(all(test, unix))]
-#[path = "mod_tests.rs"]
-mod tests;

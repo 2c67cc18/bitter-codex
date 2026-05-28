@@ -3,9 +3,7 @@ use std::sync::Arc;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use codex_protocol::config_types::ModeKind;
 use codex_protocol::items::TurnItem;
-use codex_utils_stream_parser::strip_citations;
 use tokio_util::sync::CancellationToken;
 
 use crate::context::ContextualUserFragment;
@@ -18,19 +16,14 @@ use crate::tools::parallel::ToolCallRuntime;
 use crate::tools::router::ToolRouter;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result;
-use codex_protocol::memory_citation::MemoryCitation;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputPayload;
-use codex_protocol::models::MessagePhase;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
-use codex_rollout::state_db;
 use codex_utils_absolute_path::AbsolutePathBuf;
-use codex_utils_stream_parser::strip_proposed_plan_blocks;
 use futures::Future;
 use tracing::debug;
 use tracing::instrument;
-use tracing::warn;
 
 const GENERATED_IMAGE_ARTIFACTS_DIR: &str = "generated_images";
 
@@ -62,26 +55,8 @@ pub(crate) fn image_generation_artifact_path(
         .join(format!("{}.png", sanitize(call_id)))
 }
 
-fn strip_hidden_assistant_markup(text: &str, plan_mode: bool) -> String {
-    let (without_citations, _) = strip_citations(text);
-    if plan_mode {
-        strip_proposed_plan_blocks(&without_citations)
-    } else {
-        without_citations
-    }
-}
-
-fn strip_hidden_assistant_markup_and_ignore_memory_citation(
-    text: &str,
-    plan_mode: bool,
-) -> (String, Option<codex_protocol::memory_citation::MemoryCitation>) {
-    let (without_citations, _) = strip_citations(text);
-    let visible_text = if plan_mode {
-        strip_proposed_plan_blocks(&without_citations)
-    } else {
-        without_citations
-    };
-    (visible_text, None)
+fn strip_hidden_assistant_markup(text: &str, _plan_mode: bool) -> String {
+    text.to_string()
 }
 
 pub(crate) fn raw_assistant_output_text_from_item(item: &ResponseItem) -> Option<String> {
@@ -119,106 +94,24 @@ async fn save_image_generation_result(
     Ok(path)
 }
 
-/// Persist a completed model response item and record any cited memory usage.
 pub(crate) async fn record_completed_response_item(
     sess: &Session,
     turn_context: &TurnContext,
     item: &ResponseItem,
 ) {
-    record_completed_response_item_with_finalized_facts(
-        sess,
-        turn_context,
-        item,
-        /*finalized_facts*/ None,
-    )
-    .await;
+    record_completed_response_item_with_finalized_facts(sess, turn_context, item, None).await;
 }
 
 pub(crate) async fn record_completed_response_item_with_finalized_facts(
     sess: &Session,
     turn_context: &TurnContext,
     item: &ResponseItem,
-    finalized_facts: Option<&FinalizedTurnItemFacts>,
+    _finalized_facts: Option<&FinalizedTurnItemFacts>,
 ) {
     sess.record_conversation_items(turn_context, std::slice::from_ref(item))
         .await;
-    let defers_mailbox_delivery = finalized_facts.map_or_else(
-        || {
-            completed_item_defers_mailbox_delivery_to_next_turn(
-                item,
-                turn_context.collaboration_mode.mode == ModeKind::Plan,
-            )
-        },
-        |facts| facts.defers_mailbox_delivery_to_next_turn,
-    );
-    if defers_mailbox_delivery {
-        sess.input_queue
-            .defer_mailbox_delivery_to_next_turn(&sess.active_turn, &turn_context.sub_id)
-            .await;
-    }
-    mark_thread_memory_mode_polluted_if_external_context(sess, turn_context, item).await;
-    let has_memory_citation = if let Some(memory_citation) =
-        finalized_facts.and_then(|facts| facts.memory_citation.as_ref())
-    {
-        record_stage1_output_usage_for_memory_citation(
-            sess.services.state_db.as_ref(),
-            memory_citation,
-        )
-        .await
-    } else {
-        record_stage1_output_usage_and_detect_memory_citation(sess.services.state_db.as_ref(), item)
-            .await
-    };
-    if has_memory_citation {
-        sess.record_memory_citation_for_turn(&turn_context.sub_id)
-            .await;
-    }
 }
 
-fn response_item_may_include_external_context(item: &ResponseItem) -> bool {
-    matches!(
-        item,
-        ResponseItem::ToolSearchCall { .. }
-            | ResponseItem::ToolSearchOutput { .. }
-            | ResponseItem::WebSearchCall { .. }
-    )
-}
-
-pub(crate) async fn mark_thread_memory_mode_polluted_if_external_context(
-    sess: &Session,
-    turn_context: &TurnContext,
-    item: &ResponseItem,
-) {
-    if !turn_context.config.memories.disable_on_external_context
-        || !response_item_may_include_external_context(item)
-    {
-        return;
-    }
-    state_db::mark_thread_memory_mode_polluted(
-        sess.services.state_db.as_deref(),
-        sess.conversation_id,
-        "record_completed_response_item",
-    )
-    .await;
-}
-
-async fn record_stage1_output_usage_and_detect_memory_citation(
-    _state_db_ctx: Option<&state_db::StateDbHandle>,
-    _item: &ResponseItem,
-) -> bool {
-    false
-}
-
-async fn record_stage1_output_usage_for_memory_citation(
-    _state_db_ctx: Option<&state_db::StateDbHandle>,
-    _memory_citation: &MemoryCitation,
-) -> bool {
-    true
-}
-
-/// Handle a completed output item from the model stream, recording it and
-/// queuing any tool execution futures. This records items immediately so
-/// history and rollout stay in sync even if the turn is later cancelled.
 pub(crate) type InFlightFuture<'f> =
     Pin<Box<dyn Future<Output = Result<ResponseInputItem>> + Send + 'f>>;
 
@@ -243,9 +136,7 @@ pub(crate) struct FinalizedTurnItem {
 
 #[derive(Clone, Default)]
 pub(crate) struct FinalizedTurnItemFacts {
-    pub(crate) memory_citation: Option<MemoryCitation>,
     pub(crate) last_agent_message: Option<String>,
-    pub(crate) defers_mailbox_delivery_to_next_turn: bool,
 }
 
 pub(crate) async fn finalize_non_tool_response_item(
@@ -255,40 +146,27 @@ pub(crate) async fn finalize_non_tool_response_item(
     plan_mode: bool,
 ) -> Option<FinalizedTurnItem> {
     let turn_item = handle_non_tool_response_item(sess, turn_context, item, plan_mode).await?;
-    let (memory_citation, last_agent_message, defers_mailbox_delivery_to_next_turn) =
-        match &turn_item {
-            TurnItem::AgentMessage(agent_message) => {
-                let combined = agent_message
-                    .content
-                    .iter()
-                    .map(|entry| match entry {
-                        codex_protocol::items::AgentMessageContent::Text { text } => text.as_str(),
-                    })
-                    .collect::<String>();
-                let last_agent_message = if combined.trim().is_empty() {
-                    None
-                } else {
-                    Some(combined)
-                };
-                let defers_mailbox_delivery_to_next_turn =
-                    !matches!(agent_message.phase, Some(MessagePhase::Commentary))
-                        && last_agent_message.is_some();
-                (
-                    agent_message.memory_citation.clone(),
-                    last_agent_message,
-                    defers_mailbox_delivery_to_next_turn,
-                )
-            }
-            TurnItem::ImageGeneration(_) => (None, None, true),
-            _ => (None, None, false),
-        };
+    let last_agent_message = match &turn_item {
+        TurnItem::AgentMessage(agent_message) => {
+            let combined = agent_message
+                .content
+                .iter()
+                .map(|entry| match entry {
+                    codex_protocol::items::AgentMessageContent::Text { text } => text.as_str(),
+                })
+                .collect::<String>();
+            let last_agent_message = if combined.trim().is_empty() {
+                None
+            } else {
+                Some(combined)
+            };
+            last_agent_message
+        }
+        _ => None,
+    };
     Some(FinalizedTurnItem {
         turn_item,
-        facts: FinalizedTurnItemFacts {
-            memory_citation,
-            last_agent_message,
-            defers_mailbox_delivery_to_next_turn,
-        },
+        facts: FinalizedTurnItemFacts { last_agent_message },
     })
 }
 
@@ -299,19 +177,10 @@ pub(crate) async fn handle_output_item_done(
     previously_active_item: Option<TurnItem>,
 ) -> Result<OutputItemResult> {
     let mut output = OutputItemResult::default();
-    let plan_mode = ctx.turn_context.collaboration_mode.mode == ModeKind::Plan;
+    let plan_mode = false;
 
     match ToolRouter::build_tool_call(item.clone()) {
-        // The model emitted a tool call; log it, persist the item immediately, and queue the tool execution.
         Ok(Some(call)) => {
-            ctx.sess
-                .input_queue
-                .accept_mailbox_delivery_for_current_turn(
-                    &ctx.sess.active_turn,
-                    &ctx.turn_context.sub_id,
-                )
-                .await;
-
             let payload_preview = call.payload.log_payload().into_owned();
             tracing::info!(
                 thread_id = %ctx.sess.conversation_id,
@@ -333,7 +202,7 @@ pub(crate) async fn handle_output_item_done(
             output.needs_follow_up = true;
             output.tool_future = Some(tool_future);
         }
-        // No tool call: convert messages/reasoning into turn items and mark them as complete.
+
         Ok(None) => {
             let finalized_turn_item = finalize_non_tool_response_item(
                 ctx.sess.as_ref(),
@@ -373,7 +242,7 @@ pub(crate) async fn handle_output_item_done(
 
             output.last_agent_message = finalized_facts.and_then(|facts| facts.last_agent_message);
         }
-        // The tool request should be answered directly (or was denied); push that response into the transcript.
+
         Err(FunctionCallError::RespondToModel(message)) => {
             let response = ResponseInputItem::FunctionCallOutput {
                 call_id: String::new(),
@@ -395,7 +264,7 @@ pub(crate) async fn handle_output_item_done(
 
             output.needs_follow_up = true;
         }
-        // A fatal error occurred; surface it back into history.
+
         Err(FunctionCallError::Fatal(message)) => {
             return Err(CodexErr::Fatal(message));
         }
@@ -426,13 +295,9 @@ pub(crate) async fn handle_non_tool_response_item(
                         codex_protocol::items::AgentMessageContent::Text { text } => text.as_str(),
                     })
                     .collect::<String>();
-                let (stripped, memory_citation) =
-                    strip_hidden_assistant_markup_and_ignore_memory_citation(&combined, plan_mode);
+                let stripped = strip_hidden_assistant_markup(&combined, plan_mode);
                 agent_message.content =
                     vec![codex_protocol::items::AgentMessageContent::Text { text: stripped }];
-                if agent_message.memory_citation.is_none() {
-                    agent_message.memory_citation = memory_citation;
-                }
             }
             if let TurnItem::ImageGeneration(image_item) = &mut turn_item {
                 let session_id = sess.conversation_id.to_string();
@@ -481,9 +346,7 @@ pub(crate) async fn handle_non_tool_response_item(
             }
             Some(turn_item)
         }
-        ResponseItem::FunctionCallOutput { .. }
-        | ResponseItem::CustomToolCallOutput { .. }
-        | ResponseItem::ToolSearchOutput { .. } => {
+        ResponseItem::FunctionCallOutput { .. } | ResponseItem::CustomToolCallOutput { .. } => {
             debug!("unexpected tool output from stream");
             None
         }
@@ -508,24 +371,6 @@ pub(crate) fn last_assistant_message_from_item(
     None
 }
 
-fn completed_item_defers_mailbox_delivery_to_next_turn(
-    item: &ResponseItem,
-    plan_mode: bool,
-) -> bool {
-    match item {
-        ResponseItem::Message { role, phase, .. } => {
-            if role != "assistant" || matches!(phase, Some(MessagePhase::Commentary)) {
-                return false;
-            }
-            // Treat `None` like final-answer text so untagged providers default
-            // to the safer "defer mailbox mail" behavior.
-            last_assistant_message_from_item(item, plan_mode).is_some()
-        }
-        ResponseItem::ImageGenerationCall { .. } => true,
-        _ => false,
-    }
-}
-
 pub(crate) fn response_input_to_response_item(input: &ResponseInputItem) -> Option<ResponseItem> {
     match input {
         ResponseInputItem::FunctionCallOutput { call_id, output } => {
@@ -534,37 +379,6 @@ pub(crate) fn response_input_to_response_item(input: &ResponseInputItem) -> Opti
                 output: output.clone(),
             })
         }
-        ResponseInputItem::CustomToolCallOutput {
-            call_id,
-            name,
-            output,
-        } => Some(ResponseItem::CustomToolCallOutput {
-            call_id: call_id.clone(),
-            name: name.clone(),
-            output: output.clone(),
-        }),
-        ResponseInputItem::McpToolCallOutput { call_id, output } => {
-            let output = output.as_function_call_output_payload();
-            Some(ResponseItem::FunctionCallOutput {
-                call_id: call_id.clone(),
-                output,
-            })
-        }
-        ResponseInputItem::ToolSearchOutput {
-            call_id,
-            status,
-            execution,
-            tools,
-        } => Some(ResponseItem::ToolSearchOutput {
-            call_id: Some(call_id.clone()),
-            status: status.clone(),
-            execution: execution.clone(),
-            tools: tools.clone(),
-        }),
         _ => None,
     }
 }
-
-#[cfg(test)]
-#[path = "stream_events_utils_tests.rs"]
-mod tests;

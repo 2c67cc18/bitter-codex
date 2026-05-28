@@ -7,11 +7,7 @@ fn tool_definition() -> ToolDefinition {
     ToolDefinition {
         name: "lookup_order".to_string(),
         description: "Look up an order".to_string(),
-        input_schema: JsonSchema::object(
-            BTreeMap::new(),
-            /*required*/ None,
-            /*additional_properties*/ None,
-        ),
+        input_schema: JsonSchema::object(BTreeMap::new(), None, None),
         output_schema: Some(serde_json::json!({
             "type": "object",
         })),
@@ -22,9 +18,9 @@ fn tool_definition() -> ToolDefinition {
 #[test]
 fn renamed_overrides_name_only() {
     assert_eq!(
-        tool_definition().renamed("mcp__orders__lookup_order".to_string()),
+        tool_definition().renamed("orders__lookup_order".to_string()),
         ToolDefinition {
-            name: "mcp__orders__lookup_order".to_string(),
+            name: "orders__lookup_order".to_string(),
             ..tool_definition()
         }
     );

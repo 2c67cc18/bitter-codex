@@ -34,7 +34,6 @@ impl Default for ViewImageHandler {
         Self {
             options: ViewImageToolOptions {
                 can_request_original_image_detail: false,
-                include_environment_id: false,
             },
         }
     }
@@ -52,8 +51,6 @@ const VIEW_IMAGE_UNSUPPORTED_MESSAGE: &str =
 #[derive(Deserialize)]
 struct ViewImageArgs {
     path: String,
-    #[serde(default)]
-    environment_id: Option<String>,
     detail: Option<String>,
 }
 
@@ -109,13 +106,8 @@ impl ToolExecutor<ToolInvocation> for ViewImageHandler {
             }
         };
 
-        let ViewImageArgs {
-            path,
-            environment_id,
-            detail,
-        } = parse_arguments(&arguments)?;
-        // `high` is the explicit spelling of the default resized path.
-        // Other string values remain invalid rather than being silently reinterpreted.
+        let ViewImageArgs { path, detail } = parse_arguments(&arguments)?;
+
         let detail = match detail.as_deref() {
             None => None,
             Some("high") => Some(ViewImageDetail::High),
@@ -127,14 +119,6 @@ impl ToolExecutor<ToolInvocation> for ViewImageHandler {
             }
         };
 
-        if let Some(environment_id) = environment_id
-            .as_deref()
-            .filter(|environment_id| !environment_id.is_empty())
-        {
-            return Err(FunctionCallError::RespondToModel(format!(
-                "view_image environment_id is no longer supported; requested `{environment_id}`"
-            )));
-        }
         let Some(turn_environment) = turn.environments.primary() else {
             return Err(FunctionCallError::RespondToModel(
                 "view_image is unavailable in this session".to_string(),
@@ -142,34 +126,26 @@ impl ToolExecutor<ToolInvocation> for ViewImageHandler {
         };
         let cwd = turn_environment.cwd.clone();
         let abs_path = cwd.join(path);
-        let sandbox = turn.file_system_sandbox_context(/*additional_permissions*/ None, &cwd);
-        let fs = turn_environment.environment.get_filesystem();
 
-        let metadata = fs
-            .get_metadata(&abs_path, Some(&sandbox))
-            .await
-            .map_err(|error| {
-                FunctionCallError::RespondToModel(format!(
-                    "unable to locate image at `{}`: {error}",
-                    abs_path.display()
-                ))
-            })?;
+        let metadata = tokio::fs::metadata(&abs_path).await.map_err(|error| {
+            FunctionCallError::RespondToModel(format!(
+                "unable to locate image at `{}`: {error}",
+                abs_path.display()
+            ))
+        })?;
 
-        if !metadata.is_file {
+        if !metadata.is_file() {
             return Err(FunctionCallError::RespondToModel(format!(
                 "image path `{}` is not a file",
                 abs_path.display()
             )));
         }
-        let file_bytes = fs
-            .read_file(&abs_path, Some(&sandbox))
-            .await
-            .map_err(|error| {
-                FunctionCallError::RespondToModel(format!(
-                    "unable to read image at `{}`: {error}",
-                    abs_path.display()
-                ))
-            })?;
+        let file_bytes = tokio::fs::read(&abs_path).await.map_err(|error| {
+            FunctionCallError::RespondToModel(format!(
+                "unable to read image at `{}`: {error}",
+                abs_path.display()
+            ))
+        })?;
         let event_path = abs_path.clone();
 
         let can_request_original_detail = can_request_original_image_detail(&turn.model_info);
@@ -240,150 +216,5 @@ impl ToolOutput for ViewImageOutput {
             call_id: call_id.to_string(),
             output,
         }
-    }
-
-    fn code_mode_result(&self, _payload: &ToolPayload) -> serde_json::Value {
-        serde_json::json!({
-            "image_url": self.image_url,
-            "detail": self.image_detail
-        })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::session::tests::make_session_and_context;
-    use crate::tools::context::ToolCallSource;
-    use crate::tools::context::ToolInvocation;
-    use crate::tools::context::TurnDiffTracker;
-    use codex_protocol::models::PermissionProfile;
-    use core_test_support::TempDirExt;
-    use pretty_assertions::assert_eq;
-    use serde_json::json;
-    use std::sync::Arc;
-    use tokio::sync::Mutex;
-
-    #[test]
-    fn code_mode_result_returns_image_url_object() {
-        let output = ViewImageOutput {
-            image_url: "data:image/png;base64,AAA".to_string(),
-            image_detail: DEFAULT_IMAGE_DETAIL,
-        };
-
-        let result = output.code_mode_result(&ToolPayload::Function {
-            arguments: "{}".to_string(),
-        });
-
-        assert_eq!(
-            result,
-            json!({
-                "image_url": "data:image/png;base64,AAA",
-                "detail": "high",
-            })
-        );
-    }
-
-    #[tokio::test]
-    async fn handle_passes_sandbox_context_for_local_filesystem_reads() {
-        let (session, mut turn) = make_session_and_context().await;
-        let image_dir = tempfile::tempdir().expect("create image temp dir");
-        let image_cwd = image_dir.abs();
-
-        turn.environments
-            .turn_environments
-            .first_mut()
-            .expect("default local turn environment")
-            .cwd = image_cwd.clone();
-        let image_path = image_cwd.join("image.png");
-        std::fs::write(image_path.as_path(), b"not a real image").expect("write test image");
-        turn.permission_profile = PermissionProfile::read_only();
-
-        let result = ViewImageHandler::default()
-            .handle(ToolInvocation {
-                session: Arc::new(session),
-                turn: Arc::new(turn),
-                cancellation_token: tokio_util::sync::CancellationToken::new(),
-                tracker: Arc::new(Mutex::new(TurnDiffTracker::new())),
-                call_id: "call-view-image".to_string(),
-                tool_name: codex_tools::ToolName::plain("view_image"),
-                source: ToolCallSource::Direct,
-                payload: ToolPayload::Function {
-                    arguments: json!({ "path": "image.png" }).to_string(),
-                },
-            })
-            .await;
-
-        let Err(FunctionCallError::RespondToModel(message)) = result else {
-            panic!("expected sandboxed filesystem error");
-        };
-        assert!(
-            message.contains("sandboxed filesystem operations require configured runtime paths"),
-            "{message}"
-        );
-    }
-
-    #[tokio::test]
-    async fn handle_rejects_unsupported_detail() {
-        let (session, turn) = make_session_and_context().await;
-
-        let result = ViewImageHandler::default()
-            .handle(ToolInvocation {
-                session: Arc::new(session),
-                turn: Arc::new(turn),
-                cancellation_token: tokio_util::sync::CancellationToken::new(),
-                tracker: Arc::new(Mutex::new(TurnDiffTracker::new())),
-                call_id: "call-view-image".to_string(),
-                tool_name: codex_tools::ToolName::plain("view_image"),
-                source: ToolCallSource::Direct,
-                payload: ToolPayload::Function {
-                    arguments: json!({ "path": "image.png", "detail": "low" }).to_string(),
-                },
-            })
-            .await;
-
-        let Err(FunctionCallError::RespondToModel(message)) = result else {
-            panic!("expected unsupported detail error");
-        };
-        assert_eq!(
-            message,
-            "view_image.detail only supports `high` or `original`; omit `detail` for default high resized behavior, got `low`"
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn handle_accepts_explicit_high_detail() {
-        let (session, mut turn) = make_session_and_context().await;
-        let image_dir = tempfile::tempdir().expect("create image temp dir");
-        let image_cwd = image_dir.abs();
-
-        turn.environments
-            .turn_environments
-            .first_mut()
-            .expect("default local turn environment")
-            .cwd = image_cwd.clone();
-        let image_path = image_cwd.join("image.png");
-        std::fs::write(image_path.as_path(), b"not a real image").expect("write test image");
-        turn.permission_profile = PermissionProfile::Disabled;
-
-        let result = ViewImageHandler::default()
-            .handle(ToolInvocation {
-                session: Arc::new(session),
-                turn: Arc::new(turn),
-                cancellation_token: tokio_util::sync::CancellationToken::new(),
-                tracker: Arc::new(Mutex::new(TurnDiffTracker::new())),
-                call_id: "call-view-image".to_string(),
-                tool_name: codex_tools::ToolName::plain("view_image"),
-                source: ToolCallSource::Direct,
-                payload: ToolPayload::Function {
-                    arguments: json!({ "path": "image.png", "detail": "high" }).to_string(),
-                },
-            })
-            .await;
-
-        let Err(FunctionCallError::RespondToModel(message)) = result else {
-            panic!("expected image processing error");
-        };
-        assert!(message.contains("unable to process image"), "{message}");
     }
 }

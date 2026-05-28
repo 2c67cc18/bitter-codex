@@ -8,7 +8,6 @@ mod otlp;
 mod targets;
 
 use crate::metrics::Result as MetricsResult;
-use serde::Serialize;
 use strum_macros::Display;
 
 pub use crate::config::OtelExporter;
@@ -36,15 +35,6 @@ pub use crate::trace_context::validate_tracestate_entries;
 pub use crate::trace_context::validate_tracestate_member;
 pub use codex_utils_string::sanitize_metric_tag_value;
 
-#[derive(Debug, Clone, Serialize, Display)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolDecisionSource {
-    AutomatedReviewer,
-    Config,
-    User,
-}
-
-/// Maps to API/auth `AuthMode` to avoid a circular dependency on codex-core.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Display)]
 pub enum TelemetryAuthMode {
     ApiKey,
@@ -56,13 +46,11 @@ impl From<codex_app_server_protocol::AuthMode> for TelemetryAuthMode {
         match mode {
             codex_app_server_protocol::AuthMode::ApiKey => Self::ApiKey,
             codex_app_server_protocol::AuthMode::Chatgpt
-            | codex_app_server_protocol::AuthMode::ChatgptAuthTokens
-            | codex_app_server_protocol::AuthMode::AgentIdentity => Self::Chatgpt,
+            | codex_app_server_protocol::AuthMode::ChatgptAuthTokens => Self::Chatgpt,
         }
     }
 }
 
-/// Start a metrics timer using the globally installed metrics client.
 pub fn start_global_timer(name: &str, tags: &[(&str, &str)]) -> MetricsResult<Timer> {
     let Some(metrics) = crate::metrics::global() else {
         return Err(MetricsError::ExporterDisabled);
@@ -70,8 +58,6 @@ pub fn start_global_timer(name: &str, tags: &[(&str, &str)]) -> MetricsResult<Ti
     metrics.start_timer(name, tags)
 }
 
-/// Returns the resolved Statsig metrics settings for the globally installed
-/// OTEL metrics client, if the active metrics exporter is Statsig.
 pub fn global_statsig_metrics_settings() -> Option<StatsigMetricsSettings> {
     crate::metrics::global_statsig_settings()
 }

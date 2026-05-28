@@ -1,24 +1,3 @@
-//! Tracing log export into the local SQLite log database.
-//!
-//! This module provides a `tracing_subscriber::Layer` that captures events,
-//! formats each one into a `LogEntry`, and sends entries to a bounded background
-//! queue. The background task inserts into the dedicated `logs` SQLite database
-//! in batches to keep logging overhead low.
-//!
-//! ## Usage
-//!
-//! ```no_run
-//! use codex_state::log_db;
-//! use tracing_subscriber::prelude::*;
-//!
-//! # async fn example(state_db: std::sync::Arc<codex_state::StateRuntime>) {
-//! let layer = log_db::start(state_db);
-//! let _ = tracing_subscriber::registry()
-//!     .with(layer)
-//!     .try_init();
-//! # }
-//! ```
-
 use std::future::Future;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -79,11 +58,6 @@ impl LogSinkQueueConfig {
     }
 }
 
-/// A tracing log writer that can flush entries accepted by its queue.
-///
-/// Implementations should keep `Layer::on_event` non-blocking for ordinary log
-/// events. `flush` should wait for entries accepted before the flush command to
-/// be processed by the writer.
 pub trait LogWriter<S>: Layer<S>
 where
     S: tracing::Subscriber + for<'a> LookupSpan<'a>,
@@ -154,7 +128,6 @@ where
 
         if let Some(span) = ctx.span(id) {
             span.extensions_mut().insert(SpanLogContext {
-                name: span.metadata().name().to_string(),
                 formatted_fields: format_fields(attrs),
                 thread_id: visitor.thread_id,
             });
@@ -179,7 +152,6 @@ where
                 append_fields(&mut log_context.formatted_fields, values);
             } else {
                 extensions.insert(SpanLogContext {
-                    name: span.metadata().name().to_string(),
                     formatted_fields: format_fields(values),
                     thread_id: visitor.thread_id,
                 });
@@ -195,7 +167,6 @@ where
             .thread_id
             .clone()
             .or_else(|| event_thread_id(event, &ctx));
-        let feedback_log_body = format_feedback_log_body(event, &ctx);
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -206,7 +177,6 @@ where
             level: metadata.level().as_str().to_string(),
             target: metadata.target().to_string(),
             message: visitor.message,
-            feedback_log_body: Some(feedback_log_body),
             thread_id,
             process_uuid: Some(self.process_uuid.clone()),
             module_path: metadata.module_path().map(ToString::to_string),
@@ -234,7 +204,6 @@ enum LogDbCommand {
 
 #[derive(Debug)]
 struct SpanLogContext {
-    name: String,
     formatted_fields: String,
     thread_id: Option<String>,
 }
@@ -303,37 +272,6 @@ where
     thread_id
 }
 
-fn format_feedback_log_body<S>(
-    event: &Event<'_>,
-    ctx: &tracing_subscriber::layer::Context<'_, S>,
-) -> String
-where
-    S: tracing::Subscriber + for<'a> LookupSpan<'a>,
-{
-    let mut feedback_log_body = String::new();
-    if let Some(scope) = ctx.event_scope(event) {
-        for span in scope.from_root() {
-            let extensions = span.extensions();
-            if let Some(log_context) = extensions.get::<SpanLogContext>() {
-                feedback_log_body.push_str(&log_context.name);
-                if !log_context.formatted_fields.is_empty() {
-                    feedback_log_body.push('{');
-                    feedback_log_body.push_str(&log_context.formatted_fields);
-                    feedback_log_body.push('}');
-                }
-            } else {
-                feedback_log_body.push_str(span.metadata().name());
-            }
-            feedback_log_body.push(':');
-        }
-        if !feedback_log_body.is_empty() {
-            feedback_log_body.push(' ');
-        }
-    }
-    feedback_log_body.push_str(&format_fields(event));
-    feedback_log_body
-}
-
 fn format_fields<R>(fields: R) -> String
 where
     R: RecordFields,
@@ -367,7 +305,7 @@ async fn run_inserter(
 ) {
     let mut buffer = Vec::with_capacity(config.batch_size);
     let mut ticker = tokio::time::interval(config.flush_interval);
-    // Consume the immediate startup tick so entries flush after the interval.
+
     ticker.tick().await;
     loop {
         tokio::select! {
@@ -453,13 +391,9 @@ impl Visit for MessageVisitor {
 
 #[cfg(test)]
 mod tests {
-    use std::io;
-    use std::sync::Arc;
-    use std::sync::Mutex;
 
     use pretty_assertions::assert_eq;
     use tracing_subscriber::filter::Targets;
-    use tracing_subscriber::fmt::writer::MakeWriter;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
 
@@ -495,111 +429,12 @@ mod tests {
             level: "INFO".to_string(),
             target: "test".to_string(),
             message: Some(message.to_string()),
-            feedback_log_body: Some(message.to_string()),
             thread_id: Some("thread-1".to_string()),
             process_uuid: Some("process-1".to_string()),
             module_path: Some("module".to_string()),
             file: Some("file.rs".to_string()),
             line: Some(7),
         }
-    }
-
-    #[derive(Clone, Default)]
-    struct SharedWriter {
-        bytes: Arc<Mutex<Vec<u8>>>,
-    }
-
-    impl SharedWriter {
-        fn snapshot(&self) -> String {
-            String::from_utf8(self.bytes.lock().expect("writer mutex poisoned").clone())
-                .expect("valid utf-8")
-        }
-    }
-
-    struct SharedWriterGuard {
-        bytes: Arc<Mutex<Vec<u8>>>,
-    }
-
-    impl<'a> MakeWriter<'a> for SharedWriter {
-        type Writer = SharedWriterGuard;
-
-        fn make_writer(&'a self) -> Self::Writer {
-            SharedWriterGuard {
-                bytes: Arc::clone(&self.bytes),
-            }
-        }
-    }
-
-    impl io::Write for SharedWriterGuard {
-        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            self.bytes
-                .lock()
-                .expect("writer mutex poisoned")
-                .extend_from_slice(buf);
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
-
-    #[tokio::test]
-    async fn sqlite_feedback_logs_match_feedback_formatter_shape() {
-        let codex_home = temp_codex_home();
-        let runtime = StateRuntime::init(codex_home.clone(), "test-provider".to_string())
-            .await
-            .expect("initialize runtime");
-        let writer = SharedWriter::default();
-        let layer = start(runtime.clone());
-
-        let subscriber = tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .with_writer(writer.clone())
-                    .with_ansi(false)
-                    .with_target(false)
-                    .with_filter(Targets::new().with_default(tracing::Level::TRACE)),
-            )
-            .with(
-                layer
-                    .clone()
-                    .with_filter(Targets::new().with_default(tracing::Level::TRACE)),
-            );
-        let guard = subscriber.set_default();
-
-        tracing::trace!("threadless-before");
-        tracing::info_span!("feedback-thread", thread_id = "thread-1", turn = 1).in_scope(|| {
-            tracing::info!(foo = 2, "thread-scoped");
-        });
-        tracing::debug!("threadless-after");
-
-        layer.flush().await;
-        drop(guard);
-
-        let feedback_logs = writer.snapshot();
-        let without_timestamps = |logs: &str| {
-            logs.lines()
-                .map(|line| match line.split_once(' ') {
-                    Some((_, rest)) => rest,
-                    None => line,
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-        let sqlite_logs = String::from_utf8(
-            runtime
-                .query_feedback_logs("thread-1")
-                .await
-                .expect("query feedback logs"),
-        )
-        .expect("valid utf-8");
-        assert_eq!(
-            without_timestamps(&sqlite_logs),
-            without_timestamps(&feedback_logs)
-        );
-
-        let _ = tokio::fs::remove_dir_all(codex_home).await;
     }
 
     #[tokio::test]
@@ -668,7 +503,7 @@ mod tests {
         );
 
         tracing::info!("second-batch-log");
-        let after_batch = wait_for_log_count(&runtime, /*expected*/ 2).await;
+        let after_batch = wait_for_log_count(&runtime, 2).await;
         drop(guard);
 
         assert_eq!(
@@ -707,7 +542,7 @@ mod tests {
             .set_default();
 
         tracing::info!("interval-log");
-        let after_interval = wait_for_log_count(&runtime, /*expected*/ 1).await;
+        let after_interval = wait_for_log_count(&runtime, 1).await;
         drop(guard);
 
         assert_eq!(after_interval[0].message.as_deref(), Some("interval-log"));

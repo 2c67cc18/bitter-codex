@@ -4,23 +4,14 @@ use crate::session::turn_context::TurnContext;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::runtimes::ToolError;
 use crate::turn_timing::now_unix_timestamp_ms;
-use codex_protocol::error::CodexErr;
-use codex_protocol::error::SandboxErr;
 use codex_protocol::exec_output::ExecToolCallOutput;
-use codex_protocol::items::FileChangeItem;
-use codex_protocol::items::TurnItem;
 use codex_protocol::parse_command::ParsedCommand;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::ExecCommandBeginEvent;
 use codex_protocol::protocol::ExecCommandEndEvent;
 use codex_protocol::protocol::ExecCommandSource;
 use codex_protocol::protocol::ExecCommandStatus;
-use codex_protocol::protocol::FileChange;
-use codex_protocol::protocol::PatchApplyStatus;
-use codex_protocol::protocol::TurnDiffEvent;
 use codex_utils_absolute_path::AbsolutePathBuf;
-use std::collections::HashMap;
-use std::path::PathBuf;
 use std::time::Duration;
 
 use super::format_exec_output_str;
@@ -51,24 +42,14 @@ impl<'a> ToolEventCtx<'a> {
 
 pub(crate) enum ToolEventStage {
     Begin,
-    Success {
-        output: ExecToolCallOutput,
-        applied_patch_delta: Option<()>,
-    },
+    Success { output: ExecToolCallOutput },
     Failure(ToolEventFailure),
 }
 
 pub(crate) enum ToolEventFailure {
     Output(ExecToolCallOutput),
     Message(String),
-    Rejected {
-        message: String,
-    },
-}
-
-enum TurnDiffTrackerUpdate {
-    Invalidate,
-    None,
+    Rejected { message: String },
 }
 
 pub(crate) async fn emit_exec_command_begin(
@@ -97,17 +78,13 @@ pub(crate) async fn emit_exec_command_begin(
         )
         .await;
 }
-// Concrete, allocation-free emitter: avoid trait objects and boxed futures.
+
 pub(crate) enum ToolEmitter {
     Shell {
         command: Vec<String>,
         cwd: AbsolutePathBuf,
         source: ExecCommandSource,
         parsed_cmd: Vec<ParsedCommand>,
-    },
-    ApplyPatch {
-        changes: HashMap<PathBuf, FileChange>,
-        auto_approved: bool,
     },
     UnifiedExec {
         command: Vec<String>,
@@ -121,17 +98,12 @@ pub(crate) enum ToolEmitter {
 impl ToolEmitter {
     pub fn shell(command: Vec<String>, cwd: AbsolutePathBuf, source: ExecCommandSource) -> Self {
         Self::Shell {
+            parsed_cmd: vec![ParsedCommand::Unknown {
+                cmd: command.join(" "),
+            }],
             command,
             cwd,
             source,
-            parsed_cmd,
-        }
-    }
-
-    pub fn apply_patch(changes: HashMap<PathBuf, FileChange>, auto_approved: bool) -> Self {
-        Self::ApplyPatch {
-            changes,
-            auto_approved,
         }
     }
 
@@ -145,7 +117,9 @@ impl ToolEmitter {
             command: command.to_vec(),
             cwd,
             source,
-            parsed_cmd,
+            parsed_cmd: vec![ParsedCommand::Unknown {
+                cmd: command.join(" "),
+            }],
             process_id,
         }
     }
@@ -164,104 +138,12 @@ impl ToolEmitter {
             ) => {
                 emit_exec_stage(
                     ctx,
-                    ExecCommandInput::new(
-                        command, cwd, parsed_cmd, *source, /*interaction_input*/ None,
-                        /*process_id*/ None,
-                    ),
+                    ExecCommandInput::new(command, cwd, parsed_cmd, *source, None, None),
                     stage,
                 )
                 .await;
             }
 
-            (
-                Self::ApplyPatch {
-                    changes,
-                    auto_approved,
-                    ..
-                },
-                ToolEventStage::Begin,
-            ) => {
-                ctx.session
-                    .emit_turn_item_started(
-                        ctx.turn,
-                        &TurnItem::FileChange(FileChangeItem {
-                            id: ctx.call_id.to_string(),
-                            changes: changes.clone(),
-                            status: None,
-                            auto_approved: Some(*auto_approved),
-                            stdout: None,
-                            stderr: None,
-                        }),
-                    )
-                    .await;
-            }
-            (
-                Self::ApplyPatch { changes, .. },
-                ToolEventStage::Success { output, .. },
-            ) => {
-                let status = if output.exit_code == 0 {
-                    PatchApplyStatus::Completed
-                } else {
-                    PatchApplyStatus::Failed
-                };
-                emit_patch_end(
-                    ctx,
-                    changes.clone(),
-                    output.stdout.text.clone(),
-                    output.stderr.text.clone(),
-                    status,
-                    TurnDiffTrackerUpdate::Invalidate,
-                )
-                .await;
-            }
-            (
-                Self::ApplyPatch { changes, .. },
-                ToolEventStage::Failure(ToolEventFailure::Output(output)),
-            ) => {
-                emit_patch_end(
-                    ctx,
-                    changes.clone(),
-                    output.stdout.text.clone(),
-                    output.stderr.text.clone(),
-                    if output.exit_code == 0 {
-                        PatchApplyStatus::Completed
-                    } else {
-                        PatchApplyStatus::Failed
-                    },
-                    TurnDiffTrackerUpdate::Invalidate,
-                )
-                .await;
-            }
-            (
-                Self::ApplyPatch { changes, .. },
-                ToolEventStage::Failure(ToolEventFailure::Message(message)),
-            ) => {
-                emit_patch_end(
-                    ctx,
-                    changes.clone(),
-                    String::new(),
-                    (*message).to_string(),
-                    PatchApplyStatus::Failed,
-                    TurnDiffTrackerUpdate::None,
-                )
-                .await;
-            }
-            (
-                Self::ApplyPatch { changes, .. },
-                ToolEventStage::Failure(ToolEventFailure::Rejected {
-                    message,
-                }),
-            ) => {
-                emit_patch_end(
-                    ctx,
-                    changes.clone(),
-                    String::new(),
-                    (*message).to_string(),
-                    PatchApplyStatus::Declined,
-                    TurnDiffTrackerUpdate::None,
-                )
-                .await;
-            }
             (
                 Self::UnifiedExec {
                     command,
@@ -279,7 +161,7 @@ impl ToolEmitter {
                         cwd,
                         parsed_cmd,
                         *source,
-                        /*interaction_input*/ None,
+                        None,
                         process_id.as_deref(),
                     ),
                     stage,
@@ -310,27 +192,12 @@ impl ToolEmitter {
             Ok(output) => {
                 let content = self.format_exec_output_for_model(&output, ctx);
                 let exit_code = output.exit_code;
-                let event = ToolEventStage::Success {
-                    output,
-                    applied_patch_delta: None,
-                };
+                let event = ToolEventStage::Success { output };
                 let result = if exit_code == 0 {
                     Ok(content)
                 } else {
                     Err(FunctionCallError::RespondToModel(content))
                 };
-                (event, result)
-            }
-            Err(ToolError::Codex(CodexErr::Sandbox(SandboxErr::Timeout { output }))) => {
-                let response = self.format_exec_output_for_model(&output, ctx);
-                let event = ToolEventStage::Failure(ToolEventFailure::Output(*output));
-                let result = Err(FunctionCallError::RespondToModel(response));
-                (event, result)
-            }
-            Err(ToolError::Codex(CodexErr::Sandbox(SandboxErr::Denied { output, .. }))) => {
-                let response = self.format_exec_output_for_model(&output, ctx);
-                let event = ToolEventStage::Failure(ToolEventFailure::Output(*output));
-                let result = Err(FunctionCallError::RespondToModel(response));
                 (event, result)
             }
             Err(ToolError::Codex(err)) => {
@@ -340,21 +207,11 @@ impl ToolEmitter {
                 (event, result)
             }
             Err(ToolError::Rejected(msg)) => {
-                // Normalize common rejection messages for exec tools so tests and
-                // users see a clear, consistent phrase.
-                //
-                // NOTE: ToolError::Rejected is currently used for both user-declined approvals
-                // and some operational/runtime rejection paths (for example setup failures).
-                // We intentionally map all of them through the "rejected" event path for now,
-                // which means a subset of non-user failures may be reported as Declined.
-                //
-                // TODO: We should add a new ToolError variant for user-declined approvals.
                 let normalized = if msg == "rejected by user" {
                     match self {
                         Self::Shell { .. } | Self::UnifiedExec { .. } => {
                             "exec command rejected by user".to_string()
                         }
-                        Self::ApplyPatch { .. } => "patch rejected by user".to_string(),
                     }
                 } else {
                     msg
@@ -428,7 +285,7 @@ async fn emit_exec_stage(
             )
             .await;
         }
-        ToolEventStage::Success { output, .. }
+        ToolEventStage::Success { output }
         | ToolEventStage::Failure(ToolEventFailure::Output(output)) => {
             let exec_result = ExecCommandResult {
                 stdout: output.stdout.text.clone(),
@@ -486,7 +343,7 @@ async fn emit_exec_end(
                 call_id: ctx.call_id.to_string(),
                 process_id: exec_input.process_id.map(str::to_owned),
                 turn_id: ctx.turn.sub_id.clone(),
-                completed_at_ms: now_unix_timestamp_ms(),
+                completed_at_ms: crate::turn_timing::now_unix_timestamp_ms(),
                 command: exec_input.command.to_vec(),
                 cwd: exec_input.cwd.clone(),
                 parsed_cmd: exec_input.parsed_cmd.to_vec(),
@@ -502,120 +359,4 @@ async fn emit_exec_end(
             }),
         )
         .await;
-}
-
-async fn emit_patch_end(
-    ctx: ToolEventCtx<'_>,
-    changes: HashMap<PathBuf, FileChange>,
-    stdout: String,
-    stderr: String,
-    status: PatchApplyStatus,
-    tracker_update: TurnDiffTrackerUpdate,
-) {
-    ctx.session
-        .emit_turn_item_completed(
-            ctx.turn,
-            TurnItem::FileChange(FileChangeItem {
-                id: ctx.call_id.to_string(),
-                changes,
-                status: Some(status),
-                auto_approved: None,
-                stdout: Some(stdout),
-                stderr: Some(stderr),
-            }),
-        )
-        .await;
-
-    if let Some(tracker) = ctx.turn_diff_tracker {
-        let (should_emit_turn_diff, unified_diff) = {
-            let mut guard = tracker.lock().await;
-            let previous_diff = guard.get_unified_diff();
-            let tracker_changed = match tracker_update {
-                TurnDiffTrackerUpdate::Invalidate => {
-                    guard.invalidate();
-                    true
-                }
-                TurnDiffTrackerUpdate::None => false,
-            };
-            let unified_diff = guard.get_unified_diff();
-            (
-                tracker_changed && (previous_diff.is_some() || unified_diff.is_some()),
-                unified_diff.unwrap_or_default(),
-            )
-        };
-        if should_emit_turn_diff {
-            ctx.session
-                .send_event(ctx.turn, EventMsg::TurnDiff(TurnDiffEvent { unified_diff }))
-                .await;
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::session::tests::make_session_and_context_with_dynamic_tools_and_rx;
-    use crate::turn_diff_tracker::TurnDiffTracker;
-    use codex_protocol::error::CodexErr;
-    use codex_protocol::error::SandboxErr;
-    use codex_protocol::exec_output::ExecToolCallOutput;
-    use codex_protocol::items::TurnItem;
-    use codex_protocol::protocol::PatchApplyStatus;
-    use std::sync::Arc;
-    use tokio::sync::Mutex;
-
-    async fn assert_failed_apply_patch_emits_status(
-        out: Result<ExecToolCallOutput, ToolError>,
-        expected_status: PatchApplyStatus,
-    ) {
-        let (session, turn, rx_event) =
-            make_session_and_context_with_dynamic_tools_and_rx(Vec::new()).await;
-        let tracker = Arc::new(Mutex::new(TurnDiffTracker::new()));
-
-        ToolEmitter::apply_patch(HashMap::new(), /*auto_approved*/ false)
-            .finish(
-                ToolEventCtx::new(session.as_ref(), turn.as_ref(), "call-id", Some(&tracker)),
-                out,
-            )
-            .await
-            .expect_err("failed patch");
-
-        let completed = rx_event.recv().await.expect("item completed event");
-        assert!(matches!(
-            completed.msg,
-            EventMsg::ItemCompleted(event)
-                if matches!(
-                    &event.item,
-                    TurnItem::FileChange(FileChangeItem {
-                        status: Some(status),
-                        ..
-                    }) if status == &expected_status
-                )
-        ));
-    }
-
-    #[tokio::test]
-    async fn denied_apply_patch_emits_failed_status() {
-        let output = ExecToolCallOutput {
-            exit_code: 1,
-            ..Default::default()
-        };
-        assert_failed_apply_patch_emits_status(
-            Err(ToolError::Codex(CodexErr::Sandbox(SandboxErr::Denied {
-                output: Box::new(output),
-                network_policy_decision: None,
-            }))),
-            PatchApplyStatus::Failed,
-        )
-        .await;
-    }
-
-    #[tokio::test]
-    async fn rejected_apply_patch_emits_declined_status() {
-        assert_failed_apply_patch_emits_status(
-            Err(ToolError::Rejected("rejected by user".to_string())),
-            PatchApplyStatus::Declined,
-        )
-        .await;
-    }
 }

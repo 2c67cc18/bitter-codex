@@ -25,11 +25,7 @@ fn tool_spec_name_covers_all_variants() {
             description: "Look up an order".to_string(),
             strict: false,
             defer_loading: None,
-            parameters: JsonSchema::object(
-                BTreeMap::new(),
-                /*required*/ None,
-                /*additional_properties*/ None
-            ),
+            parameters: JsonSchema::object(BTreeMap::new(), None, None),
             output_schema: None,
         })
         .name(),
@@ -37,25 +33,12 @@ fn tool_spec_name_covers_all_variants() {
     );
     assert_eq!(
         ToolSpec::Namespace(ResponsesApiNamespace {
-            name: "mcp__demo__".to_string(),
+            name: "demo__".to_string(),
             description: "Demo tools".to_string(),
             tools: Vec::new(),
         })
         .name(),
-        "mcp__demo__"
-    );
-    assert_eq!(
-        ToolSpec::ToolSearch {
-            execution: "sync".to_string(),
-            description: "Search for tools".to_string(),
-            parameters: JsonSchema::object(
-                BTreeMap::new(),
-                /*required*/ None,
-                /*additional_properties*/ None
-            ),
-        }
-        .name(),
-        "tool_search"
+        "demo__"
     );
     assert_eq!(
         ToolSpec::ImageGeneration {
@@ -127,9 +110,9 @@ fn create_tools_json_for_responses_api_includes_top_level_name() {
             strict: false,
             defer_loading: None,
             parameters: JsonSchema::object(
-                BTreeMap::from([("foo".to_string(), JsonSchema::string(/*description*/ None),)]),
-                /*required*/ None,
-                /*additional_properties*/ None
+                BTreeMap::from([("foo".to_string(), JsonSchema::string(None),)]),
+                None,
+                None
             ),
             output_schema: None,
         })])
@@ -153,7 +136,7 @@ fn create_tools_json_for_responses_api_includes_top_level_name() {
 fn namespace_tool_spec_serializes_expected_wire_shape() {
     assert_eq!(
         serde_json::to_value(ToolSpec::Namespace(ResponsesApiNamespace {
-            name: "mcp__demo__".to_string(),
+            name: "demo__".to_string(),
             description: "Demo tools".to_string(),
             tools: vec![ResponsesApiNamespaceTool::Function(ResponsesApiTool {
                 name: "lookup_order".to_string(),
@@ -161,11 +144,9 @@ fn namespace_tool_spec_serializes_expected_wire_shape() {
                 strict: false,
                 defer_loading: None,
                 parameters: JsonSchema::object(
-                    BTreeMap::from([(
-                        "order_id".to_string(), JsonSchema::string(/*description*/ None),
-                    )]),
-                    /*required*/ None,
-                    /*additional_properties*/ None,
+                    BTreeMap::from([("order_id".to_string(), JsonSchema::string(None),)]),
+                    None,
+                    None,
                 ),
                 output_schema: None,
             })],
@@ -173,7 +154,7 @@ fn namespace_tool_spec_serializes_expected_wire_shape() {
         .expect("serialize namespace tool"),
         json!({
             "type": "namespace",
-            "name": "mcp__demo__",
+            "name": "demo__",
             "description": "Demo tools",
             "tools": [
                 {
@@ -227,40 +208,6 @@ fn web_search_tool_spec_serializes_expected_wire_shape() {
             },
             "search_context_size": "high",
             "search_content_types": ["text", "image"],
-        })
-    );
-}
-
-#[test]
-fn tool_search_tool_spec_serializes_expected_wire_shape() {
-    assert_eq!(
-        serde_json::to_value(ToolSpec::ToolSearch {
-            execution: "sync".to_string(),
-            description: "Search app tools".to_string(),
-            parameters: JsonSchema::object(
-                BTreeMap::from([(
-                    "query".to_string(), JsonSchema::string(Some("Tool search query".to_string()),),
-                )]),
-                Some(vec!["query".to_string()]),
-                Some(AdditionalProperties::Boolean(false))
-            ),
-        })
-        .expect("serialize tool_search"),
-        json!({
-            "type": "tool_search",
-            "execution": "sync",
-            "description": "Search app tools",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Tool search query",
-                    }
-                },
-                "required": ["query"],
-                "additionalProperties": false,
-            },
         })
     );
 }

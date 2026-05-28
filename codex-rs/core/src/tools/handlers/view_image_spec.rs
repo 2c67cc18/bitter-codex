@@ -9,7 +9,6 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ViewImageToolOptions {
     pub can_request_original_image_detail: bool,
-    pub include_environment_id: bool,
 }
 
 pub fn create_view_image_tool(options: ViewImageToolOptions) -> ToolSpec {
@@ -28,16 +27,6 @@ pub fn create_view_image_tool(options: ViewImageToolOptions) -> ToolSpec {
             ),
         );
     }
-    if options.include_environment_id {
-        properties.insert(
-            "environment_id".to_string(),
-            JsonSchema::string(Some(
-                "Optional selected environment id to target. Omit this to use the primary environment."
-                    .to_string(),
-            )),
-        );
-    }
-
     ToolSpec::Function(ResponsesApiTool {
         name: VIEW_IMAGE_TOOL_NAME.to_string(),
         description: "View a local image from the filesystem (only use if given a full filepath by the user, and the image isn't already attached to the thread context within <image ...> tags)."

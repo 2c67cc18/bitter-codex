@@ -1,5 +1,3 @@
-//! Persist Codex session rollouts (.jsonl) so sessions can be replayed or inspected later.
-
 use std::collections::HashSet;
 use std::fs;
 use std::fs::File;
@@ -42,7 +40,6 @@ use super::list::get_threads_in_root;
 use super::list::parse_cursor;
 use super::list::parse_timestamp_uuid_from_filename;
 use super::metadata;
-use super::session_index::find_thread_names_by_ids;
 use crate::config::RolloutConfigView;
 use crate::default_client::originator;
 use crate::state_db;
@@ -57,18 +54,9 @@ use codex_protocol::protocol::RolloutLine;
 use codex_protocol::protocol::SessionMeta;
 use codex_protocol::protocol::SessionMetaLine;
 use codex_protocol::protocol::SessionSource;
-use codex_protocol::protocol::ThreadSource;
 use codex_state::StateRuntime;
 use codex_utils_path as path_utils;
 
-/// Writes canonical session rollout items to JSONL.
-///
-/// Rollouts are recorded as JSONL and can be inspected with tools such as:
-///
-/// ```ignore
-/// $ jq -C . ~/.codex/sessions/rollout-2025-05-07T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl
-/// $ fx ~/.codex/sessions/rollout-2025-05-07T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl
-/// ```
 #[derive(Clone)]
 pub struct RolloutRecorder {
     tx: Sender<RolloutCmd>,
@@ -82,7 +70,6 @@ pub enum RolloutRecorderParams {
         conversation_id: ThreadId,
         forked_from_id: Option<ThreadId>,
         source: SessionSource,
-        thread_source: Option<ThreadSource>,
         base_instructions: BaseInstructions,
         dynamic_tools: Vec<DynamicToolSpec>,
     },
@@ -96,7 +83,7 @@ enum RolloutCmd {
     Persist {
         ack: oneshot::Sender<std::io::Result<()>>,
     },
-    /// Ensure all prior writes are processed; respond when flushed.
+
     Flush {
         ack: oneshot::Sender<std::io::Result<()>>,
     },
@@ -105,14 +92,12 @@ enum RolloutCmd {
     },
 }
 
-/// Observable state for the background rollout writer task.
 struct RolloutWriterTask {
     handle: Mutex<Option<JoinHandle<()>>>,
     terminal_failure: Mutex<Option<Arc<IoError>>>,
 }
 
 impl RolloutWriterTask {
-    /// Create task observability state before spawning the writer.
     fn new() -> Self {
         Self {
             handle: Mutex::new(None),
@@ -120,7 +105,6 @@ impl RolloutWriterTask {
         }
     }
 
-    /// Store the spawned task handle so it remains owned for the lifetime of recorder clones.
     fn set_handle(&self, handle: JoinHandle<()>) {
         let mut guard = self
             .handle
@@ -129,7 +113,6 @@ impl RolloutWriterTask {
         *guard = Some(handle);
     }
 
-    /// Remember a terminal task failure for future recorder API calls.
     fn mark_failed(&self, err: &IoError) {
         let mut guard = self
             .terminal_failure
@@ -138,7 +121,6 @@ impl RolloutWriterTask {
         *guard = Some(Arc::new(clone_io_error(err)));
     }
 
-    /// Return the terminal writer-task failure, if the task exited with an error.
     fn terminal_failure(&self) -> Option<IoError> {
         let guard = self
             .terminal_failure
@@ -157,7 +139,6 @@ impl RolloutRecorderParams {
         conversation_id: ThreadId,
         forked_from_id: Option<ThreadId>,
         source: SessionSource,
-        thread_source: Option<ThreadSource>,
         base_instructions: BaseInstructions,
         dynamic_tools: Vec<DynamicToolSpec>,
     ) -> Self {
@@ -165,7 +146,6 @@ impl RolloutRecorderParams {
             conversation_id,
             forked_from_id,
             source,
-            thread_source,
             base_instructions,
             dynamic_tools,
         }
@@ -189,7 +169,6 @@ enum ThreadListRepairMode {
 }
 
 impl RolloutRecorder {
-    /// List threads (rollout files) under the provided Codex home directory.
     #[allow(clippy::too_many_arguments)]
     pub async fn list_threads(
         state_db_ctx: Option<StateDbHandle>,
@@ -254,7 +233,6 @@ impl RolloutRecorder {
         .await
     }
 
-    /// List archived threads (rollout files) under the archived sessions directory.
     #[allow(clippy::too_many_arguments)]
     pub async fn list_archived_threads(
         state_db_ctx: Option<StateDbHandle>,
@@ -367,9 +345,7 @@ impl RolloutRecorder {
             || model_providers.is_some()
             || cwd_filters.is_some()
             || search_term.is_some();
-        // Filesystem-first listing intentionally overfetches so we can repair stale/missing
-        // SQLite rows before returning the scan page for filtered listings or the DB page for
-        // unfiltered listings.
+
         let fs_page = match sort_direction {
             SortDirection::Asc => {
                 list_threads_from_files_asc(
@@ -404,13 +380,7 @@ impl RolloutRecorder {
         };
 
         if state_db_ctx.is_none() {
-            // Keep legacy behavior when SQLite is unavailable: return filesystem results
-            // at the requested page size.
-            codex_state::record_fallback(
-                "list_threads",
-                "db_unavailable",
-                /*telemetry_override*/ None,
-            );
+            codex_state::record_fallback("list_threads", "db_unavailable", None);
             return Ok(page_from_filesystem_scan(
                 fs_page,
                 sort_direction,
@@ -419,27 +389,21 @@ impl RolloutRecorder {
             ));
         }
 
-        // For metadata-filtered listings the filesystem page is the page we return. Track those
-        // IDs so the later DB page only triggers full reconciliation for DB-only hits.
         let fs_page_thread_ids = fs_page
             .items
             .iter()
             .filter_map(|item| item.thread_id)
             .collect::<HashSet<_>>();
 
-        // Warm the DB by repairing every filesystem hit before querying SQLite. Source/provider/cwd
-        // filters are already validated from rollout head metadata, so lightweight read-repair is
-        // enough there. Search can depend on full title metadata, so keep full reconciliation.
         for item in &fs_page.items {
             if search_term.is_some() {
                 state_db::reconcile_rollout(
                     state_db_ctx.as_deref(),
                     item.path.as_path(),
                     default_provider,
-                    /*builder*/ None,
+                    None,
                     &[],
                     Some(archived),
-                    /*new_thread_memory_mode*/ None,
                 )
                 .await;
             } else {
@@ -474,10 +438,9 @@ impl RolloutRecorder {
                         state_db_ctx.as_deref(),
                         item.rollout_path.as_path(),
                         default_provider,
-                        /*builder*/ None,
+                        None,
                         &[],
                         Some(archived),
-                        /*new_thread_memory_mode*/ None,
                     )
                     .await;
                 }
@@ -502,9 +465,6 @@ impl RolloutRecorder {
             }
             if listing_has_metadata_filters {
                 for item in &db_page.items {
-                    // Rows that also appeared in the filesystem page were just validated from the
-                    // rollout head. Rows only found by SQLite may be stale filter matches, so fully
-                    // reconcile those before returning the filesystem-backed page.
                     if fs_page_thread_ids.contains(&item.id) {
                         continue;
                     }
@@ -512,18 +472,13 @@ impl RolloutRecorder {
                         state_db_ctx.as_deref(),
                         item.rollout_path.as_path(),
                         default_provider,
-                        /*builder*/ None,
+                        None,
                         &[],
                         Some(archived),
-                        /*new_thread_memory_mode*/ None,
                     )
                     .await;
                 }
-                codex_state::record_fallback(
-                    "list_threads",
-                    "metadata_filter",
-                    /*telemetry_override*/ None,
-                );
+                codex_state::record_fallback("list_threads", "metadata_filter", None);
                 let page = page_from_filesystem_scan(fs_page, sort_direction, page_size, sort_key);
                 return Ok(fill_missing_thread_item_metadata_from_state_db(
                     state_db_ctx.as_deref(),
@@ -535,21 +490,17 @@ impl RolloutRecorder {
         }
         if listing_has_metadata_filters {
             let page = page_from_filesystem_scan(fs_page, sort_direction, page_size, sort_key);
-            codex_state::record_fallback(
-                "list_threads",
-                "db_error",
-                /*telemetry_override*/ None,
-            );
+            codex_state::record_fallback("list_threads", "db_error", None);
             return Ok(fill_missing_thread_item_metadata_from_state_db(
                 state_db_ctx.as_deref(),
                 page,
             )
             .await);
         }
-        // If SQLite listing still fails, return the filesystem page rather than failing the list.
+
         tracing::error!("Falling back on rollout system");
         tracing::warn!("state db discrepancy during list_threads_with_db_fallback: falling_back");
-        codex_state::record_fallback("list_threads", "db_error", /*telemetry_override*/ None);
+        codex_state::record_fallback("list_threads", "db_error", None);
         Ok(page_from_filesystem_scan(
             fs_page,
             sort_direction,
@@ -558,7 +509,6 @@ impl RolloutRecorder {
         ))
     }
 
-    /// Find the newest recorded thread path, optionally filtering to a matching cwd.
     #[allow(clippy::too_many_arguments)]
     pub async fn find_latest_thread_path(
         state_db_ctx: Option<StateDbHandle>,
@@ -587,8 +537,8 @@ impl RolloutRecorder {
                     allowed_sources,
                     model_providers,
                     cwd_filter.as_ref().map(std::slice::from_ref),
-                    /*archived*/ false,
-                    /*search_term*/ None,
+                    false,
+                    None,
                 )
                 .await
                 else {
@@ -608,11 +558,7 @@ impl RolloutRecorder {
             }
         }
         if let Some(reason) = fallback_reason {
-            codex_state::record_fallback(
-                "find_latest_thread_path",
-                reason,
-                /*telemetry_override*/ None,
-            );
+            codex_state::record_fallback("find_latest_thread_path", reason, None);
         }
 
         let mut cursor = cursor.cloned();
@@ -638,12 +584,6 @@ impl RolloutRecorder {
         }
     }
 
-    /// Attempt to create a new [`RolloutRecorder`].
-    ///
-    /// For newly created sessions, this precomputes path/metadata and defers
-    /// file creation/open until an explicit `persist()` call.
-    ///
-    /// For resumed sessions, this immediately opens the existing rollout file.
     pub async fn new(
         config: &impl RolloutConfigView,
         params: RolloutRecorderParams,
@@ -653,7 +593,6 @@ impl RolloutRecorder {
                 conversation_id,
                 forked_from_id,
                 source,
-                thread_source,
                 base_instructions,
                 dynamic_tools,
             } => {
@@ -677,19 +616,10 @@ impl RolloutRecorder {
                     cwd: config.cwd().to_path_buf(),
                     originator: originator().value,
                     cli_version: env!("CARGO_PKG_VERSION").to_string(),
-                    agent_nickname: source.get_nickname(),
-                    agent_role: source.get_agent_role(),
-                    agent_path: source.get_agent_path().map(Into::into),
                     source,
-                    thread_source,
                     model_provider: Some(config.model_provider_id().to_string()),
                     base_instructions: Some(base_instructions),
-                    dynamic_tools: if dynamic_tools.is_empty() {
-                        None
-                    } else {
-                        Some(dynamic_tools)
-                    },
-                    memory_mode: (!config.generate_memories()).then_some("disabled".to_string()),
+                    dynamic_tools: Some(dynamic_tools),
                 };
 
                 (None, Some(log_file_info), path, Some(session_meta))
@@ -707,16 +637,10 @@ impl RolloutRecorder {
             ),
         };
 
-        // Clone the cwd for the spawned task to collect git info asynchronously
         let cwd = config.cwd().to_path_buf();
 
-        // A reasonably-sized bounded channel. If the buffer fills up the send
-        // future will yield, which is fine – we only need to ensure we do not
-        // perform *blocking* I/O on the caller's thread.
         let (tx, rx) = mpsc::channel::<RolloutCmd>(256);
-        // Spawn a Tokio task that owns the file handle and performs async
-        // writes. Using `tokio::fs::File` keeps everything on the async I/O
-        // driver instead of blocking the runtime.
+
         let writer_task = Arc::new(RolloutWriterTask::new());
         let writer_task_for_spawn = Arc::clone(&writer_task);
         let rollout_path_for_spawn = rollout_path.clone();
@@ -731,8 +655,6 @@ impl RolloutRecorder {
             )
             .await;
             if let Err(err) = result {
-                // This is the terminal background-task failure path. Normal I/O failures stay inside
-                // `rollout_writer`, are reported through command acks, and leave items buffered for retry.
                 error!(
                     "rollout writer task failed for {}: {err}",
                     rollout_path_for_spawn.display()
@@ -767,10 +689,6 @@ impl RolloutRecorder {
             })
     }
 
-    /// Materialize the rollout file and persist all buffered items.
-    ///
-    /// This is idempotent. If materialization fails, the recorder keeps all pending items in memory
-    /// and a later `persist()` or `flush()` can retry opening and writing the rollout file.
     pub async fn persist(&self) -> std::io::Result<()> {
         let (tx, rx) = oneshot::channel();
         self.tx
@@ -788,10 +706,6 @@ impl RolloutRecorder {
         })?
     }
 
-    /// Flush all queued writes and wait until they are committed by the writer task.
-    ///
-    /// If the first writer attempt fails, the writer drops and reopens the file handle before
-    /// retrying. This returns an error only when that retry also fails or the writer task is gone.
     pub async fn flush(&self) -> std::io::Result<()> {
         let (tx, rx) = oneshot::channel();
         self.tx
@@ -825,7 +739,7 @@ impl RolloutRecorder {
             if line.trim().is_empty() {
                 continue;
             }
-            let mut v: Value = match serde_json::from_str(line) {
+            let v: Value = match serde_json::from_str(line) {
                 Ok(v) => v,
                 Err(e) => {
                     warn!("failed to parse line as JSON: {line:?}, error: {e}");
@@ -833,17 +747,10 @@ impl RolloutRecorder {
                     continue;
                 }
             };
-            if strip_legacy_ghost_snapshot_rollout_line(&mut v) {
-                trace!("skipping legacy ghost_snapshot rollout line");
-                continue;
-            }
 
-            // Parse the rollout line structure
             match serde_json::from_value::<RolloutLine>(v.clone()) {
                 Ok(rollout_line) => match rollout_line.item {
                     RolloutItem::SessionMeta(session_meta_line) => {
-                        // Use the FIRST SessionMeta encountered in the file as the canonical
-                        // thread id and main session information. Keep all items intact.
                         if thread_id.is_none() {
                             thread_id = Some(session_meta_line.meta.id);
                         }
@@ -895,9 +802,6 @@ impl RolloutRecorder {
         }))
     }
 
-    /// Drain pending items before stopping the writer task.
-    ///
-    /// If draining fails, the writer stays alive so callers can continue retrying flush/shutdown.
     pub async fn shutdown(&self) -> std::io::Result<()> {
         let (tx_done, rx_done) = oneshot::channel();
         match self.tx.send(RolloutCmd::Shutdown { ack: tx_done }).await {
@@ -921,29 +825,6 @@ impl RolloutRecorder {
         };
         Ok(())
     }
-}
-
-fn strip_legacy_ghost_snapshot_rollout_line(value: &mut Value) -> bool {
-    match value.get("type").and_then(Value::as_str) {
-        Some("response_item") => value
-            .get("payload")
-            .is_some_and(is_legacy_ghost_snapshot_response_item),
-        Some("compacted") => {
-            if let Some(replacement_history) = value
-                .get_mut("payload")
-                .and_then(|payload| payload.get_mut("replacement_history"))
-                .and_then(Value::as_array_mut)
-            {
-                replacement_history.retain(|item| !is_legacy_ghost_snapshot_response_item(item));
-            }
-            false
-        }
-        _ => false,
-    }
-}
-
-fn is_legacy_ghost_snapshot_response_item(value: &Value) -> bool {
-    value.get("type").and_then(Value::as_str) == Some("ghost_snapshot")
 }
 
 fn truncate_fs_page(
@@ -1018,8 +899,6 @@ fn fill_missing_thread_item_metadata(item: &mut ThreadItem, state_item: ThreadIt
         git_sha,
         git_origin_url,
         source,
-        agent_nickname,
-        agent_role,
         model_provider,
         cli_version,
         created_at,
@@ -1046,12 +925,6 @@ fn fill_missing_thread_item_metadata(item: &mut ThreadItem, state_item: ThreadIt
     }
     if item.source.is_none() {
         item.source = source;
-    }
-    if item.agent_nickname.is_none() {
-        item.agent_nickname = agent_nickname;
-    }
-    if item.agent_role.is_none() {
-        item.agent_role = agent_role;
     }
     if item.model_provider.is_none() {
         item.model_provider = model_provider;
@@ -1216,7 +1089,7 @@ async fn list_threads_from_files_asc(
             cwd_filters,
             default_provider,
             archived,
-            /*search_term*/ None,
+            None,
         )
         .await?;
         scanned_files = scanned_files.saturating_add(page.num_scanned_files);
@@ -1265,27 +1138,15 @@ async fn list_threads_from_files_asc(
 }
 
 async fn filter_thread_items_by_search_term(
-    codex_home: &Path,
+    _codex_home: &Path,
     items: &mut Vec<ThreadItem>,
     search_term: Option<&str>,
 ) -> std::io::Result<()> {
-    let Some(search_term) = search_term else {
+    let Some(_search_term) = search_term else {
         return Ok(());
     };
 
-    // The file-backed fallback only has the thread title in the sidecar session index.
-    // Match the SQLite path's title substring filter so search pagination behaves the same
-    // whether the state DB is available or not.
-    let thread_ids = items
-        .iter()
-        .filter_map(|item| item.thread_id)
-        .collect::<HashSet<_>>();
-    let thread_names = find_thread_names_by_ids(codex_home, &thread_ids).await?;
-    items.retain(|item| {
-        item.thread_id
-            .and_then(|thread_id| thread_names.get(&thread_id))
-            .is_some_and(|title| title.contains(search_term))
-    });
+    items.clear();
     Ok(())
 }
 
@@ -1312,13 +1173,10 @@ fn cursor_from_thread_item(item: &ThreadItem, sort_key: ThreadSortKey) -> Option
 }
 
 struct LogFileInfo {
-    /// Full path to the rollout file.
     path: PathBuf,
 
-    /// Session ID (also embedded in filename).
     conversation_id: ThreadId,
 
-    /// Timestamp for the start of the session.
     timestamp: OffsetDateTime,
 }
 
@@ -1326,7 +1184,6 @@ fn precompute_log_file_info(
     config: &impl RolloutConfigView,
     conversation_id: ThreadId,
 ) -> std::io::Result<LogFileInfo> {
-    // Resolve ~/.codex/sessions/YYYY/MM/DD path.
     let timestamp = OffsetDateTime::now_local()
         .map_err(|e| IoError::other(format!("failed to get local time: {e}")))?;
     let mut dir = config.codex_home().to_path_buf();
@@ -1335,8 +1192,6 @@ fn precompute_log_file_info(
     dir.push(format!("{:02}", u8::from(timestamp.month())));
     dir.push(format!("{:02}", timestamp.day()));
 
-    // Custom format for YYYY-MM-DDThh-mm-ss. Use `-` instead of `:` for
-    // compatibility with filesystems that do not allow colons in filenames.
     let format: &[FormatItem] =
         format_description!("[year]-[month]-[day]T[hour]-[minute]-[second]");
     let date_str = timestamp
@@ -1368,11 +1223,6 @@ fn open_log_file(path: &Path) -> std::io::Result<File> {
         .open(path)
 }
 
-/// Mutable state owned by the background rollout writer.
-///
-/// Items are first appended to `pending_items`; persist/flush/shutdown remove each item from that
-/// queue only after it is written successfully. I/O failures drop the file handle but keep the
-/// unwritten suffix so the next barrier can reopen the file and retry.
 struct RolloutWriterState {
     writer: Option<JsonlWriter>,
     deferred_log_file_info: Option<LogFileInfo>,
@@ -1548,7 +1398,6 @@ async fn rollout_writer(
 ) -> std::io::Result<()> {
     let mut state = RolloutWriterState::new(file, deferred_log_file_info, meta, cwd, rollout_path);
 
-    // Process rollout commands
     while let Some(cmd) = rx.recv().await {
         match cmd {
             RolloutCmd::AddItems(items) => {
@@ -1602,11 +1451,6 @@ async fn write_session_meta(
     Ok(())
 }
 
-/// Append one already-filtered rollout item to an existing rollout JSONL file.
-///
-/// This is for metadata updates to unloaded threads. Live sessions should use
-/// `RolloutRecorder::record_canonical_items` so rollout writes remain ordered
-/// with the rest of the session stream.
 pub async fn append_rollout_item_to_path(
     rollout_path: &Path,
     item: &RolloutItem,
@@ -1685,8 +1529,6 @@ fn thread_item_from_state_metadata(item: codex_state::ThreadMetadata) -> ThreadI
                 .or_else(|_| serde_json::from_value(Value::String(item.source)))
                 .unwrap_or(SessionSource::Unknown),
         ),
-        agent_nickname: item.agent_nickname,
-        agent_role: item.agent_role,
         model_provider: Some(item.model_provider),
         cli_version: Some(item.cli_version),
         created_at: Some(item.created_at.to_rfc3339_opts(SecondsFormat::Secs, true)),
@@ -1774,7 +1616,3 @@ async fn select_resume_path_from_db_page(
 fn cwd_matches(session_cwd: &Path, cwd: &Path) -> bool {
     path_utils::paths_match_after_normalization(session_cwd, cwd)
 }
-
-#[cfg(test)]
-#[path = "recorder_tests.rs"]
-mod tests;

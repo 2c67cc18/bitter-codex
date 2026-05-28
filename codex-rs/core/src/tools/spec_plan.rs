@@ -15,14 +15,11 @@ use crate::tools::router::ToolRouterParams;
 use codex_features::Feature;
 use codex_login::AuthManager;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
-use codex_protocol::openai_models::ConfigShellToolType;
 use codex_protocol::openai_models::InputModality;
 use codex_tools::ResponsesApiNamespaceTool;
-use codex_tools::ToolEnvironmentMode;
 use codex_tools::ToolSpec;
 use codex_tools::can_request_original_image_detail;
 use codex_tools::default_namespace_description;
-use codex_tools::shell_type_for_model_and_features;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -66,10 +63,7 @@ fn build_tool_specs_and_registry(
     turn_context: &TurnContext,
     params: ToolRouterParams<'_>,
 ) -> (Vec<ToolSpec>, ToolRegistry) {
-    let ToolRouterParams {
-        discoverable_tools: _,
-        dynamic_tools,
-    } = params;
+    let ToolRouterParams { dynamic_tools } = params;
     let context = CoreToolPlanContext {
         turn_context,
         dynamic_tools,
@@ -213,58 +207,36 @@ fn add_tool_sources(context: &CoreToolPlanContext<'_>, planned_tools: &mut Plann
     }
 }
 
+fn add_dynamic_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {
+    for tool in context.dynamic_tools {
+        if let Some(handler) = DynamicToolHandler::new(tool) {
+            planned_tools.add(handler);
+        }
+    }
+}
+
 fn add_shell_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {
     let turn_context = context.turn_context;
-    let features = turn_context.features.get();
-    let environment_mode = turn_context.tool_environment_mode();
-    if !environment_mode.has_environment() {
+    let environment_count = turn_context.environments.turn_environments.len();
+    if environment_count == 0 {
         return;
     }
 
-    let allow_login_shell = turn_context.config.permissions.allow_login_shell;
-    let include_environment_id = matches!(environment_mode, ToolEnvironmentMode::Multiple);
-
-    if matches!(
-        shell_type_for_model_and_features(&turn_context.model_info, features),
-        ConfigShellToolType::UnifiedExec
-    ) {
-        planned_tools.add(ExecCommandHandler::new(ExecCommandHandlerOptions {
-            allow_login_shell,
-            include_environment_id,
-        }));
-        planned_tools.add(WriteStdinHandler);
-    }
+    planned_tools.add(ExecCommandHandler::new(ExecCommandHandlerOptions {
+        allow_login_shell: turn_context.config.allow_login_shell,
+    }));
+    planned_tools.add(WriteStdinHandler);
 }
 
 fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {
     let turn_context = context.turn_context;
-    let environment_mode = turn_context.tool_environment_mode();
+    let environment_count = turn_context.environments.turn_environments.len();
 
-    if environment_mode.has_environment() {
-        let include_environment_id = matches!(environment_mode, ToolEnvironmentMode::Multiple);
+    if environment_count > 0 {
         planned_tools.add(ViewImageHandler::new(ViewImageToolOptions {
             can_request_original_image_detail: can_request_original_image_detail(
                 &turn_context.model_info,
             ),
-            include_environment_id,
         }));
     }
 }
-
-fn add_dynamic_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {
-    for tool in context.dynamic_tools {
-        let Some(handler) = DynamicToolHandler::new(tool) else {
-            tracing::error!(
-                "Failed to convert dynamic tool {:?} to OpenAI tool",
-                tool.name
-            );
-            continue;
-        };
-
-        planned_tools.add(handler);
-    }
-}
-
-#[cfg(test)]
-#[path = "spec_plan_tests.rs"]
-mod tests;

@@ -1,11 +1,3 @@
-//! Helpers for applying unified diffs using the system `git` binary.
-//!
-//! The entry point is [`apply_git_patch`], which writes a diff to a temporary
-//! file, shells out to `git apply` with the right flags, and then parses the
-//! command’s output into structured details. Callers can opt into dry-run
-//! mode via [`ApplyGitRequest::preflight`] and inspect the resulting paths to
-//! learn what would change before applying for real.
-
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::ffi::OsStr;
@@ -13,7 +5,6 @@ use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 
-/// Parameters for invoking [`apply_git_patch`].
 #[derive(Debug, Clone)]
 pub struct ApplyGitRequest {
     pub cwd: PathBuf,
@@ -22,7 +13,6 @@ pub struct ApplyGitRequest {
     pub preflight: bool,
 }
 
-/// Result of running [`apply_git_patch`], including paths gleaned from stdout/stderr.
 #[derive(Debug, Clone)]
 pub struct ApplyGitResult {
     pub exit_code: i32,
@@ -34,30 +24,22 @@ pub struct ApplyGitResult {
     pub cmd_for_log: String,
 }
 
-/// Apply a unified diff to the target repository by shelling out to `git apply`.
-///
-/// When [`ApplyGitRequest::preflight`] is `true`, this behaves like `git apply --check` and
-/// leaves the working tree untouched while still parsing the command output for diagnostics.
 pub fn apply_git_patch(req: &ApplyGitRequest) -> io::Result<ApplyGitResult> {
     let git_root = resolve_git_root(&req.cwd)?;
 
-    // Write unified diff into a temporary file
     let (tmpdir, patch_path) = write_temp_patch(&req.diff)?;
-    // Keep tmpdir alive until function end to ensure the file exists
+
     let _guard = tmpdir;
 
     if req.revert && !req.preflight {
-        // Stage WT paths first to avoid index mismatch on revert.
         stage_paths(&git_root, &req.diff)?;
     }
 
-    // Build git args
     let mut args: Vec<String> = vec!["apply".into(), "--3way".into()];
     if req.revert {
         args.push("-R".into());
     }
 
-    // Optional: additional git config via env knob (defaults OFF)
     let mut cfg_parts: Vec<String> = Vec::new();
     if let Ok(cfg) = std::env::var("CODEX_APPLY_GIT_CFG") {
         for pair in cfg.split(',') {
@@ -72,7 +54,6 @@ pub fn apply_git_patch(req: &ApplyGitRequest) -> io::Result<ApplyGitResult> {
 
     args.push(patch_path.to_string_lossy().to_string());
 
-    // Optional preflight: dry-run only; do not modify working tree
     if req.preflight {
         let mut check_args = vec!["apply".to_string(), "--check".to_string()];
         if req.revert {
@@ -190,7 +171,6 @@ fn render_command_for_log(cwd: &Path, git_cfg: &[String], args: &[String]) -> St
     )
 }
 
-/// Collect every path referenced by the diff headers inside `diff --git` sections.
 pub fn extract_paths_from_patch(diff_text: &str) -> Vec<String> {
     let mut set = std::collections::BTreeSet::new();
     for raw_line in diff_text.lines() {
@@ -316,7 +296,6 @@ fn unescape_c_string(input: &str) -> String {
     out
 }
 
-/// Stage only the files that actually exist on disk for the given diff.
 pub fn stage_paths(git_root: &Path, diff: &str) -> io::Result<()> {
     let paths = extract_paths_from_patch(diff);
     let mut existing: Vec<String> = Vec::new();
@@ -337,13 +316,10 @@ pub fn stage_paths(git_root: &Path, diff: &str) -> io::Result<()> {
     }
     let out = cmd.current_dir(git_root).output()?;
     let _code = out.status.code().unwrap_or(-1);
-    // We do not hard fail staging; best-effort is OK. Return Ok even on non-zero.
+
     Ok(())
 }
 
-// ============ Parser ported from VS Code (TS) ============
-
-/// Parse `git apply` output into applied/skipped/conflicted path groupings.
 pub fn parse_git_apply_output(
     stdout: &str,
     stderr: &str,
@@ -444,7 +420,6 @@ pub fn parse_git_apply_output(
             continue;
         }
 
-        // === "Checking patch <path>..." tracking ===
         if let Some(c) = CHECKING_PATCH.captures(line) {
             if let Some(m) = c.name("path") {
                 last_seen_path = Some(m.as_str().to_string());
@@ -452,7 +427,6 @@ pub fn parse_git_apply_output(
             continue;
         }
 
-        // === Status lines ===
         if let Some(c) = APPLIED_CLEAN.captures(line) {
             if let Some(m) = c.name("path") {
                 add(&mut applied, m.as_str());
@@ -490,7 +464,6 @@ pub fn parse_git_apply_output(
             continue;
         }
 
-        // === “U <path>” after conflicts ===
         if let Some(c) = UNMERGED_LINE.captures(line) {
             if let Some(m) = c.name("path") {
                 add(&mut conflicted, m.as_str());
@@ -504,7 +477,6 @@ pub fn parse_git_apply_output(
             continue;
         }
 
-        // === Early hints ===
         if PATCH_FAILED.is_match(line) || DOES_NOT_APPLY.is_match(line) {
             if let Some(c) = PATCH_FAILED
                 .captures(line)
@@ -517,12 +489,10 @@ pub fn parse_git_apply_output(
             continue;
         }
 
-        // === Ignore narration ===
         if THREE_WAY_START.is_match(line) || FALLBACK_DIRECT.is_match(line) {
             continue;
         }
 
-        // === 3-way failed entirely; attribute to last_seen_path ===
         if THREE_WAY_FAILED.is_match(line) || LACKS_BLOB.is_match(line) {
             if let Some(p) = last_seen_path.clone() {
                 add(&mut skipped, &p);
@@ -532,7 +502,6 @@ pub fn parse_git_apply_output(
             continue;
         }
 
-        // === Skips / I/O problems ===
         if let Some(c) = INDEX_MISMATCH
             .captures(line)
             .or_else(|| NOT_IN_INDEX.captures(line))
@@ -557,7 +526,6 @@ pub fn parse_git_apply_output(
             continue;
         }
 
-        // === Warnings that imply conflicts ===
         if let Some(c) = CANNOT_MERGE_BINARY_WARN.captures(line) {
             if let Some(m) = c.name("path") {
                 add(&mut conflicted, m.as_str());
@@ -572,7 +540,6 @@ pub fn parse_git_apply_output(
         }
     }
 
-    // Final precedence: conflicts > applied > skipped
     for p in conflicted.iter() {
         applied.remove(p);
         skipped.remove(p);
@@ -620,7 +587,7 @@ mod tests {
     fn init_repo() -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
-        // git init and minimal identity
+
         let _ = run(root, &["git", "init"]);
         let _ = run(root, &["git", "config", "user.email", "codex@example.com"]);
         let _ = run(root, &["git", "config", "user.name", "Codex"]);
@@ -678,7 +645,7 @@ mod tests {
         };
         let r = apply_git_patch(&req).expect("run apply");
         assert_eq!(r.exit_code, 0, "exit code 0");
-        // File exists now
+
         assert!(root.join("hello.txt").exists());
     }
 
@@ -687,13 +654,13 @@ mod tests {
         let _g = env_lock().lock().unwrap();
         let repo = init_repo();
         let root = repo.path();
-        // seed file and commit
+
         std::fs::write(root.join("file.txt"), "line1\nline2\nline3\n").unwrap();
         let _ = run(root, &["git", "add", "file.txt"]);
         let _ = run(root, &["git", "commit", "-m", "seed"]);
-        // local edit (unstaged)
+
         std::fs::write(root.join("file.txt"), "line1\nlocal2\nline3\n").unwrap();
-        // patch wants to change the same line differently
+
         let diff = "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1,3 +1,3 @@\n line1\n-line2\n+remote2\n line3\n";
         let req = ApplyGitRequest {
             cwd: root.to_path_buf(),
@@ -710,7 +677,7 @@ mod tests {
         let _g = env_lock().lock().unwrap();
         let repo = init_repo();
         let root = repo.path();
-        // Try to modify a file that is not in the index
+
         let diff = "diff --git a/ghost.txt b/ghost.txt\n--- a/ghost.txt\n+++ b/ghost.txt\n@@ -1,1 +1,1 @@\n-old\n+new\n";
         let req = ApplyGitRequest {
             cwd: root.to_path_buf(),
@@ -727,12 +694,11 @@ mod tests {
         let _g = env_lock().lock().unwrap();
         let repo = init_repo();
         let root = repo.path();
-        // Seed file and commit original content
+
         std::fs::write(root.join("file.txt"), "orig\n").unwrap();
         let _ = run(root, &["git", "add", "file.txt"]);
         let _ = run(root, &["git", "commit", "-m", "seed"]);
 
-        // Forward patch: orig -> ORIG
         let diff = "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1,1 +1,1 @@\n-orig\n+ORIG\n";
         let apply_req = ApplyGitRequest {
             cwd: root.to_path_buf(),
@@ -745,7 +711,6 @@ mod tests {
         let after_apply = read_file_normalized(&root.join("file.txt"));
         assert_eq!(after_apply, "ORIG\n");
 
-        // Revert patch: ORIG -> orig (stage paths first; engine handles it)
         let revert_req = ApplyGitRequest {
             cwd: root.to_path_buf(),
             diff: diff.to_string(),
@@ -763,7 +728,7 @@ mod tests {
         let _g = env_lock().lock().unwrap();
         let repo = init_repo();
         let root = repo.path();
-        // Seed repo and apply forward patch so the working tree reflects the change.
+
         std::fs::write(root.join("file.txt"), "orig\n").unwrap();
         let _ = run(root, &["git", "add", "file.txt"]);
         let _ = run(root, &["git", "commit", "-m", "seed"]);
@@ -808,11 +773,10 @@ mod tests {
         let _g = env_lock().lock().unwrap();
         let repo = init_repo();
         let root = repo.path();
-        // Build a multi-file diff: one valid add (ok.txt) and one invalid modify (ghost.txt)
+
         let diff = "diff --git a/ok.txt b/ok.txt\nnew file mode 100644\n--- /dev/null\n+++ b/ok.txt\n@@ -0,0 +1,2 @@\n+alpha\n+beta\n\n\
 diff --git a/ghost.txt b/ghost.txt\n--- a/ghost.txt\n+++ b/ghost.txt\n@@ -1,1 +1,1 @@\n-old\n+new\n";
 
-        // 1) With preflight enabled, nothing should be changed (even though ok.txt could be added)
         let req1 = ApplyGitRequest {
             cwd: root.to_path_buf(),
             diff: diff.to_string(),
@@ -830,7 +794,6 @@ diff --git a/ghost.txt b/ghost.txt\n--- a/ghost.txt\n+++ b/ghost.txt\n@@ -1,1 +1
             "preflight path recorded --check"
         );
 
-        // 2) Without preflight, we should see no --check in the executed command
         let req2 = ApplyGitRequest {
             cwd: root.to_path_buf(),
             diff: diff.to_string(),

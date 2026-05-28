@@ -22,11 +22,6 @@ use super::process_state::ProcessState;
 const EARLY_EXIT_GRACE_PERIOD: Duration = Duration::from_millis(150);
 
 pub(crate) trait SpawnLifecycle: std::fmt::Debug + Send + Sync {
-    /// Returns file descriptors that must stay open across the child `exec()`.
-    ///
-    /// The returned descriptors must already be valid in the parent process and
-    /// stay valid until `after_spawn()` runs, which is the first point where
-    /// the parent may release its copies.
     fn inherited_fds(&self) -> Vec<i32> {
         Vec::new()
     }
@@ -37,13 +32,13 @@ pub(crate) trait SpawnLifecycle: std::fmt::Debug + Send + Sync {
 pub(crate) type SpawnLifecycleHandle = Box<dyn SpawnLifecycle>;
 
 #[derive(Debug, Default)]
-/// Spawn lifecycle that performs no extra setup around process launch.
+
 pub(crate) struct NoopSpawnLifecycle;
 
 impl SpawnLifecycle for NoopSpawnLifecycle {}
 
 pub(crate) type OutputBuffer = Arc<Mutex<HeadTailBuffer>>;
-/// Shared output state exposed to polling and streaming consumers.
+
 pub(crate) struct OutputHandles {
     pub(crate) output_buffer: OutputBuffer,
     pub(crate) output_notify: Arc<Notify>,
@@ -52,7 +47,6 @@ pub(crate) struct OutputHandles {
     pub(crate) cancellation_token: CancellationToken,
 }
 
-/// Unified wrapper over directly spawned PTY sessions.
 pub(crate) struct UnifiedExecProcess {
     process_handle: Box<ExecCommandSession>,
     output_tx: broadcast::Sender<Vec<u8>>,
@@ -168,11 +162,6 @@ impl UnifiedExecProcess {
     pub(super) fn failure_message(&self) -> Option<String> {
         self.state_rx.borrow().failure_message.clone()
     }
-
-    pub(super) async fn check_for_sandbox_denial(&self) -> Result<(), UnifiedExecError> {
-        Ok(())
-    }
-
     pub(super) async fn from_spawned(
         spawned: SpawnedPty,
         spawn_lifecycle: SpawnLifecycleHandle,
@@ -197,12 +186,10 @@ impl UnifiedExecProcess {
         match exit_rx.try_recv() {
             Ok(exit_code) => {
                 managed.signal_exit(Some(exit_code));
-                managed.check_for_sandbox_denial().await?;
                 return Ok(managed);
             }
             Err(TryRecvError::Closed) => {
-                managed.signal_exit(/*exit_code*/ None);
-                managed.check_for_sandbox_denial().await?;
+                managed.signal_exit(None);
                 return Ok(managed);
             }
             Err(TryRecvError::Empty) => {}
@@ -210,7 +197,6 @@ impl UnifiedExecProcess {
 
         if let Ok(exit_result) = tokio::time::timeout(EARLY_EXIT_GRACE_PERIOD, &mut exit_rx).await {
             managed.signal_exit(exit_result.ok());
-            managed.check_for_sandbox_denial().await?;
             return Ok(managed);
         }
 

@@ -19,12 +19,10 @@ impl Display for RateLimitError {
     }
 }
 
-/// Parses the default Codex rate-limit header family into a `RateLimitSnapshot`.
 pub fn parse_default_rate_limit(headers: &HeaderMap) -> Option<RateLimitSnapshot> {
-    parse_rate_limit_for_limit(headers, /*limit_id*/ None)
+    parse_rate_limit_for_limit(headers, None)
 }
 
-/// Parses all known rate-limit header families into update records keyed by limit id.
 pub fn parse_all_rate_limits(headers: &HeaderMap) -> Vec<RateLimitSnapshot> {
     let mut snapshots = Vec::new();
     if let Some(snapshot) = parse_default_rate_limit(headers) {
@@ -50,10 +48,6 @@ pub fn parse_all_rate_limits(headers: &HeaderMap) -> Vec<RateLimitSnapshot> {
     snapshots
 }
 
-/// Parses rate-limit headers for the provided limit id.
-///
-/// `limit_id` should match the server-provided metered limit id (e.g. `codex`,
-/// `codex_other`). When omitted, this defaults to the legacy `codex` header family.
 pub fn parse_rate_limit_for_limit(
     headers: &HeaderMap,
     limit_id: Option<&str>,
@@ -171,7 +165,6 @@ fn map_event_window(window: Option<&RateLimitEventWindow>) -> Option<RateLimitWi
     })
 }
 
-/// Parses the bespoke Codex rate-limit headers into a `RateLimitSnapshot`.
 pub fn parse_promo_message(headers: &HeaderMap) -> Option<String> {
     parse_header_str(headers, "x-codex-promo-message")
         .map(str::trim)
@@ -287,7 +280,7 @@ mod tests {
             HeaderValue::from_static("1704069000"),
         );
 
-        let snapshot = parse_rate_limit_for_limit(&headers, /*limit_id*/ None).expect("snapshot");
+        let snapshot = parse_rate_limit_for_limit(&headers, None).expect("snapshot");
         assert_eq!(snapshot.limit_id.as_deref(), Some("codex"));
         assert_eq!(snapshot.limit_name, None);
         let primary = snapshot.primary.expect("primary");

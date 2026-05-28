@@ -8,10 +8,6 @@ use crate::DB_INIT_DURATION_METRIC;
 use crate::DB_INIT_METRIC;
 use tracing::debug;
 
-/// Low-cardinality sink for SQLite startup and fallback telemetry.
-///
-/// Implementations should absorb delivery failures locally. Database behavior
-/// must not depend on whether telemetry export succeeds.
 pub trait DbTelemetry: Send + Sync + 'static {
     fn counter(&self, name: &str, inc: i64, tags: &[(&str, &str)]);
     fn record_duration(&self, name: &str, duration: Duration, tags: &[(&str, &str)]);
@@ -21,11 +17,6 @@ pub type DbTelemetryHandle = Arc<dyn DbTelemetry>;
 
 static PROCESS_DB_TELEMETRY: OnceLock<DbTelemetryHandle> = OnceLock::new();
 
-/// Install the process-wide SQLite telemetry sink.
-///
-/// Startup owners should call this once after OTEL initialization. Low-level
-/// database paths will use the registered sink unless an explicit sink is
-/// provided. Subsequent installs are ignored and keep the first installed sink.
 pub fn install_process_db_telemetry(telemetry: DbTelemetryHandle) -> bool {
     if PROCESS_DB_TELEMETRY.set(telemetry).is_ok() {
         true
@@ -39,7 +30,6 @@ pub fn install_process_db_telemetry(telemetry: DbTelemetryHandle) -> bool {
 pub(crate) enum DbKind {
     State,
     Logs,
-    Goals,
 }
 
 impl DbKind {
@@ -47,7 +37,6 @@ impl DbKind {
         match self {
             Self::State => "state",
             Self::Logs => "logs",
-            Self::Goals => "goals",
         }
     }
 }
@@ -92,7 +81,7 @@ pub fn record_fallback(
 
 fn record_counter(telemetry: Option<&dyn DbTelemetry>, name: &str, tags: &[(&str, &str)]) {
     if let Some(telemetry) = resolve_telemetry(telemetry) {
-        telemetry.counter(name, /*inc*/ 1, tags);
+        telemetry.counter(name, 1, tags);
     }
 }
 
@@ -170,8 +159,6 @@ fn classify_sqlx_error(err: &sqlx::Error) -> &'static str {
 }
 
 fn classify_sqlite_code(code: &str) -> &'static str {
-    // SQLite result codes are documented at https://www.sqlite.org/rescode.html.
-    // Extended codes preserve the primary code in the low byte.
     let primary_code = code.parse::<i32>().ok().map(|code| code & 0xff);
     match primary_code {
         Some(5) => "busy",

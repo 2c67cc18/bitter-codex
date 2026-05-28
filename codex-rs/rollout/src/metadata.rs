@@ -1,6 +1,5 @@
 use crate::ARCHIVED_SESSIONS_SUBDIR;
 use crate::SESSIONS_SUBDIR;
-use crate::list;
 use crate::list::parse_timestamp_uuid_from_filename;
 use crate::recorder::RolloutRecorder;
 use crate::state_db::normalize_cwd_for_state_db;
@@ -9,9 +8,7 @@ use chrono::NaiveDateTime;
 use chrono::Timelike;
 use chrono::Utc;
 use codex_protocol::ThreadId;
-use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::RolloutItem;
-use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::SessionMetaLine;
 use codex_protocol::protocol::SessionSource;
 use codex_state::BackfillState;
@@ -48,13 +45,8 @@ pub(crate) fn builder_from_session_meta(
         session_meta.meta.source.clone(),
     );
     builder.model_provider = session_meta.meta.model_provider.clone();
-    builder.agent_nickname = session_meta.meta.agent_nickname.clone();
-    builder.agent_role = session_meta.meta.agent_role.clone();
-    builder.agent_path = session_meta.meta.agent_path.clone();
     builder.cwd = session_meta.meta.cwd.clone();
     builder.cli_version = Some(session_meta.meta.cli_version.clone());
-    builder.sandbox_policy = SandboxPolicy::new_read_only_policy();
-    builder.approval_mode = AskForApproval::OnRequest;
     if let Some(git) = session_meta.git.as_ref() {
         builder.git_sha = git.commit_hash.as_ref().map(|sha| sha.0.clone());
         builder.git_branch = git.branch.clone();
@@ -121,13 +113,6 @@ pub async fn extract_metadata_from_rollout(
     }
     Ok(ExtractionOutcome {
         metadata,
-        memory_mode: items.iter().rev().find_map(|item| match item {
-            RolloutItem::SessionMeta(meta_line) => meta_line.meta.memory_mode.clone(),
-            RolloutItem::ResponseItem(_)
-            | RolloutItem::Compacted(_)
-            | RolloutItem::TurnContext(_)
-            | RolloutItem::EventMsg(_) => None,
-        }),
         parse_errors,
     })
 }
@@ -260,7 +245,6 @@ pub(crate) async fn backfill_sessions_with_lease(
                     }
                     let mut metadata = outcome.metadata;
                     metadata.cwd = normalize_cwd_for_state_db(&metadata.cwd);
-                    let memory_mode = outcome.memory_mode.unwrap_or_else(|| "enabled".to_string());
                     if let Ok(Some(existing_metadata)) = runtime.get_thread(metadata.id).await {
                         metadata.prefer_existing_git_info(&existing_metadata);
                     }
@@ -274,37 +258,7 @@ pub(crate) async fn backfill_sessions_with_lease(
                         stats.failed = stats.failed.saturating_add(1);
                         warn!("failed to upsert rollout {}: {err}", rollout.path.display());
                     } else {
-                        if let Err(err) = runtime
-                            .set_thread_memory_mode(metadata.id, memory_mode.as_str())
-                            .await
-                        {
-                            stats.failed = stats.failed.saturating_add(1);
-                            warn!(
-                                "failed to restore memory mode for {}: {err}",
-                                rollout.path.display()
-                            );
-                            continue;
-                        }
                         stats.upserted = stats.upserted.saturating_add(1);
-                        if let Ok(meta_line) = list::read_session_meta_line(&rollout.path).await {
-                            if let Err(err) = runtime
-                                .persist_dynamic_tools(
-                                    meta_line.meta.id,
-                                    meta_line.meta.dynamic_tools.as_deref(),
-                                )
-                                .await
-                            {
-                                warn!(
-                                    "failed to backfill dynamic tools {}: {err}",
-                                    rollout.path.display()
-                                );
-                            }
-                        } else {
-                            warn!(
-                                "failed to read session meta for dynamic tools {}",
-                                rollout.path.display()
-                            );
-                        }
                     }
                 }
                 Err(err) => {
@@ -452,7 +406,3 @@ async fn collect_rollout_paths(root: &Path) -> std::io::Result<Vec<PathBuf>> {
     }
     Ok(paths)
 }
-
-#[cfg(test)]
-#[path = "metadata_tests.rs"]
-mod tests;

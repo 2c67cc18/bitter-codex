@@ -1,7 +1,6 @@
 use crate::shell::Shell;
 use crate::shell::ShellType;
 use crate::shell::get_shell_by_model_provided_path;
-use codex_tools::UnifiedExecShellMode;
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -33,16 +32,6 @@ pub(crate) struct ExecCommandArgs {
     max_output_tokens: Option<usize>,
 }
 
-#[derive(Debug, Deserialize)]
-struct ExecCommandEnvironmentArgs {
-    #[serde(default)]
-    environment_id: Option<String>,
-    // Keep this raw until after environment selection; relative paths must be
-    // resolved against the selected environment cwd, not the process cwd.
-    #[serde(default)]
-    workdir: Option<String>,
-}
-
 fn default_exec_yield_time_ms() -> u64 {
     10_000
 }
@@ -64,7 +53,6 @@ pub(crate) struct ResolvedCommand {
 pub(crate) fn get_command(
     args: &ExecCommandArgs,
     session_shell: Arc<Shell>,
-    shell_mode: &UnifiedExecShellMode,
     allow_login_shell: bool,
 ) -> Result<ResolvedCommand, String> {
     let use_login_shell = match args.login {
@@ -77,30 +65,14 @@ pub(crate) fn get_command(
         None => allow_login_shell,
     };
 
-    match shell_mode {
-        UnifiedExecShellMode::Direct => {
-            let model_shell = args.shell.as_ref().map(|shell_str| {
-                let mut shell = get_shell_by_model_provided_path(&PathBuf::from(shell_str));
-                shell.shell_snapshot = crate::shell::empty_shell_snapshot_receiver();
-                shell
-            });
-            let shell = model_shell.as_ref().unwrap_or(session_shell.as_ref());
-            Ok(ResolvedCommand {
-                command: shell.derive_exec_args(&args.cmd, use_login_shell),
-                shell_type: shell.shell_type.clone(),
-            })
-        }
-        UnifiedExecShellMode::ZshFork(zsh_fork_config) => Ok(ResolvedCommand {
-            command: vec![
-                zsh_fork_config.shell_zsh_path.to_string_lossy().to_string(),
-                if use_login_shell { "-lc" } else { "-c" }.to_string(),
-                args.cmd.clone(),
-            ],
-            shell_type: ShellType::Zsh,
-        }),
-    }
+    let model_shell = args.shell.as_ref().map(|shell_str| {
+        let mut shell = get_shell_by_model_provided_path(&PathBuf::from(shell_str));
+        shell.shell_snapshot = crate::shell::empty_shell_snapshot_receiver();
+        shell
+    });
+    let shell = model_shell.as_ref().unwrap_or(session_shell.as_ref());
+    Ok(ResolvedCommand {
+        command: shell.derive_exec_args(&args.cmd, use_login_shell),
+        shell_type: shell.shell_type.clone(),
+    })
 }
-
-#[cfg(test)]
-#[path = "unified_exec_tests.rs"]
-mod tests;

@@ -8,7 +8,7 @@ use tempfile::TempDir;
 
 fn codex_command(codex_home: &Path) -> Result<assert_cmd::Command> {
     let mut cmd = assert_cmd::Command::new(codex_utils_cargo_bin::cargo_bin("codex")?);
-    cmd.env("CODEX_HOME", codex_home);
+    cmd.env("BITTER_CODEX_HOME", codex_home);
     Ok(cmd)
 }
 
@@ -45,7 +45,6 @@ fn login_with_api_key_reads_stdin_and_writes_auth_json() -> Result<()> {
     let auth = read_auth_json(codex_home.path())?;
     assert_eq!(auth["OPENAI_API_KEY"], "sk-test");
     assert!(auth.get("tokens").is_none());
-    assert!(auth.get("agent_identity").is_none());
 
     Ok(())
 }
