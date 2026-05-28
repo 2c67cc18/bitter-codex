@@ -102,6 +102,37 @@ done as blind deletion or line-range cleanup.
   attestation, realtime, MCP/request-permissions, sandboxing, execpolicy,
   network-proxy, Windows sandbox, rollout-trace, compact, tools, and
   thread-manager references.
+- 2026-05-28 accepted narrow unified exec command handler slice
+  `semantic-root-20260528-core-unified-exec-handler/core-unified-exec-handler`
+  as merge commit `Merge unified exec command handler trim`. It removed stale
+  deleted hook/shell-command fallout from
+  `core/src/tools/handlers/unified_exec/exec_command.rs` without restoring hook
+  behavior or deleted crates: command display no longer uses
+  `codex_shell_command`, retained tool output boxing is imported directly, and
+  handler-created outputs clear hook metadata. Its focused cargo-modal check
+  still failed at 369 out-of-scope `codex-core` errors in session, compact,
+  thread-manager, exec, attestation/agent/realtime/MCP/request-permissions,
+  sandboxing, execpolicy, network-proxy, Windows sandbox, and rollout-trace
+  surfaces.
+- 2026-05-28 accepted narrow thread-manager rollout trace slice
+  `semantic-root-20260528-core-thread-trace/core-thread-trace` as merge commit
+  `Merge thread manager rollout trace trim`. It removed the direct
+  `codex_rollout_trace::ThreadTraceContext` return type from
+  `core/src/thread_manager.rs` by inlining parent trace lookup and using the
+  retained/default rollout trace context at the call site. Its focused
+  cargo-modal check still failed at 369 out-of-scope `codex-core` errors from
+  broader removed surfaces.
+- 2026-05-28 rejected compact trace worker
+  `semantic-root-20260528-core-compact-trace/core-compact-trace` as incomplete.
+  Evidence: branch `semantic/core-compact-trace` commit
+  `0ad6526ef Trim remote compact rollout trace fallout` touched only
+  `core/src/compact_remote_v2.rs` and removed direct `codex_rollout_trace`
+  imports/calls, but also dropped the `ModelClientSession::stream` inference
+  trace argument while the retained `client.rs` API still requires it. Do not
+  merge this patch as-is; rerun a tighter-but-complete compact/client trace
+  slice that owns the relevant `compact_remote_v2.rs` and client stream
+  signature/call sites, or intentionally remove the trace parameter everywhere
+  in one reviewed slice.
 
 ## Analytics removal follow-through
 
