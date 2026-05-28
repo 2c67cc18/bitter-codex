@@ -1,12 +1,11 @@
-use codex_tools::ToolName;
-use codex_tools::mcp_tool_to_responses_api_tool;
+use codex_protocol::dynamic_tools::DynamicToolSpec;
+use codex_tools::dynamic_tool_to_responses_api_tool;
 use pretty_assertions::assert_eq;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use serde_json::json;
 use std::fs;
-use std::sync::Arc;
 
 const FIXTURE_PATHS: [&str; 5] = [
     "tests/fixtures/json_schema_policy/slack.json",
@@ -196,24 +195,15 @@ fn convert_fixture_tool(
     fixture_tool: &FixtureTool,
 ) -> codex_tools::ResponsesApiTool {
     let name = &fixture_tool.name;
-    let input_schema = fixture_tool
-        .input_schema
-        .as_object()
-        .unwrap_or_else(|| panic!("{name} input_schema should be an object"))
-        .clone();
-    let tool = rmcp::model::Tool {
-        name: name.to_string().into(),
-        title: None,
-        description: Some(fixture_tool.description.clone().into()),
-        input_schema: Arc::new(input_schema),
-        output_schema: None,
-        annotations: None,
-        execution: None,
-        icons: None,
-        meta: None,
+    let tool = DynamicToolSpec {
+        namespace: Some(fixture.source.clone()),
+        name: name.to_string(),
+        description: fixture_tool.description.clone(),
+        input_schema: fixture_tool.input_schema.clone(),
+        defer_loading: false,
     };
 
-    mcp_tool_to_responses_api_tool(&ToolName::namespaced(&fixture.source, name), &tool)
+    dynamic_tool_to_responses_api_tool(&tool)
         .unwrap_or_else(|err| panic!("convert {name} from {}: {err}", fixture.source))
 }
 

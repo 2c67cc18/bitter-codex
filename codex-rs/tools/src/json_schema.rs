@@ -48,7 +48,7 @@ pub struct JsonSchema {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub items: Option<Box<JsonSchema>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub properties: Option<BTreeMap<String>>,
+    pub properties: Option<BTreeMap<String, JsonSchema>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub required: Option<Vec<String>>,
     #[serde(
@@ -59,9 +59,9 @@ pub struct JsonSchema {
     #[serde(rename = "anyOf", skip_serializing_if = "Option::is_none")]
     pub any_of: Option<Vec<JsonSchema>>,
     #[serde(rename = "$defs", skip_serializing_if = "Option::is_none")]
-    pub defs: Option<BTreeMap<String>>,
+    pub defs: Option<BTreeMap<String, JsonSchema>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub definitions: Option<BTreeMap<String>>,
+    pub definitions: Option<BTreeMap<String, JsonSchema>>,
 }
 
 impl JsonSchema {
@@ -111,7 +111,7 @@ impl JsonSchema {
         }
     }
 
-    pub fn array(items: description: Option<String>) -> Self {
+    pub fn array(items: JsonSchema, description: Option<String>) -> Self {
         Self {
             schema_type: Some(JsonSchemaType::Single(JsonSchemaPrimitiveType::Array)),
             description,
@@ -121,7 +121,7 @@ impl JsonSchema {
     }
 
     pub fn object(
-        properties: BTreeMap<String>,
+        properties: BTreeMap<String, JsonSchema>,
         required: Option<Vec<String>>,
         additional_properties: Option<AdditionalProperties>,
     ) -> Self {
@@ -156,7 +156,7 @@ impl From<JsonSchema> for AdditionalProperties {
 }
 
 /// Parse the tool `input_schema` or return an error for invalid schema.
-pub fn parse_tool_input_schema(input_schema: &JsonValue) -> Result<serde_json::Error> {
+pub fn parse_tool_input_schema(input_schema: &JsonValue) -> Result<JsonSchema, serde_json::Error> {
     let mut input_schema = input_schema.clone();
     sanitize_json_schema(&mut input_schema);
     prune_unreachable_definitions(&mut input_schema);
