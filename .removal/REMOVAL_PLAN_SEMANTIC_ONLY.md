@@ -133,6 +133,21 @@ done as blind deletion or line-range cleanup.
   slice that owns the relevant `compact_remote_v2.rs` and client stream
   signature/call sites, or intentionally remove the trace parameter everywhere
   in one reviewed slice.
+- 2026-05-28 accepted replacement compact/client trace slice
+  `semantic-root-20260528-core-compact-client-trace/core-compact-client-trace`
+  as merge commit `Merge compact client trace trim`. It replaced the rejected
+  one-file compact patch with a complete signature/call-site update across
+  `core/src/client.rs`, `core/src/compact.rs`,
+  `core/src/compact_remote_v2.rs`, and `core/src/session/turn.rs`: direct
+  `codex_rollout_trace` imports and stream trace arguments were removed from
+  retained compact/model streaming paths, `compact_remote_v2.rs` gained the
+  missing retained compaction enum imports, and `client.rs` now keeps local
+  no-op trace-attempt bookkeeping instead of depending on the removed trace
+  crate. Focused cargo-modal core lib check still failed at 350 out-of-scope
+  errors in broader session/handlers/exec/thread-manager and removed
+  attestation, agent, realtime, MCP/request-permissions, sandboxing,
+  execpolicy, network-proxy, Windows sandbox, and remaining rollout trace
+  surfaces.
 
 ## Analytics removal follow-through
 
