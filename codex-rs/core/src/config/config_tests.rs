@@ -4789,7 +4789,7 @@ async fn to_mcp_config_preserves_apps_feature_from_config() -> std::io::Result<(
 
     config.apps_mcp_path_override = Some("/custom/mcp".to_string());
     config.apps_mcp_product_sku = Some("tpp".to_string());
-    let mcp_config = config.to_mcp_config().await;
+    let mcp_config = config.to_mcp_config(()).await;
     assert!(mcp_config.apps_enabled);
     assert_eq!(
         mcp_config.apps_mcp_path_override.as_deref(),
@@ -4798,11 +4798,11 @@ async fn to_mcp_config_preserves_apps_feature_from_config() -> std::io::Result<(
     assert_eq!(mcp_config.apps_mcp_product_sku.as_deref(), Some("tpp"));
 
     let _ = config.features.disable(Feature::Apps);
-    let mcp_config = config.to_mcp_config().await;
+    let mcp_config = config.to_mcp_config(()).await;
     assert!(!mcp_config.apps_enabled);
 
     let _ = config.features.enable(Feature::Apps);
-    let mcp_config = config.to_mcp_config().await;
+    let mcp_config = config.to_mcp_config(()).await;
     assert!(mcp_config.apps_enabled);
 
     Ok(())
@@ -4818,14 +4818,14 @@ async fn to_mcp_config_preserves_auth_elicitation_feature_from_config() -> std::
     )
     .await?;
 
-    let mcp_config = config.to_mcp_config().await;
+    let mcp_config = config.to_mcp_config(()).await;
     assert_eq!(
         mcp_config.client_elicitation_capability,
         ElicitationCapability::default()
     );
 
     let _ = config.features.enable(Feature::AuthElicitation);
-    let mcp_config = config.to_mcp_config().await;
+    let mcp_config = config.to_mcp_config(()).await;
     assert_eq!(
         mcp_config.client_elicitation_capability,
         ElicitationCapability {
