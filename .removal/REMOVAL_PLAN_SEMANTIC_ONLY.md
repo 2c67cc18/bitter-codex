@@ -320,6 +320,23 @@ done as blind deletion or line-range cleanup.
   deleted surfaces still block dependency compilation; a protocol-only retry
   hit a transient rustup self-update connection reset. `git diff --check`
   passed and the owned file no longer references `codex_sandboxing`.
+- 2026-05-28 accepted core exec Windows sandbox trim
+  `semantic-root-20260528-core-exec-windows-sandbox-trim/core-exec-windows-sandbox-trim`
+  as merge commit `Merge core exec Windows sandbox trim`. It kept ownership to
+  `core/src/exec.rs` and removed the direct `codex_windows_sandbox` dependency.
+  The retained Windows execution path now records a sandbox spawn failure and
+  returns an error that explicitly refuses unsupported Windows sandbox execution
+  instead of silently running unsandboxed. The two filesystem override builders
+  now use a local deny-read resolver based on retained protocol permission APIs
+  for exact roots and bounded glob expansion. The worker reached terminal
+  `completed` normally with clean branch
+  `semantic/core-exec-windows-sandbox-trim` at `1dfc1048d`. Its
+  `cargo-modal --dirty check -p codex-core --no-default-features --lib` reached
+  Cargo and failed from broader unresolved core surfaces (`agent`,
+  `environment_selection`, `guardian`, `codex_execpolicy`,
+  `codex_network_proxy`, MCP/request-permissions, and related deleted modules);
+  after review `git diff --check` passed and the owned file no longer contains
+  `codex_windows_sandbox` references.
 
 ## Analytics removal follow-through
 
