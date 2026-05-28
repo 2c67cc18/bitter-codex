@@ -1296,3 +1296,22 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   and `core/tests/suite/{exec,windows_sandbox}.rs` still mention removed
   `ExecParams` fields and belong to the later tests-rebuild/all-targets phase
   after source surfaces settle.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/tool-events-apply-patch-trim`
+  as merge commit `Merge tool events apply patch delta trim`. The slice
+  removed the retained tools/event/context dependency on the deleted
+  `codex_apply_patch::AppliedPatchDelta` type and dropped committed-delta
+  tracking from the no-op `TurnDiffTracker`; retained exec/unified-exec event
+  begin/end behavior and `FileChange` begin/end item emission are preserved.
+  The worker reached terminal `completed` normally with a clean branch, and
+  `git diff --check` passed. Root reran
+  `cargo-modal --repo codex-rs --dirty check -p codex-core
+  --no-default-features --lib`; it still failed at 140 broader errors with no
+  owned-file `codex_apply_patch` diagnostics. Remaining source blockers are now
+  concentrated in broad session/thread/state service references to deleted
+  agents/goals/environment-selection/exec-policy/guardian/MCP/app-server
+  elicitation/request-permissions, deleted exec-server plumbing in
+  prompt/test/unified-exec/session/state/thread-manager, `sandbox_tags` in
+  turn metadata, and residual rollout/MCP crates. Do not restore the removed
+  apply-patch crate for the remaining tool tests; defer apply-patch protocol
+  and tests cleanup to the later all-target/test rebuild phase.
