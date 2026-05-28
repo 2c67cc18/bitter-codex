@@ -406,6 +406,18 @@ done as blind deletion or line-range cleanup.
   `tools::network_approval`, `codex_network_proxy`, `codex_sandboxing`,
   `codex_exec_server`, and related removed modules), but the specific
   `tools::sandboxing::ToolError` dependency is gone.
+- 2026-05-28 user-shell single-file runtime trim
+  `semantic-root-20260528-user-shell-runtime-trim/user-shell-runtime-trim`
+  ended as an intentional no-go with a clean worktree. The worker confirmed
+  `core/src/tasks/user_shell.rs` could locally replace deleted network-proxy
+  environment constants, but the retained `/shell` task still must construct
+  `ExecRequest { sandbox: SandboxType::None, ... }`, and `SandboxType` remains
+  defined by the deleted `codex_sandboxing` crate through the broader exec
+  request/runtime surface. Removing that correctly requires a wider
+  `ExecRequest`/exec runtime slice, not a single-file user-shell edit. Do not
+  retry `user_shell.rs` alone for this dependency; include the relevant
+  `exec.rs`/`sandboxing` request type ownership or leave the reference until
+  that broader runtime cleanup is scheduled.
 
 ## Analytics removal follow-through
 
