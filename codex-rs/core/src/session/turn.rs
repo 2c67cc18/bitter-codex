@@ -728,8 +728,6 @@ pub(crate) async fn built_tools(
     Ok(Arc::new(ToolRouter::from_turn_context(
         turn_context,
         ToolRouterParams {
-            mcp_tools: None,
-            deferred_mcp_tools: None,
             discoverable_tools: None,
             dynamic_tools: turn_context.dynamic_tools.as_slice(),
         },

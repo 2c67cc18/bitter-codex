@@ -67,8 +67,6 @@ fn build_tool_specs_and_registry(
     params: ToolRouterParams<'_>,
 ) -> (Vec<ToolSpec>, ToolRegistry) {
     let ToolRouterParams {
-        mcp_tools: _,
-        deferred_mcp_tools: _,
         discoverable_tools: _,
         dynamic_tools,
     } = params;
