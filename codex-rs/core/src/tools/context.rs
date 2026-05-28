@@ -6,7 +6,6 @@ use crate::tools::TELEMETRY_PREVIEW_MAX_BYTES;
 use crate::tools::TELEMETRY_PREVIEW_MAX_LINES;
 use crate::tools::TELEMETRY_PREVIEW_TRUNCATION_NOTICE;
 use crate::unified_exec::resolve_max_tokens;
-use codex_apply_patch::AppliedPatchDelta;
 use codex_protocol::mcp::CallToolResult;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
@@ -51,8 +50,6 @@ impl TurnDiffTracker {
     pub(crate) fn get_unified_diff(&self) -> Option<String> {
         None
     }
-
-    pub(crate) fn track_delta(&mut self, _delta: &AppliedPatchDelta) {}
 
     pub(crate) fn invalidate(&mut self) {}
 }

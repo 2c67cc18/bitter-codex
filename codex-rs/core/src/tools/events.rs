@@ -4,7 +4,6 @@ use crate::session::turn_context::TurnContext;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::runtimes::ToolError;
 use crate::turn_timing::now_unix_timestamp_ms;
-use codex_apply_patch::AppliedPatchDelta;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::SandboxErr;
 use codex_protocol::exec_output::ExecToolCallOutput;
@@ -50,26 +49,24 @@ impl<'a> ToolEventCtx<'a> {
     }
 }
 
-pub(crate) enum ToolEventStage<'a> {
+pub(crate) enum ToolEventStage {
     Begin,
     Success {
         output: ExecToolCallOutput,
-        applied_patch_delta: Option<&'a AppliedPatchDelta>,
+        applied_patch_delta: Option<()>,
     },
-    Failure(ToolEventFailure<'a>),
+    Failure(ToolEventFailure),
 }
 
-pub(crate) enum ToolEventFailure<'a> {
+pub(crate) enum ToolEventFailure {
     Output(ExecToolCallOutput),
     Message(String),
     Rejected {
         message: String,
-        applied_patch_delta: Option<&'a AppliedPatchDelta>,
     },
 }
 
-enum TurnDiffTrackerUpdate<'a> {
-    Track(&'a AppliedPatchDelta),
+enum TurnDiffTrackerUpdate {
     Invalidate,
     None,
 }
@@ -92,14 +89,6 @@ fn shell_join(command: &[String]) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-fn tracker_update_for_known_delta(delta: &AppliedPatchDelta) -> TurnDiffTrackerUpdate<'_> {
-    if delta.is_exact() && delta.is_empty() {
-        TurnDiffTrackerUpdate::None
-    } else {
-        TurnDiffTrackerUpdate::Track(delta)
-    }
 }
 
 pub(crate) async fn emit_exec_command_begin(
@@ -183,7 +172,7 @@ impl ToolEmitter {
         }
     }
 
-    pub async fn emit(&self, ctx: ToolEventCtx<'_>, stage: ToolEventStage<'_>) {
+    pub async fn emit(&self, ctx: ToolEventCtx<'_>, stage: ToolEventStage) {
         match (self, stage) {
             (
                 Self::Shell {
@@ -230,26 +219,20 @@ impl ToolEmitter {
             }
             (
                 Self::ApplyPatch { changes, .. },
-                ToolEventStage::Success {
-                    output,
-                    applied_patch_delta,
-                },
+                ToolEventStage::Success { output, .. },
             ) => {
                 let status = if output.exit_code == 0 {
                     PatchApplyStatus::Completed
                 } else {
                     PatchApplyStatus::Failed
                 };
-                let tracker_update = applied_patch_delta
-                    .map(tracker_update_for_known_delta)
-                    .unwrap_or(TurnDiffTrackerUpdate::Invalidate);
                 emit_patch_end(
                     ctx,
                     changes.clone(),
                     output.stdout.text.clone(),
                     output.stderr.text.clone(),
                     status,
-                    tracker_update,
+                    TurnDiffTrackerUpdate::Invalidate,
                 )
                 .await;
             }
@@ -289,7 +272,6 @@ impl ToolEmitter {
                 Self::ApplyPatch { changes, .. },
                 ToolEventStage::Failure(ToolEventFailure::Rejected {
                     message,
-                    applied_patch_delta,
                 }),
             ) => {
                 emit_patch_end(
@@ -298,9 +280,7 @@ impl ToolEmitter {
                     String::new(),
                     (*message).to_string(),
                     PatchApplyStatus::Declined,
-                    applied_patch_delta
-                        .map(tracker_update_for_known_delta)
-                        .unwrap_or(TurnDiffTrackerUpdate::None),
+                    TurnDiffTrackerUpdate::None,
                 )
                 .await;
             }
@@ -347,7 +327,6 @@ impl ToolEmitter {
         &self,
         ctx: ToolEventCtx<'_>,
         out: Result<ExecToolCallOutput, ToolError>,
-        applied_patch_delta: Option<&AppliedPatchDelta>,
     ) -> Result<String, FunctionCallError> {
         let (event, result) = match out {
             Ok(output) => {
@@ -355,7 +334,7 @@ impl ToolEmitter {
                 let exit_code = output.exit_code;
                 let event = ToolEventStage::Success {
                     output,
-                    applied_patch_delta,
+                    applied_patch_delta: None,
                 };
                 let result = if exit_code == 0 {
                     Ok(content)
@@ -372,16 +351,7 @@ impl ToolEmitter {
             }
             Err(ToolError::Codex(CodexErr::Sandbox(SandboxErr::Denied { output, .. }))) => {
                 let response = self.format_exec_output_for_model(&output, ctx);
-                // apply_patch can be denied after it has already committed a
-                // known prefix. Reuse the output-bearing path so the visible
-                // item still fails while the turn diff consumes that prefix.
-                let event = match (self, applied_patch_delta) {
-                    (Self::ApplyPatch { .. }, Some(delta)) => ToolEventStage::Success {
-                        output: *output,
-                        applied_patch_delta: Some(delta),
-                    },
-                    _ => ToolEventStage::Failure(ToolEventFailure::Output(*output)),
-                };
+                let event = ToolEventStage::Failure(ToolEventFailure::Output(*output));
                 let result = Err(FunctionCallError::RespondToModel(response));
                 (event, result)
             }
@@ -413,7 +383,6 @@ impl ToolEmitter {
                 };
                 let event = ToolEventStage::Failure(ToolEventFailure::Rejected {
                     message: normalized.clone(),
-                    applied_patch_delta,
                 });
                 let result = Err(FunctionCallError::RespondToModel(normalized));
                 (event, result)
@@ -466,7 +435,7 @@ struct ExecCommandResult {
 async fn emit_exec_stage(
     ctx: ToolEventCtx<'_>,
     exec_input: ExecCommandInput<'_>,
-    stage: ToolEventStage<'_>,
+    stage: ToolEventStage,
 ) {
     match stage {
         ToolEventStage::Begin => {
@@ -563,7 +532,7 @@ async fn emit_patch_end(
     stdout: String,
     stderr: String,
     status: PatchApplyStatus,
-    tracker_update: TurnDiffTrackerUpdate<'_>,
+    tracker_update: TurnDiffTrackerUpdate,
 ) {
     ctx.session
         .emit_turn_item_completed(
@@ -584,10 +553,6 @@ async fn emit_patch_end(
             let mut guard = tracker.lock().await;
             let previous_diff = guard.get_unified_diff();
             let tracker_changed = match tracker_update {
-                TurnDiffTrackerUpdate::Track(delta) => {
-                    guard.track_delta(delta);
-                    true
-                }
                 TurnDiffTrackerUpdate::Invalidate => {
                     guard.invalidate();
                     true
@@ -613,44 +578,26 @@ mod tests {
     use super::*;
     use crate::session::tests::make_session_and_context_with_dynamic_tools_and_rx;
     use crate::turn_diff_tracker::TurnDiffTracker;
-    use codex_exec_server::LOCAL_FS;
     use codex_protocol::error::CodexErr;
     use codex_protocol::error::SandboxErr;
     use codex_protocol::exec_output::ExecToolCallOutput;
     use codex_protocol::items::TurnItem;
     use codex_protocol::protocol::PatchApplyStatus;
-    use codex_utils_absolute_path::AbsolutePathBuf;
     use std::sync::Arc;
-    use tempfile::tempdir;
     use tokio::sync::Mutex;
 
-    async fn assert_failed_apply_patch_tracks_committed_delta(
+    async fn assert_failed_apply_patch_emits_status(
         out: Result<ExecToolCallOutput, ToolError>,
         expected_status: PatchApplyStatus,
     ) {
         let (session, turn, rx_event) =
             make_session_and_context_with_dynamic_tools_and_rx(Vec::new()).await;
         let tracker = Arc::new(Mutex::new(TurnDiffTracker::new()));
-        let dir = tempdir().expect("tempdir");
-        let cwd = AbsolutePathBuf::from_absolute_path(dir.path()).expect("absolute cwd");
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-        let delta = codex_apply_patch::apply_patch(
-            "*** Begin Patch\n*** Add File: out/dest.txt\n+after\n*** End Patch",
-            &cwd,
-            &mut stdout,
-            &mut stderr,
-            LOCAL_FS.as_ref(),
-            /*sandbox*/ None,
-        )
-        .await
-        .expect("apply patch");
 
         ToolEmitter::apply_patch(HashMap::new(), /*auto_approved*/ false)
             .finish(
                 ToolEventCtx::new(session.as_ref(), turn.as_ref(), "call-id", Some(&tracker)),
                 out,
-                Some(&delta),
             )
             .await
             .expect_err("failed patch");
@@ -667,27 +614,15 @@ mod tests {
                     }) if status == &expected_status
                 )
         ));
-
-        let unified_diff = loop {
-            let event = tokio::time::timeout(Duration::from_secs(1), rx_event.recv())
-                .await
-                .expect("turn diff event")
-                .expect("channel open");
-            if let EventMsg::TurnDiff(TurnDiffEvent { unified_diff }) = event.msg {
-                break unified_diff;
-            }
-        };
-        assert!(unified_diff.contains("out/dest.txt"));
-        assert!(unified_diff.contains("+after"));
     }
 
     #[tokio::test]
-    async fn denied_apply_patch_tracks_committed_delta() {
+    async fn denied_apply_patch_emits_failed_status() {
         let output = ExecToolCallOutput {
             exit_code: 1,
             ..Default::default()
         };
-        assert_failed_apply_patch_tracks_committed_delta(
+        assert_failed_apply_patch_emits_status(
             Err(ToolError::Codex(CodexErr::Sandbox(SandboxErr::Denied {
                 output: Box::new(output),
                 network_policy_decision: None,
@@ -698,8 +633,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejected_apply_patch_tracks_committed_delta() {
-        assert_failed_apply_patch_tracks_committed_delta(
+    async fn rejected_apply_patch_emits_declined_status() {
+        assert_failed_apply_patch_emits_status(
             Err(ToolError::Rejected("rejected by user".to_string())),
             PatchApplyStatus::Declined,
         )
