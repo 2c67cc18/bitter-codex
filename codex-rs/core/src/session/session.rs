@@ -767,7 +767,7 @@ impl Session {
             let account_id = auth.and_then(CodexAuth::get_account_id);
             let account_email = auth.and_then(CodexAuth::get_account_email);
             let originator = originator().value;
-            let terminal_type = "unknown";
+            let terminal_type = "unknown".to_string();
             let session_model = session_configuration.collaboration_mode.model().to_string();
             let auth_env_telemetry = collect_auth_env_telemetry(
                 &session_configuration.provider,
@@ -782,7 +782,7 @@ impl Session {
                 auth_mode,
                 originator.clone(),
                 config.otel.log_user_prompt,
-                terminal_type.clone(),
+                terminal_type,
                 session_configuration.session_source.clone(),
             )
             .with_auth_env(auth_env_telemetry.to_otel_metadata());
