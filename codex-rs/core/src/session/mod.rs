@@ -290,7 +290,6 @@ use crate::tools::sandboxing::ApprovalStore;
 use crate::turn_timing::TurnTimingState;
 use crate::turn_timing::record_turn_ttfm_metric;
 use crate::unified_exec::UnifiedExecProcessManager;
-use crate::windows_sandbox::WindowsSandboxLevelExt;
 use codex_core_plugins::PluginsManager;
 use codex_git_utils::get_git_repo_root;
 use codex_mcp::compute_auth_statuses;
@@ -570,7 +569,7 @@ impl Codex {
             approval_policy: config.permissions.approval_policy.clone(),
             approvals_reviewer: config.approvals_reviewer,
             permission_profile_state: session_permission_profile_state_from_config(&config)?,
-            windows_sandbox_level: WindowsSandboxLevel::from_config(&config),
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
             cwd: config.cwd.clone(),
             workspace_roots: config.workspace_roots.clone(),
             codex_home: config.codex_home.clone(),
