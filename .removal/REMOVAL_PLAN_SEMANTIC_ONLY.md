@@ -1334,3 +1334,17 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   elicitation/request-permissions, deleted exec-server plumbing in
   prompt/test/unified-exec/session/state/thread-manager, and residual
   rollout/MCP crates.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/session-handlers-trace-trim`
+  as merge commit `Merge session handlers trace trim`. The slice removed the
+  last `session/handlers.rs` dependency on deleted
+  `codex_rollout_trace::RolloutStatus` by dropping shutdown end-status
+  recording while preserving `ShutdownComplete` delivery and retained protocol
+  event recording. The worker reached terminal `completed` normally with a
+  clean branch, and `git diff --check` passed. Its focused
+  `cargo-modal --repo codex-rs --dirty check -p codex-core
+  --no-default-features --lib` still failed at 138 broader errors with no
+  owned-file diagnostics. Remaining rollout-trace source blockers are outside
+  handlers, notably compact/state/session construction surfaces; handle them in
+  slices that own the corresponding trace context producers instead of
+  restoring `codex_rollout_trace`.
