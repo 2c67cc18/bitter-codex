@@ -7,7 +7,6 @@ pub(crate) mod registry;
 pub(crate) mod router;
 pub(crate) mod runtimes;
 pub(crate) mod spec_plan;
-pub(crate) mod tool_dispatch_trace;
 pub(crate) mod tool_search_entry;
 
 use std::borrow::Cow;
