@@ -5,10 +5,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-use crate::agent::AgentControl;
-use crate::agent::AgentStatus;
-use crate::agent::agent_status_from_event;
-use crate::agent::status::is_final;
 use crate::build_available_skills;
 use crate::compact;
 use crate::config::ManagedFeatures;
@@ -27,7 +23,6 @@ use crate::exec_policy::ExecPolicyManager;
 use crate::parse_turn_item;
 use crate::path_utils::normalize_for_native_workdir;
 use crate::realtime_conversation::RealtimeConversationManager;
-use crate::session_prefix::format_subagent_notification_message;
 use crate::skills::SkillRenderSideEffects;
 use crate::skills_load_input_from_config;
 use crate::turn_metadata::TurnMetadataState;
@@ -59,6 +54,7 @@ use codex_otel::current_span_trace_id;
 use codex_otel::current_span_w3c_trace_context;
 use codex_otel::set_parent_from_w3c_trace_context;
 use codex_protocol::ThreadId;
+use codex_protocol::SessionId;
 use codex_protocol::approvals::ElicitationRequestEvent;
 use codex_protocol::approvals::ExecPolicyAmendment;
 use codex_protocol::approvals::NetworkPolicyAmendment;
@@ -85,8 +81,8 @@ use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::permissions::FileSystemSandboxPolicy;
 use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::protocol::FileChange;
+use codex_protocol::protocol::AgentStatus;
 use codex_protocol::protocol::HasLegacyEvent;
-use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::ItemCompletedEvent;
 use codex_protocol::protocol::ItemStartedEvent;
 use codex_protocol::protocol::RawResponseItemEvent;
@@ -103,7 +99,6 @@ use codex_protocol::request_user_input::RequestUserInputArgs;
 use codex_protocol::request_user_input::RequestUserInputResponse;
 use codex_rmcp_client::ElicitationResponse;
 use codex_rollout::state_db;
-use codex_rollout_trace::AgentResultTracePayload;
 use codex_rollout_trace::ThreadStartedTraceMetadata;
 use codex_rollout_trace::ThreadTraceContext;
 use codex_thread_store::CreateThreadParams;
@@ -367,7 +362,7 @@ pub(crate) struct CodexSpawnArgs {
     pub(crate) conversation_history: InitialHistory,
     pub(crate) session_source: SessionSource,
     pub(crate) thread_source: Option<ThreadSource>,
-    pub(crate) agent_control: AgentControl,
+    pub(crate) parent_session_id: Option<SessionId>,
     pub(crate) dynamic_tools: Vec<DynamicToolSpec>,
     pub(crate) persist_extended_history: bool,
     pub(crate) metrics_service_name: Option<String>,
@@ -388,6 +383,26 @@ pub(crate) const INITIAL_SUBMIT_ID: &str = "";
 pub(crate) const SUBMISSION_CHANNEL_CAPACITY: usize = 512;
 const CYBER_VERIFY_URL: &str = "https://chatgpt.com/cyber";
 const CYBER_SAFETY_URL: &str = "https://developers.openai.com/codex/concepts/cyber-safety";
+
+fn status_from_event(msg: &EventMsg) -> Option<AgentStatus> {
+    match msg {
+        EventMsg::TurnStarted(_) => Some(AgentStatus::Running),
+        EventMsg::TurnComplete(event) => {
+            Some(AgentStatus::Completed(event.last_agent_message.clone()))
+        }
+        EventMsg::TurnAborted(_) => Some(AgentStatus::Interrupted),
+        EventMsg::Error(event) => Some(AgentStatus::Errored(event.message.clone())),
+        EventMsg::ShutdownComplete => Some(AgentStatus::Shutdown),
+        _ => None,
+    }
+}
+
+fn is_final_agent_status(status: &AgentStatus) -> bool {
+    matches!(
+        status,
+        AgentStatus::Completed(_) | AgentStatus::Errored(_) | AgentStatus::Shutdown
+    )
+}
 
 impl Codex {
     /// Spawn a new [`Codex`] and initialize the session.
@@ -428,7 +443,7 @@ impl Codex {
             conversation_history,
             session_source,
             thread_source,
-            agent_control,
+            parent_session_id,
             dynamic_tools,
             persist_extended_history,
             metrics_service_name,
@@ -594,7 +609,7 @@ impl Codex {
             skills_manager,
             plugins_manager,
             mcp_manager.clone(),
-            agent_control,
+            parent_session_id,
             environment_manager,
             thread_store,
             parent_rollout_thread_trace,
@@ -1519,10 +1534,10 @@ impl Session {
             return;
         };
 
-        let Some(status) = agent_status_from_event(msg) else {
+        let Some(status) = status_from_event(msg) else {
             return;
         };
-        if !is_final(&status) {
+        if !is_final_agent_status(&status) {
             return;
         }
 
@@ -1543,51 +1558,7 @@ impl Session {
         child_agent_path: &codex_protocol::AgentPath,
         status: AgentStatus,
     ) {
-        let Some(parent_agent_path) = child_agent_path
-            .as_str()
-            .rsplit_once('/')
-            .and_then(|(parent, _)| codex_protocol::AgentPath::try_from(parent).ok())
-        else {
-            return;
-        };
-
-        let message = format_subagent_notification_message(child_agent_path.as_str(), &status);
-        // `communication` owns the message. Keep a second copy only when the
-        // recorder will actually need it after parent delivery succeeds.
-        let trace_message = self
-            .services
-            .rollout_thread_trace
-            .is_enabled()
-            .then(|| message.clone());
-        let communication = InterAgentCommunication::new(
-            child_agent_path.clone(),
-            parent_agent_path,
-            Vec::new(),
-            message,
-            /*trigger_turn*/ false,
-        );
-        if let Err(err) = self
-            .services
-            .agent_control
-            .send_inter_agent_communication(parent_thread_id, communication)
-            .await
-        {
-            debug!("failed to notify parent thread {parent_thread_id}: {err}");
-            return;
-        }
-        if let Some(message) = trace_message {
-            self.services
-                .rollout_thread_trace
-                .record_agent_result_interaction(
-                    turn_context.sub_id.as_str(),
-                    parent_thread_id,
-                    &AgentResultTracePayload {
-                        child_agent_path: child_agent_path.as_str(),
-                        message: &message,
-                        status: &status,
-                    },
-                );
-        }
+        let _ = (turn_context, parent_thread_id, child_agent_path, status);
     }
 
     async fn maybe_mirror_event_text_to_realtime(&self, msg: &EventMsg) {
@@ -1626,7 +1597,7 @@ impl Session {
 
     async fn deliver_event_raw(&self, event: Event) {
         // Record the last known agent status.
-        if let Some(status) = agent_status_from_event(&event.msg) {
+        if let Some(status) = status_from_event(&event.msg) {
             self.agent_status.send_replace(status);
         }
         if let Err(e) = self.tx_event.send(event).await {
@@ -2353,11 +2324,7 @@ impl Session {
         }
         if turn_context.config.include_environment_context {
             let shell = self.user_shell();
-            let subagents = self
-                .services
-                .agent_control
-                .format_environment_context_subagents(self.conversation_id)
-                .await;
+            let subagents = String::new();
             contextual_user_sections.push(
                 crate::context::EnvironmentContext::from_turn_context(turn_context, shell.as_ref())
                     .with_subagents(subagents)
