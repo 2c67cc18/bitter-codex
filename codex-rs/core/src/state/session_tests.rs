@@ -6,8 +6,8 @@ use codex_protocol::protocol::RateLimitWindow;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
-// Verifies connector merging deduplicates repeated IDs.
-async fn merge_connector_selection_deduplicates_entries() {
+// Verifies connector merging is inert after connector runtime selection removal.
+async fn merge_connector_selection_returns_empty_selection() {
     let session_configuration = make_session_configuration_for_tests().await;
     let mut state = SessionState::new(session_configuration);
     let merged = state.merge_connector_selection([
@@ -18,13 +18,13 @@ async fn merge_connector_selection_deduplicates_entries() {
 
     assert_eq!(
         merged,
-        HashSet::from(["calendar".to_string(), "drive".to_string()])
+        HashSet::new()
     );
 }
 
 #[tokio::test]
-// Verifies clearing connector selection removes all saved IDs.
-async fn clear_connector_selection_removes_entries() {
+// Verifies clearing connector selection stays a no-op.
+async fn clear_connector_selection_keeps_empty_selection() {
     let session_configuration = make_session_configuration_for_tests().await;
     let mut state = SessionState::new(session_configuration);
     state.merge_connector_selection(["calendar".to_string()]);

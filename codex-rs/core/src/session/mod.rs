@@ -9,7 +9,6 @@ use crate::build_available_skills;
 use crate::compact;
 use crate::config::ManagedFeatures;
 use crate::config::resolve_tool_suggest_config_from_layer_stack;
-use crate::connectors;
 use crate::context::ApprovedCommandPrefixSaved;
 use crate::context::AvailableSkillsInstructions;
 use crate::context::CollaborationModeInstructions;
