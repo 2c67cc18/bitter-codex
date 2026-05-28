@@ -286,6 +286,24 @@ done as blind deletion or line-range cleanup.
   and failed from the same broader unresolved core surfaces (`agent`,
   `guardian`, `codex_execpolicy`, `codex_windows_sandbox`, and related deleted
   modules), with no reported diagnostics in the edited state files.
+- 2026-05-28 accepted request-permission intersect trim
+  `semantic-root-20260528-request-permission-intersect-trim/request-permission-intersect-trim`
+  as merge commit `Merge request permission intersect trim`. It kept ownership
+  to `core/src/session/mod.rs` and
+  `app-server/src/bespoke_event_handling.rs`, removed the remaining
+  `codex_sandboxing::policy_transforms::intersect_permission_profiles`
+  imports/usages in those files, and added local response-normalization clamp
+  helpers. The retained behavior still rejects session-scoped strict auto
+  review, drops empty grants, clamps granted network/filesystem permissions to
+  the originally requested profile, materializes `ProjectRoots` entries against
+  the request cwd, rejects broader granted paths, and accepts equal or narrower
+  granted paths. The worker reached terminal `completed` normally with clean
+  branch `semantic/request-permission-intersect-trim` at `a6a8d741b`.
+  `cargo-modal --dirty --repo codex-rs check -p codex-core -p
+  codex-app-server` reached Cargo and failed on broader pre-existing missing
+  core modules/crates (`agent`, `guardian`, `codex_protocol::request_permissions`,
+  `codex_execpolicy`, etc.); `git diff --check` passed and the owned files no
+  longer contain `policy_transforms` references.
 
 ## Analytics removal follow-through
 
