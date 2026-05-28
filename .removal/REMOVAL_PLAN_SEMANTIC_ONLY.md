@@ -76,6 +76,18 @@ done as blind deletion or line-range cleanup.
   report and marked its own goal complete, but `bitter-loop` status stayed
   `running` with no new output; root stopped it at `2026-05-28T01:22:03Z` to
   collect the clean branch.
+- 2026-05-28 accepted narrow tools declaration slice
+  `semantic-root-20260528-core-tools-decls/core-tools-decls` as merge commit
+  `Merge core tools declaration trim`. It removed stale
+  `core/src/tools/mod.rs` declarations for deleted `network_approval`,
+  `orchestrator`, and `sandboxing` modules, and fixed malformed
+  `view_image_spec` schema constructors introduced by prior deletion fallout.
+  The worker reached terminal `completed` normally at
+  `2026-05-28T01:27:30Z` and left a clean branch. Its focused cargo-modal core
+  lib check still failed from out-of-scope blockers: deleted
+  `session::{multi_agents,review}` and `tasks::review` declarations plus
+  non-tools-declaration references to removed sandboxing, execpolicy,
+  network-proxy, Windows sandbox, rollout-trace, and MCP surfaces.
 
 ## Analytics removal follow-through
 
