@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::SkillsManager;
-use crate::agent::AgentControl;
 use crate::client::ModelClient;
 use crate::config::NetworkProxyAuditMetadata;
 use crate::config::StartedNetworkProxy;
@@ -12,6 +11,7 @@ use crate::guardian::GuardianRejectionCircuitBreaker;
 use crate::mcp::McpManager;
 use crate::tools::network_approval::NetworkApprovalService;
 use crate::tools::sandboxing::ApprovalStore;
+use crate::thread_manager::ThreadManagerState;
 use crate::unified_exec::UnifiedExecProcessManager;
 use arc_swap::ArcSwapOption;
 use codex_core_plugins::PluginsManager;
@@ -32,6 +32,7 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 pub(crate) struct SessionServices {
+    pub(crate) session_id: codex_protocol::SessionId,
     pub(crate) mcp_connection_manager: Arc<RwLock<McpConnectionManager>>,
     pub(crate) mcp_startup_cancellation_token: Mutex<CancellationToken>,
     pub(crate) unified_exec_manager: UnifiedExecProcessManager,
@@ -54,7 +55,7 @@ pub(crate) struct SessionServices {
     pub(crate) skills_manager: Arc<SkillsManager>,
     pub(crate) plugins_manager: Arc<PluginsManager>,
     pub(crate) mcp_manager: Arc<McpManager>,
-    pub(crate) agent_control: AgentControl,
+    pub(crate) thread_manager_state: Arc<ThreadManagerState>,
     pub(crate) network_proxy: ArcSwapOption<StartedNetworkProxy>,
     pub(crate) network_proxy_audit_metadata: NetworkProxyAuditMetadata,
     pub(crate) managed_network_requirements_configured: bool,

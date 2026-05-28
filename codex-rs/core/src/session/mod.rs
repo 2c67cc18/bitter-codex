@@ -6,10 +6,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-use crate::agent::AgentControl;
-use crate::agent::AgentStatus;
-use crate::agent::agent_status_from_event;
-use crate::agent::status::is_final;
 use crate::build_available_skills;
 use crate::compact;
 use crate::config::ManagedFeatures;
@@ -30,7 +26,6 @@ use crate::exec_policy::ExecPolicyManager;
 use crate::parse_turn_item;
 use crate::path_utils::normalize_for_native_workdir;
 use crate::realtime_conversation::RealtimeConversationManager;
-use crate::session_prefix::format_subagent_notification_message;
 use crate::skills::SkillRenderSideEffects;
 use crate::skills_load_input_from_config;
 use crate::turn_metadata::TurnMetadataState;
@@ -91,7 +86,6 @@ use codex_protocol::permissions::FileSystemSandboxPolicy;
 use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::protocol::FileChange;
 use codex_protocol::protocol::HasLegacyEvent;
-use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::ItemCompletedEvent;
 use codex_protocol::protocol::ItemStartedEvent;
 use codex_protocol::protocol::RawResponseItemEvent;
@@ -113,7 +107,6 @@ use codex_protocol::request_user_input::RequestUserInputArgs;
 use codex_protocol::request_user_input::RequestUserInputResponse;
 use codex_rmcp_client::ElicitationResponse;
 use codex_rollout::state_db;
-use codex_rollout_trace::AgentResultTracePayload;
 use codex_rollout_trace::ThreadStartedTraceMetadata;
 use codex_rollout_trace::ThreadTraceContext;
 use codex_sandboxing::policy_transforms::intersect_permission_profiles;
@@ -289,6 +282,7 @@ use crate::tools::network_approval::build_network_policy_decider;
 #[cfg(test)]
 use crate::tools::parallel::ToolCallRuntime;
 use crate::tools::sandboxing::ApprovalStore;
+use crate::thread_manager::ThreadManagerState;
 use crate::turn_timing::TurnTimingState;
 use crate::turn_timing::record_turn_ttfm_metric;
 use crate::unified_exec::UnifiedExecProcessManager;
@@ -310,6 +304,7 @@ use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use codex_protocol::protocol::ApplyPatchApprovalRequestEvent;
+use codex_protocol::protocol::AgentStatus;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::CompactedItem;
@@ -382,7 +377,7 @@ pub(crate) struct CodexSpawnArgs {
     pub(crate) conversation_history: InitialHistory,
     pub(crate) session_source: SessionSource,
     pub(crate) thread_source: Option<ThreadSource>,
-    pub(crate) agent_control: AgentControl,
+    pub(crate) thread_manager_state: Arc<ThreadManagerState>,
     pub(crate) dynamic_tools: Vec<DynamicToolSpec>,
     pub(crate) persist_extended_history: bool,
     pub(crate) metrics_service_name: Option<String>,
@@ -443,7 +438,7 @@ impl Codex {
             conversation_history,
             session_source,
             thread_source,
-            agent_control,
+            thread_manager_state,
             dynamic_tools,
             persist_extended_history,
             metrics_service_name,
@@ -460,7 +455,6 @@ impl Codex {
 
         if let SessionSource::SubAgent(SubAgentSource::ThreadSpawn { depth, .. }) = session_source
             && depth >= config.agent_max_depth
-            && !config.features.enabled(Feature::MultiAgentV2)
         {
             let _ = config.features.disable(Feature::SpawnCsv);
             let _ = config.features.disable(Feature::Collab);
@@ -609,7 +603,7 @@ impl Codex {
             skills_manager,
             plugins_manager,
             mcp_manager.clone(),
-            agent_control,
+            thread_manager_state,
             environment_manager,
             thread_store,
             parent_rollout_thread_trace,
@@ -752,6 +746,23 @@ impl Codex {
 
     pub(crate) fn enabled(&self, feature: Feature) -> bool {
         self.session.enabled(feature)
+    }
+}
+
+fn status_from_event_msg(msg: &EventMsg) -> Option<AgentStatus> {
+    match msg {
+        EventMsg::SessionConfigured(_) => Some(AgentStatus::Running),
+        EventMsg::TurnStarted(_) => Some(AgentStatus::Running),
+        EventMsg::TurnComplete(event) => Some(AgentStatus::Completed(
+            event.last_agent_message.clone(),
+        )),
+        EventMsg::TurnAborted(event) => match event.reason {
+            TurnAbortReason::Interrupted => Some(AgentStatus::Interrupted),
+            _ => Some(AgentStatus::Errored(format!("{:?}", event.reason))),
+        },
+        EventMsg::Error(event) => Some(AgentStatus::Errored(event.message.clone())),
+        EventMsg::ShutdownComplete => Some(AgentStatus::Shutdown),
+        _ => None,
     }
 }
 
@@ -1519,8 +1530,6 @@ impl Session {
             msg,
         };
         self.send_event_raw(event).await;
-        self.maybe_notify_parent_of_terminal_turn(turn_context, &legacy_source)
-            .await;
         self.maybe_mirror_event_text_to_realtime(&legacy_source)
             .await;
         self.maybe_clear_realtime_handoff_for_event(&legacy_source)
@@ -1533,100 +1542,6 @@ impl Session {
                 msg: legacy,
             };
             self.send_event_raw(legacy_event).await;
-        }
-    }
-
-    /// Forwards terminal turn events from spawned MultiAgentV2 children to their direct parent.
-    async fn maybe_notify_parent_of_terminal_turn(
-        &self,
-        turn_context: &TurnContext,
-        msg: &EventMsg,
-    ) {
-        if !self.enabled(Feature::MultiAgentV2) {
-            return;
-        }
-
-        if !matches!(msg, EventMsg::TurnComplete(_) | EventMsg::TurnAborted(_)) {
-            return;
-        }
-
-        let SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-            parent_thread_id,
-            agent_path: Some(child_agent_path),
-            ..
-        }) = &turn_context.session_source
-        else {
-            return;
-        };
-
-        let Some(status) = agent_status_from_event(msg) else {
-            return;
-        };
-        if !is_final(&status) {
-            return;
-        }
-
-        self.forward_child_completion_to_parent(
-            turn_context,
-            *parent_thread_id,
-            child_agent_path,
-            status,
-        )
-        .await;
-    }
-
-    /// Sends the standard completion envelope from a spawned MultiAgentV2 child to its parent.
-    async fn forward_child_completion_to_parent(
-        &self,
-        turn_context: &TurnContext,
-        parent_thread_id: ThreadId,
-        child_agent_path: &codex_protocol::AgentPath,
-        status: AgentStatus,
-    ) {
-        let Some(parent_agent_path) = child_agent_path
-            .as_str()
-            .rsplit_once('/')
-            .and_then(|(parent, _)| codex_protocol::AgentPath::try_from(parent).ok())
-        else {
-            return;
-        };
-
-        let message = format_subagent_notification_message(child_agent_path.as_str(), &status);
-        // `communication` owns the message. Keep a second copy only when the
-        // recorder will actually need it after parent delivery succeeds.
-        let trace_message = self
-            .services
-            .rollout_thread_trace
-            .is_enabled()
-            .then(|| message.clone());
-        let communication = InterAgentCommunication::new(
-            child_agent_path.clone(),
-            parent_agent_path,
-            Vec::new(),
-            message,
-            /*trigger_turn*/ false,
-        );
-        if let Err(err) = self
-            .services
-            .agent_control
-            .send_inter_agent_communication(parent_thread_id, communication)
-            .await
-        {
-            debug!("failed to notify parent thread {parent_thread_id}: {err}");
-            return;
-        }
-        if let Some(message) = trace_message {
-            self.services
-                .rollout_thread_trace
-                .record_agent_result_interaction(
-                    turn_context.sub_id.as_str(),
-                    parent_thread_id,
-                    &AgentResultTracePayload {
-                        child_agent_path: child_agent_path.as_str(),
-                        message: &message,
-                        status: &status,
-                    },
-                );
         }
     }
 
@@ -1666,7 +1581,7 @@ impl Session {
 
     async fn deliver_event_raw(&self, event: Event) {
         // Record the last known agent status.
-        if let Some(status) = agent_status_from_event(&event.msg) {
+        if let Some(status) = status_from_event_msg(&event.msg) {
             self.agent_status.send_replace(status);
         }
         if let Err(e) = self.tx_event.send(event).await {
@@ -2703,7 +2618,7 @@ impl Session {
             let shell = self.user_shell();
             let subagents = self
                 .services
-                .agent_control
+                .thread_manager_state
                 .format_environment_context_subagents(self.conversation_id)
                 .await;
             contextual_user_sections.push(

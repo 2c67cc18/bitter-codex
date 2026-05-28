@@ -1,4 +1,3 @@
-use crate::agent::AgentStatus;
 use crate::config::ConstraintResult;
 use crate::goals::ExternalGoalSet;
 use crate::goals::GoalRuntimeEvent;
@@ -23,6 +22,7 @@ use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::Event;
+use codex_protocol::protocol::AgentStatus;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::SessionConfiguredEvent;

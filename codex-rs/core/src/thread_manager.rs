@@ -1,5 +1,4 @@
 use crate::SkillsManager;
-use crate::agent::AgentControl;
 use crate::codex_thread::CodexThread;
 use crate::config::Config;
 use crate::config::ThreadStoreConfig;
@@ -183,15 +182,14 @@ pub struct StartThreadOptions {
 pub(crate) struct ResumeThreadWithHistoryOptions {
     pub(crate) config: Config,
     pub(crate) initial_history: InitialHistory,
-    pub(crate) agent_control: AgentControl,
     pub(crate) session_source: SessionSource,
     pub(crate) inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
     pub(crate) inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
 }
 
 /// Shared, `Arc`-owned state for [`ThreadManager`]. This `Arc` is required to have a single
-/// `Arc` reference that can be downgraded to by `AgentControl` while preventing every single
-/// function to require an `Arc<&Self>`.
+/// `Arc` reference that sessions can retain while preventing every single
+/// function from requiring an `Arc<&Self>`.
 pub(crate) struct ThreadManagerState {
     threads: Arc<RwLock<HashMap<ThreadId, Arc<CodexThread>>>>,
     thread_created_tx: broadcast::Sender<ThreadId>,
@@ -511,11 +509,8 @@ impl ThreadManager {
             }
         }
 
-        for descendant_id in thread
-            .codex
-            .session
-            .services
-            .agent_control
+        for descendant_id in self
+            .state
             .list_live_agent_subtree_thread_ids(thread_id)
             .await?
         {
@@ -576,7 +571,6 @@ impl ThreadManager {
             options.config,
             options.initial_history,
             Arc::clone(&self.state.auth_manager),
-            self.agent_control(),
             session_source,
             thread_source,
             options.dynamic_tools,
@@ -589,36 +583,6 @@ impl ThreadManager {
             /*user_shell_override*/ None,
         ))
         .await
-    }
-
-    // TODO(jif) merge with fork_agent
-    /// Spawn a subagent by forking persisted history from `forked_from_thread_id`.
-    pub async fn spawn_subagent(
-        &self,
-        forked_from_thread_id: ThreadId,
-        mut options: StartThreadOptions,
-    ) -> CodexResult<NewThread> {
-        let fork_source = self.get_thread(forked_from_thread_id).await?;
-        // Persist queued rollout updates before reading the fork snapshot.
-        fork_source.ensure_rollout_materialized().await;
-        fork_source.flush_rollout().await?;
-        let stored_thread = fork_source
-            .read_thread(
-                /*include_archived*/ true, /*include_history*/ true,
-            )
-            .await
-            .map_err(|err| {
-                CodexErr::Fatal(format!(
-                    "failed to read subagent fork source {forked_from_thread_id}: {err}"
-                ))
-            })?;
-        let history = stored_thread_to_initial_history(stored_thread, fork_source.rollout_path())?;
-        options.initial_history = fork_history_from_snapshot(
-            ForkSnapshot::Interrupted,
-            history,
-            InterruptedTurnHistoryMarker::from_config(&options.config),
-        );
-        self.start_thread_with_options(options).await
     }
 
     pub async fn resume_thread_from_rollout(
@@ -656,7 +620,6 @@ impl ThreadManager {
             config,
             initial_history,
             auth_manager,
-            self.agent_control(),
             thread_source,
             Vec::new(),
             persist_extended_history,
@@ -681,7 +644,6 @@ impl ThreadManager {
             config,
             InitialHistory::New,
             Arc::clone(&self.state.auth_manager),
-            self.agent_control(),
             /*thread_source*/ None,
             Vec::new(),
             /*persist_extended_history*/ false,
@@ -710,7 +672,6 @@ impl ThreadManager {
             config,
             initial_history,
             auth_manager,
-            self.agent_control(),
             thread_source,
             Vec::new(),
             /*persist_extended_history*/ false,
@@ -870,7 +831,6 @@ impl ThreadManager {
             config,
             history,
             Arc::clone(&self.state.auth_manager),
-            self.agent_control(),
             thread_source,
             Vec::new(),
             persist_extended_history,
@@ -880,10 +840,6 @@ impl ThreadManager {
             /*user_shell_override*/ None,
         ))
         .await
-    }
-
-    pub(crate) fn agent_control(&self) -> AgentControl {
-        AgentControl::new(Arc::downgrade(&self.state))
     }
 
     #[cfg(test)]
@@ -931,6 +887,34 @@ impl ThreadManagerState {
                 }
             })
             .collect()
+    }
+
+    pub(crate) async fn list_live_agent_subtree_thread_ids(
+        &self,
+        thread_id: ThreadId,
+    ) -> CodexResult<Vec<ThreadId>> {
+        let edges = self.list_live_thread_spawn_edges().await;
+        let mut descendants = Vec::new();
+        let mut frontier = vec![thread_id];
+        let mut seen = HashSet::from([thread_id]);
+
+        while let Some(parent_id) = frontier.pop() {
+            for (edge_parent_id, child_id) in &edges {
+                if *edge_parent_id == parent_id && seen.insert(*child_id) {
+                    descendants.push(*child_id);
+                    frontier.push(*child_id);
+                }
+            }
+        }
+
+        Ok(descendants)
+    }
+
+    pub(crate) async fn format_environment_context_subagents(
+        &self,
+        _thread_id: ThreadId,
+    ) -> String {
+        String::new()
     }
 
     /// Fetch a thread by ID or return ThreadNotFound.
@@ -995,14 +979,9 @@ impl ThreadManagerState {
     }
 
     /// Spawn a new thread with no history using a provided config.
-    pub(crate) async fn spawn_new_thread(
-        &self,
-        config: Config,
-        agent_control: AgentControl,
-    ) -> CodexResult<NewThread> {
+    pub(crate) async fn spawn_new_thread(self: &Arc<Self>, config: Config) -> CodexResult<NewThread> {
         Box::pin(self.spawn_new_thread_with_source(
             config,
-            agent_control,
             self.session_source.clone(),
             /*thread_source*/ None,
             /*persist_extended_history*/ false,
@@ -1016,9 +995,8 @@ impl ThreadManagerState {
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn spawn_new_thread_with_source(
-        &self,
+        self: &Arc<Self>,
         config: Config,
-        agent_control: AgentControl,
         session_source: SessionSource,
         thread_source: Option<ThreadSource>,
         persist_extended_history: bool,
@@ -1034,7 +1012,6 @@ impl ThreadManagerState {
             config,
             InitialHistory::New,
             Arc::clone(&self.auth_manager),
-            agent_control,
             session_source,
             thread_source,
             Vec::new(),
@@ -1050,13 +1027,12 @@ impl ThreadManagerState {
     }
 
     pub(crate) async fn resume_thread_with_history_with_source(
-        &self,
+        self: &Arc<Self>,
         options: ResumeThreadWithHistoryOptions,
     ) -> CodexResult<NewThread> {
         let ResumeThreadWithHistoryOptions {
             config,
             initial_history,
-            agent_control,
             session_source,
             inherited_shell_snapshot,
             inherited_exec_policy,
@@ -1068,7 +1044,6 @@ impl ThreadManagerState {
             config,
             initial_history,
             Arc::clone(&self.auth_manager),
-            agent_control,
             session_source,
             thread_source,
             Vec::new(),
@@ -1085,10 +1060,9 @@ impl ThreadManagerState {
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn fork_thread_with_source(
-        &self,
+        self: &Arc<Self>,
         config: Config,
         initial_history: InitialHistory,
-        agent_control: AgentControl,
         session_source: SessionSource,
         thread_source: Option<ThreadSource>,
         persist_extended_history: bool,
@@ -1103,7 +1077,6 @@ impl ThreadManagerState {
             config,
             initial_history,
             Arc::clone(&self.auth_manager),
-            agent_control,
             session_source,
             thread_source,
             Vec::new(),
@@ -1121,11 +1094,10 @@ impl ThreadManagerState {
     /// Spawn a new thread with optional history and register it with the manager.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn spawn_thread(
-        &self,
+        self: &Arc<Self>,
         config: Config,
         initial_history: InitialHistory,
         auth_manager: Arc<AuthManager>,
-        agent_control: AgentControl,
         thread_source: Option<ThreadSource>,
         dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
         persist_extended_history: bool,
@@ -1138,7 +1110,6 @@ impl ThreadManagerState {
             config,
             initial_history,
             auth_manager,
-            agent_control,
             self.session_source.clone(),
             thread_source,
             dynamic_tools,
@@ -1155,11 +1126,10 @@ impl ThreadManagerState {
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn spawn_thread_with_source(
-        &self,
+        self: &Arc<Self>,
         config: Config,
         initial_history: InitialHistory,
         auth_manager: Arc<AuthManager>,
-        agent_control: AgentControl,
         session_source: SessionSource,
         thread_source: Option<ThreadSource>,
         dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
@@ -1224,7 +1194,7 @@ impl ThreadManagerState {
             conversation_history: initial_history,
             session_source,
             thread_source,
-            agent_control,
+            thread_manager_state: Arc::clone(self),
             dynamic_tools,
             persist_extended_history,
             metrics_service_name,
