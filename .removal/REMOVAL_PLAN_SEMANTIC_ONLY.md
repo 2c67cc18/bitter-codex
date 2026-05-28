@@ -1419,3 +1419,17 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   --no-default-features` after merge; it still failed at 179 broader errors
   with no remaining `codex_feedback` or `codex_response_debug_context`
   diagnostics in the owned client/util source.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/goal-runtime-trim` as merge
+  commit `Merge goal runtime trim`. The slice removed retained
+  `crate::goals` source hooks from the core session/task/thread surfaces:
+  `GoalRuntimeState` is no longer stored on `Session`, goal runtime apply calls
+  were removed from turn start/finish/abort and usage-limit paths, and the
+  public thread goal-effect methods now return success/no-op behavior without
+  reintroducing the deleted goals module. The worker reached terminal
+  `completed` normally with a clean branch, and `git diff --check` passed. Its
+  focused `cargo-modal --repo codex-rs --dirty check -p codex-core` run failed
+  at 166 broader errors in out-of-scope missing/deleted surfaces such as agent,
+  MCP, exec policy, request permissions, realtime/state service, and skill
+  metadata plumbing; the owned files had no remaining `crate::goals`,
+  `GoalRuntime`, `ExternalGoalSet`, or `goal_runtime` references.
