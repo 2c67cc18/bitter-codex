@@ -8,7 +8,6 @@ use codex_protocol::SessionId;
 use codex_protocol::models::AdditionalPermissionProfile;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnEnvironmentSelection;
-use codex_sandboxing::compatibility_sandbox_policy_for_permission_profile;
 use codex_sandboxing::policy_transforms::effective_file_system_sandbox_policy;
 use codex_sandboxing::policy_transforms::effective_network_sandbox_policy;
 use std::sync::atomic::AtomicBool;
@@ -109,15 +108,12 @@ impl TurnContext {
     }
 
     pub(crate) fn sandbox_policy(&self) -> SandboxPolicy {
-        let file_system_sandbox_policy = self.file_system_sandbox_policy();
         let network_sandbox_policy = self.network_sandbox_policy();
-        compatibility_sandbox_policy_for_permission_profile(
-            &self.permission_profile,
-            &file_system_sandbox_policy,
-            network_sandbox_policy,
-            #[allow(deprecated)]
-            &self.cwd,
-        )
+        self.permission_profile
+            .to_legacy_sandbox_policy(#[allow(deprecated)] &self.cwd)
+            .unwrap_or_else(|_| SandboxPolicy::ReadOnly {
+                network_access: network_sandbox_policy.is_enabled(),
+            })
     }
 
     pub(crate) fn effective_reasoning_effort(&self) -> Option<ReasoningEffortConfig> {

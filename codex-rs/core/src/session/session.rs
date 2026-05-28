@@ -9,6 +9,7 @@ use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::permissions::FileSystemPath;
 use codex_protocol::permissions::FileSystemSpecialPath;
+use codex_protocol::protocol::NetworkAccess;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use tokio::sync::Semaphore;
@@ -145,7 +146,7 @@ impl SessionConfiguration {
             .to_legacy_sandbox_policy(&self.cwd)
             .unwrap_or_else(|_| {
                 let file_system_sandbox_policy = self.file_system_sandbox_policy();
-                codex_sandboxing::compatibility_sandbox_policy_for_permission_profile(
+                legacy_sandbox_policy_for_permission_profile(
                     self.permission_profile_state.permission_profile(),
                     &file_system_sandbox_policy,
                     self.network_sandbox_policy(),
@@ -403,6 +404,29 @@ impl SessionConfiguration {
 
         self.permission_profile_state
             .set_permission_profile_snapshot(permission_snapshot)
+    }
+}
+
+fn legacy_sandbox_policy_for_permission_profile(
+    permission_profile: &PermissionProfile,
+    file_system_sandbox_policy: &FileSystemSandboxPolicy,
+    network_sandbox_policy: NetworkSandboxPolicy,
+    cwd: &Path,
+) -> SandboxPolicy {
+    match permission_profile.enforcement() {
+        SandboxEnforcement::Disabled => SandboxPolicy::DangerFullAccess,
+        SandboxEnforcement::External => SandboxPolicy::ExternalSandbox {
+            network_access: if network_sandbox_policy.is_enabled() {
+                NetworkAccess::Enabled
+            } else {
+                NetworkAccess::Restricted
+            },
+        },
+        SandboxEnforcement::Managed => file_system_sandbox_policy
+            .to_legacy_sandbox_policy(network_sandbox_policy, cwd)
+            .unwrap_or_else(|_| SandboxPolicy::ReadOnly {
+                network_access: network_sandbox_policy.is_enabled(),
+            }),
     }
 }
 

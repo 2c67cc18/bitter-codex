@@ -72,13 +72,12 @@ pub struct ThreadConfigSnapshot {
 
 impl ThreadConfigSnapshot {
     pub fn sandbox_policy(&self) -> SandboxPolicy {
-        let file_system_sandbox_policy = self.permission_profile.file_system_sandbox_policy();
-        codex_sandboxing::compatibility_sandbox_policy_for_permission_profile(
-            &self.permission_profile,
-            &file_system_sandbox_policy,
-            self.permission_profile.network_sandbox_policy(),
-            self.cwd.as_path(),
-        )
+        let network_sandbox_policy = self.permission_profile.network_sandbox_policy();
+        self.permission_profile
+            .to_legacy_sandbox_policy(self.cwd.as_path())
+            .unwrap_or_else(|_| SandboxPolicy::ReadOnly {
+                network_access: network_sandbox_policy.is_enabled(),
+            })
     }
 }
 
