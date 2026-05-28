@@ -222,6 +222,22 @@ done as blind deletion or line-range cleanup.
   remains intentionally outside this dispatch-only slice; remove or retain that
   with the broader `session/mod.rs`/MCP runtime cleanup instead of restoring the
   removed submission ops.
+- 2026-05-28 accepted narrow unified-exec sandbox dependency trim
+  `semantic-root-20260528-core-unified-exec-sandbox-trim/core-unified-exec-sandbox-trim`
+  as merge commit `Merge unified exec sandbox dependency trim`. It kept
+  ownership to `core/src/unified_exec/{process.rs,process_manager.rs}` and
+  removed direct `codex_sandboxing::SandboxType`/sandbox-denial classification
+  dependencies from retained unified exec process wrappers while preserving
+  process lifecycle, output collection, stdin/write, shutdown, and state
+  behavior. The worker reached terminal `completed` normally with clean branch
+  `semantic/core-unified-exec-sandbox-trim` at `0159d0aac`. Its first focused
+  cargo-modal core lib check failed at 288 broader errors with no owned-file
+  diagnostics; a retry after tightening the patch hit a rustup self-update
+  connection reset before Cargo began. Remaining sandbox cleanup is still broad
+  in `exec.rs`, `session/session.rs`, `codex_thread.rs`, `tasks/user_shell.rs`,
+  `tools/runtimes/mod.rs`, and tests. The now-stale
+  `unified_exec/process_tests.rs` calls to `from_exec_server_started(...,
+  SandboxType::None)` are test follow-up outside this lib-only worker contract.
 
 ## Analytics removal follow-through
 
