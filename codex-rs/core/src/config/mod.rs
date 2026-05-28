@@ -63,7 +63,6 @@ use codex_features::NetworkProxyConfigToml;
 use codex_git_utils::resolve_root_git_project_for_trust;
 use codex_login::AuthManagerConfig;
 use codex_mcp::McpConfig;
-use codex_memories_read::memory_root;
 use codex_model_provider_info::LEGACY_OLLAMA_CHAT_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::OLLAMA_CHAT_PROVIDER_REMOVED_ERROR;
@@ -149,6 +148,7 @@ pub(crate) use resolved_permission_profile::PermissionProfileState;
 
 const DEFAULT_IGNORE_LARGE_UNTRACKED_DIRS: i64 = 200;
 const DEFAULT_IGNORE_LARGE_UNTRACKED_FILES: i64 = 10 * 1024 * 1024;
+const RETAINED_MEMORIES_ROOT_DIR: &str = "memories";
 
 /// Compatibility-only config retained so legacy `ghost_snapshot` settings
 /// continue to load even though snapshots are no longer produced.
@@ -2544,7 +2544,7 @@ impl Config {
         }
 
         let windows_sandbox_level = WindowsSandboxLevel::from_features(&features);
-        let memories_root = memory_root(&codex_home);
+        let memories_root = codex_home.join(RETAINED_MEMORIES_ROOT_DIR);
         std::fs::create_dir_all(&memories_root)?;
         let internal_writable_roots = vec![memories_root];
 
