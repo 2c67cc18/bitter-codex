@@ -1366,3 +1366,15 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   elicitation/request-permissions, deleted exec-server/plugin plumbing, MCP
   router/session/state turn types, and rollout trace context surfaces in
   session construction/state service.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/tool-router-mcp-param-trim`
+  as merge commit `Merge tool router MCP params trim`. The slice removed stale
+  `codex_mcp::ToolInfo` parameter fields from retained `ToolRouterParams`,
+  removed the ignored fields from `spec_plan.rs`, and updated the only source
+  construction in `session/turn.rs`; retained local/hosted/dynamic tool
+  registration behavior is unchanged and no MCP tool registration was restored.
+  The worker reached terminal `completed` normally with a clean branch, and
+  `git diff --check` passed. Its focused `cargo-modal --repo codex-rs --dirty
+  check -p codex-core --no-default-features --lib` still failed at 136 broader
+  errors with no owned-file diagnostics. Remaining MCP compile blockers are now
+  in broader session/MCP/state turn surfaces rather than router params.
