@@ -1,6 +1,6 @@
 //! Turn-scoped state and active turn metadata scaffolding.
 
-use codex_sandboxing::policy_transforms::merge_permission_profiles;
+use super::merge_granted_permission_profiles;
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -230,7 +230,7 @@ impl TurnState {
 
     pub(crate) fn record_granted_permissions(&mut self, permissions: AdditionalPermissionProfile) {
         self.granted_permissions =
-            merge_permission_profiles(self.granted_permissions.as_ref(), Some(&permissions));
+            merge_granted_permission_profiles(self.granted_permissions.as_ref(), &permissions);
     }
 
     pub(crate) fn granted_permissions(&self) -> Option<AdditionalPermissionProfile> {
