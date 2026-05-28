@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
 
-use crate::attestation::app_server_attestation_provider;
 use crate::config_manager::ConfigManager;
 use crate::connection_rpc_gate::ConnectionRpcGate;
 use crate::error_code::invalid_request;
@@ -304,10 +303,6 @@ impl MessageProcessor {
             Arc::clone(&thread_store),
             state_db.clone(),
             installation_id,
-            Some(app_server_attestation_provider(
-                outgoing.clone(),
-                thread_state_manager.clone(),
-            )),
         ));
         let skills_watcher = SkillsWatcher::new(thread_manager.skills_manager(), outgoing.clone());
 
