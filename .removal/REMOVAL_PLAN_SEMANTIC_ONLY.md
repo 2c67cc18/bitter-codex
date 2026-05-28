@@ -304,6 +304,22 @@ done as blind deletion or line-range cleanup.
   core modules/crates (`agent`, `guardian`, `codex_protocol::request_permissions`,
   `codex_execpolicy`, etc.); `git diff --check` passed and the owned files no
   longer contain `policy_transforms` references.
+- 2026-05-28 accepted app-server thread-summary sandbox trim
+  `semantic-root-20260528-app-server-thread-summary-sandbox-trim/app-server-thread-summary-sandbox-trim`
+  as merge commit `Merge app-server thread summary sandbox trim`. It kept
+  ownership to `app-server/src/request_processors/thread_summary.rs` and
+  removed the direct
+  `codex_sandboxing::compatibility_sandbox_policy_for_permission_profile`
+  dependency from thread response sandbox-policy projection. The retained
+  projection now uses `PermissionProfile::to_legacy_sandbox_policy(cwd)` with
+  the same read-only fallback for unbridgeable profiles. The worker reached
+  terminal `completed` normally with clean branch
+  `semantic/app-server-thread-summary-sandbox-trim` at `bf7c37b7f`.
+  `cargo-modal --dirty --repo codex-rs check -p codex-app-server` failed before
+  app-server-specific validation because existing `codex-core` unresolved
+  deleted surfaces still block dependency compilation; a protocol-only retry
+  hit a transient rustup self-update connection reset. `git diff --check`
+  passed and the owned file no longer references `codex_sandboxing`.
 
 ## Analytics removal follow-through
 
