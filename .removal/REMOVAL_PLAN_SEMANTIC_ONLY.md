@@ -459,6 +459,11 @@ done as blind deletion or line-range cleanup.
   fails before reaching app-server because `codex-core` has the broader
   unresolved deleted session/runtime surfaces documented above; this is not an
   app-server shell-command regression.
+- 2026-05-28 root serial follow-up localized core mention sigils in
+  `core/src/mention_syntax.rs`, removing the stale re-export from the deleted
+  `codex_utils_plugins` helper crate. This preserves the retained public
+  `PLUGIN_TEXT_MENTION_SIGIL` and `TOOL_MENTION_SIGIL` constants as local core
+  constants while leaving broader plugin/MCP cleanup untouched.
 
 ## Analytics removal follow-through
 
