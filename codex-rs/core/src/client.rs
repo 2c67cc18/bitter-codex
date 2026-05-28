@@ -31,6 +31,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
+use base64::Engine;
 use codex_api::ApiError;
 use codex_api::AuthProvider;
 use codex_api::CompactClient as ApiCompactClient;
@@ -192,9 +193,14 @@ fn extract_header(headers: Option<&ApiHeaderMap>, name: &str) -> Option<String> 
 }
 
 fn extract_x_error_json_code(headers: Option<&ApiHeaderMap>) -> Option<String> {
-    let value = extract_header(headers, X_ERROR_JSON_HEADER)?;
-    let json = serde_json::from_str::<serde_json::Value>(&value).ok()?;
-    json.get("code")
+    let encoded = extract_header(headers, X_ERROR_JSON_HEADER)?;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()?;
+    let parsed = serde_json::from_slice::<serde_json::Value>(&decoded).ok()?;
+    parsed
+        .get("error")
+        .and_then(|error| error.get("code"))
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)
 }
