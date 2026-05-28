@@ -87,12 +87,7 @@ use codex_core::review_format::format_review_findings_block;
 use codex_core::review_prompts;
 use codex_protocol::ThreadId;
 use codex_protocol::models::AdditionalPermissionProfile as CoreAdditionalPermissionProfile;
-use codex_protocol::models::FileSystemPermissions as CoreFileSystemPermissions;
 use codex_protocol::plan_tool::UpdatePlanArgs;
-use codex_protocol::permissions::FileSystemAccessMode;
-use codex_protocol::permissions::FileSystemPath;
-use codex_protocol::permissions::FileSystemSandboxEntry;
-use codex_protocol::permissions::FileSystemSpecialPath;
 use codex_protocol::protocol::CodexErrorInfo as CoreCodexErrorInfo;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
@@ -1804,108 +1799,12 @@ fn request_permissions_response_from_client_result(
     let permissions = if granted_permissions.is_empty() {
         CoreRequestPermissionProfile::default()
     } else {
-        clamp_granted_permissions_to_request(requested_permissions, granted_permissions, cwd)
     };
     Some(CoreRequestPermissionsResponse {
         permissions,
         scope: response.scope.to_core(),
         strict_auto_review,
     })
-}
-
-fn clamp_granted_permissions_to_request(
-    requested_permissions: CoreRequestPermissionProfile,
-    granted_permissions: CoreAdditionalPermissionProfile,
-    cwd: &std::path::Path,
-) -> CoreRequestPermissionProfile {
-    let network = match (requested_permissions.network, granted_permissions.network) {
-        (Some(requested), Some(granted)) if requested.enabled == Some(true) => {
-            (granted.enabled == Some(true)).then_some(granted)
-        }
-        _ => None,
-    };
-
-    let file_system = match (
-        requested_permissions.file_system,
-        granted_permissions.file_system,
-    ) {
-        (Some(requested), Some(granted)) => {
-            let requested = materialize_file_system_project_roots(requested, cwd);
-            let granted = materialize_file_system_project_roots(granted, cwd);
-            let entries = granted
-                .entries
-                .into_iter()
-                .filter(|entry| {
-                    requested
-                        .entries
-                        .iter()
-                        .any(|requested| file_system_entry_allows(requested, entry))
-                })
-                .collect::<Vec<_>>();
-            (!entries.is_empty()).then_some(CoreFileSystemPermissions {
-                entries,
-                glob_scan_max_depth: granted.glob_scan_max_depth,
-            })
-        }
-        _ => None,
-    };
-
-    CoreAdditionalPermissionProfile {
-        network,
-        file_system,
-    }
-    .into()
-}
-
-fn materialize_file_system_project_roots(
-    mut permissions: CoreFileSystemPermissions,
-    cwd: &std::path::Path,
-) -> CoreFileSystemPermissions {
-    let Some(cwd) = AbsolutePathBuf::from_absolute_path(cwd).ok() else {
-        return permissions;
-    };
-
-    for entry in &mut permissions.entries {
-        if let FileSystemPath::Special {
-            value: FileSystemSpecialPath::ProjectRoots { subpath },
-        } = &entry.path
-        {
-            let path = match subpath {
-                Some(subpath) => cwd.join(subpath),
-                None => cwd.clone(),
-            };
-            entry.path = FileSystemPath::Path { path };
-        }
-    }
-    permissions
-}
-
-fn file_system_entry_allows(
-    requested: &FileSystemSandboxEntry,
-    granted: &FileSystemSandboxEntry,
-) -> bool {
-    file_system_access_allows(requested.access, granted.access)
-        && file_system_path_allows(&requested.path, &granted.path)
-}
-
-fn file_system_access_allows(
-    requested: FileSystemAccessMode,
-    granted: FileSystemAccessMode,
-) -> bool {
-    match granted {
-        FileSystemAccessMode::Read => requested.can_read(),
-        FileSystemAccessMode::Write => requested.can_write(),
-        FileSystemAccessMode::Deny => false,
-    }
-}
-
-fn file_system_path_allows(requested: &FileSystemPath, granted: &FileSystemPath) -> bool {
-    match (requested, granted) {
-        (FileSystemPath::Path { path: requested }, FileSystemPath::Path { path: granted }) => {
-            granted == requested || granted.starts_with(requested)
-        }
-        _ => requested == granted,
-    }
 }
 
 const REVIEW_FALLBACK_MESSAGE: &str = "Reviewer failed to output a response.";

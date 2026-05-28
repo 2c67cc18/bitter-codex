@@ -7,7 +7,6 @@ use codex_protocol::SessionId;
 use codex_protocol::models::AdditionalPermissionProfile;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnEnvironmentSelection;
-use codex_protocol::permissions::FileSystemSandboxKind;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
@@ -383,52 +382,6 @@ impl TurnContext {
     }
 }
 
-fn effective_file_system_sandbox_policy(
-    base: &FileSystemSandboxPolicy,
-    additional_permissions: Option<&AdditionalPermissionProfile>,
-) -> FileSystemSandboxPolicy {
-    let mut policy = base.clone();
-    let Some(file_system) = additional_permissions.and_then(|permissions| {
-        permissions
-            .file_system
-            .as_ref()
-            .filter(|file_system| !file_system.is_empty())
-    }) else {
-        return policy;
-    };
-
-    if !matches!(policy.kind, FileSystemSandboxKind::Restricted) {
-        return policy;
-    }
-
-    if policy.glob_scan_max_depth.is_none() {
-        policy.glob_scan_max_depth = file_system
-            .glob_scan_max_depth
-            .map(|glob_scan_max_depth| glob_scan_max_depth.get());
-    }
-    for entry in &file_system.entries {
-        if !policy.entries.iter().any(|existing| existing == entry) {
-            policy.entries.push(entry.clone());
-        }
-    }
-
-    policy
-}
-
-fn effective_network_sandbox_policy(
-    base: NetworkSandboxPolicy,
-    additional_permissions: Option<&AdditionalPermissionProfile>,
-) -> NetworkSandboxPolicy {
-    match additional_permissions
-        .and_then(|permissions| permissions.network.as_ref())
-        .and_then(|network| network.enabled)
-    {
-        Some(true) => NetworkSandboxPolicy::Enabled,
-        Some(false) => NetworkSandboxPolicy::Restricted,
-        None => base,
-    }
-}
-
 fn local_time_context() -> (String, String) {
     match iana_time_zone::get_timezone() {
         Ok(timezone) => (Local::now().format("%Y-%m-%d").to_string(), timezone),
@@ -709,7 +662,6 @@ impl Session {
                 &per_turn_config.to_models_manager_config(),
             )
             .await;
-        let skills_input = skills_load_input_from_config(&per_turn_config);
         let fs = primary_turn_environment
             .map(|turn_environment| turn_environment.environment.get_filesystem());
         let skills_outcome = Arc::new(

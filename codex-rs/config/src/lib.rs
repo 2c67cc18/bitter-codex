@@ -4,7 +4,6 @@ pub mod config_toml;
 mod constraint;
 mod diagnostics;
 mod fingerprint;
-pub mod file_system;
 mod host_name;
 mod key_aliases;
 pub mod loader;

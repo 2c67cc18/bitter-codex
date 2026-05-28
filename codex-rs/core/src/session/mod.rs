@@ -151,7 +151,6 @@ use crate::config::resolve_web_search_mode_for_turn;
 use crate::context_manager::ContextManager;
 use crate::context_manager::TotalTokenUsageBreakdown;
 use crate::thread_rollout_truncation::initial_history_has_prior_user_turns;
-use crate::tools::events::parse_command_for_event;
 use codex_config::CONFIG_TOML_FILE;
 use codex_config::ConfigLayerSource;
 use codex_config::ConfigLayerStackOrdering;
@@ -1119,8 +1118,7 @@ impl Session {
                             message: format!(
                                 "This session was recorded with model `{prev}` but is resuming with `{curr}`. \
                          Consider switching back to `{prev}` as it may affect Codex performance."
-                            ),
-                        }),
+                                        }),
                     )
                     .await;
                 }
@@ -1820,7 +1818,6 @@ impl Session {
             warn!("Overwriting existing pending approval for call_id: {effective_approval_id}");
         }
 
-        let parsed_cmd = parse_command_for_event(&command);
         let proposed_network_policy_amendments = network_approval_context.as_ref().map(|context| {
             vec![
                 NetworkPolicyAmendment {

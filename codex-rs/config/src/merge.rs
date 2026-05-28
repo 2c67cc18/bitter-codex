@@ -48,10 +48,6 @@ fn normalize_network_domain_keys(table: &mut toml::map::Map<String, TomlValue>) 
     }
 }
 
-fn normalize_host(host: &str) -> String {
-    host.trim().trim_end_matches('.').to_ascii_lowercase()
-}
-
 #[cfg(test)]
 #[path = "merge_tests.rs"]
 mod tests;

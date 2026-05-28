@@ -1,7 +1,5 @@
 use super::*;
 use async_trait::async_trait;
-use crate::file_system::FileMetadata;
-use crate::file_system::FileSystemResult;
 use pretty_assertions::assert_eq;
 use tempfile::tempdir;
 
@@ -9,15 +7,8 @@ struct TestFileSystem;
 
 #[async_trait]
 impl ExecutorFileSystem for TestFileSystem {
-    async fn read_file_text(&self, path: &AbsolutePathBuf) -> FileSystemResult<String> {
-        tokio::fs::read_to_string(path.as_path()).await
     }
 
-    async fn get_metadata(&self, path: &AbsolutePathBuf) -> FileSystemResult<FileMetadata> {
-        let metadata = tokio::fs::metadata(path.as_path()).await?;
-        Ok(FileMetadata {
-            is_directory: metadata.is_dir(),
-        })
     }
 }
 

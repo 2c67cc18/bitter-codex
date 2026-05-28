@@ -1588,3 +1588,33 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   `codex_memories_read` errors. Remaining failures stayed in broader
   exec-policy, guardian, MCP, app-server protocol MCP elicitation,
   exec-server/plugin, network proxy, and session-runtime cleanup.
+
+## Addition-Only Shim Reversal Audit
+
+- 2026-05-28 root was stopped after commit `944b386b3` exposed an unsafe
+  pattern: removed helper crates were sometimes replaced by local equivalent
+  helper code. This is now rejected by default. Removing a crate/surface must
+  not be satisfied by copying or reimplementing its behavior locally unless a
+  separately approved retained surface says exactly why.
+- Addition-only mechanical removal was applied with reusable ignored tools:
+  `.removal/remove_added_lines_from_commits.py` for exact contiguous added
+  blocks and `.removal/remove_named_rust_items.py` for edited added Rust items.
+  These tools remove additions only; they do not restore lines removed by the
+  original worker commits.
+- The shim/localization commits included in this mechanical removal pass are:
+  - `944b386b3` client feedback/debug-context local helper replacement.
+  - `80e2ec33` core skills local facade replacement.
+  - `a6a8d741` request-permission intersection/clamp helper replacement.
+  - `563ec5b2` turn-context sandbox policy transform replacement.
+  - `a0ce7c73` state granted-permission merge helper replacement.
+  - `4bd4e319` shell command parsing fallback replacement.
+  - `5a0cef35` config permission/network-proxy/resolved-profile local surface
+    replacement.
+  - `49250262` config file-system and exec-policy local surface replacement.
+- Mechanical reports:
+  - `.removal/remove-added-blocks-shim-commits-report.json`
+  - `.removal/remove-named-shim-items-report.json`
+- Expected follow-up: the tree may now contain unresolved references to deleted
+  surfaces because this pass intentionally removed additions without restoring
+  deleted imports/crates. The next semantic worker must delete or reshape the
+  remaining callers, not recreate local shims.

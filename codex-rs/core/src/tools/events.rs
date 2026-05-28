@@ -71,26 +71,6 @@ enum TurnDiffTrackerUpdate {
     None,
 }
 
-pub(crate) fn parse_command_for_event(command: &[String]) -> Vec<ParsedCommand> {
-    vec![ParsedCommand::Unknown {
-        cmd: shell_join(command),
-    }]
-}
-
-fn shell_join(command: &[String]) -> String {
-    command
-        .iter()
-        .map(|arg| {
-            if arg.is_empty() || arg.chars().any(char::is_whitespace) {
-                format!("'{}'", arg.replace('\'', "'\\''"))
-            } else {
-                arg.clone()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 pub(crate) async fn emit_exec_command_begin(
     ctx: ToolEventCtx<'_>,
     command: &[String],
@@ -140,7 +120,6 @@ pub(crate) enum ToolEmitter {
 
 impl ToolEmitter {
     pub fn shell(command: Vec<String>, cwd: AbsolutePathBuf, source: ExecCommandSource) -> Self {
-        let parsed_cmd = parse_command_for_event(&command);
         Self::Shell {
             command,
             cwd,
@@ -162,7 +141,6 @@ impl ToolEmitter {
         source: ExecCommandSource,
         process_id: Option<String>,
     ) -> Self {
-        let parsed_cmd = parse_command_for_event(command);
         Self::UnifiedExec {
             command: command.to_vec(),
             cwd,

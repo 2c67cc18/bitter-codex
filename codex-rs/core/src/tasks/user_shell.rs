@@ -17,7 +17,6 @@ use crate::session::TurnInput;
 use crate::session::turn_context::TurnContext;
 use crate::state::TaskKind;
 use crate::tools::format_exec_output_str;
-use crate::tools::events::parse_command_for_event;
 use crate::tools::runtimes::maybe_wrap_shell_lc_with_snapshot;
 use crate::turn_timing::now_unix_timestamp_ms;
 use crate::user_shell_command::user_shell_command_record_item;
@@ -141,7 +140,6 @@ pub(crate) async fn execute_user_shell_command(
     #[allow(deprecated)]
     let cwd = turn_context.cwd.clone();
 
-    let parsed_cmd = parse_command_for_event(&display_command);
     session
         .send_event(
             turn_context.as_ref(),

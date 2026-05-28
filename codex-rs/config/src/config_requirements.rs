@@ -1289,9 +1289,6 @@ pub fn sandbox_mode_requirement_for_permission_profile(
 mod tests {
     use super::*;
     use anyhow::Result;
-    use crate::requirements_exec_policy::Decision;
-    use crate::requirements_exec_policy::Evaluation;
-    use crate::requirements_exec_policy::RuleMatch;
     use codex_protocol::permissions::NetworkSandboxPolicy;
     use codex_utils_absolute_path::AbsolutePathBuf;
     use codex_utils_absolute_path::AbsolutePathBufGuard;

@@ -119,7 +119,6 @@ use crate::config::permissions::validate_user_permission_profile_names;
 use crate::config_lock::config_without_lock_controls;
 use crate::config_lock::lock_layer_from_config;
 use crate::config_lock::read_config_lock_from_path;
-use codex_config::permissions_toml::NetworkProxyConfig;
 use toml::Value as TomlValue;
 use toml_edit::DocumentMut;
 
@@ -137,7 +136,6 @@ pub use codex_config::ConstraintError;
 pub use codex_config::ConstraintResult;
 pub use codex_config::LoaderOverrides;
 pub use managed_features::ManagedFeatures;
-pub use network_proxy_spec::NetworkProxyAuditMetadata;
 pub use network_proxy_spec::NetworkProxySpec;
 pub use network_proxy_spec::StartedNetworkProxy;
 pub(crate) use permissions::is_builtin_permission_profile_name;
@@ -180,29 +178,6 @@ pub(crate) const HARD_MAX_MULTI_AGENT_V2_TIMEOUT_MS: i64 =
 pub(crate) const DEFAULT_AGENT_MAX_DEPTH: i32 = 1;
 pub(crate) const DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS: Option<u64> = None;
 const LOCAL_DEV_BUILD_VERSION: &str = "0.0.0";
-
-pub fn system_bwrap_warning(_permission_profile: &PermissionProfile) -> Option<String> {
-    None
-}
-
-fn compatibility_sandbox_policy_for_permission_profile(
-    permission_profile: &PermissionProfile,
-    file_system_sandbox_policy: &FileSystemSandboxPolicy,
-    network_sandbox_policy: NetworkSandboxPolicy,
-    cwd: &Path,
-) -> SandboxPolicy {
-    match permission_profile.enforcement() {
-        SandboxEnforcement::Disabled => SandboxPolicy::DangerFullAccess,
-        SandboxEnforcement::External => SandboxPolicy::ExternalSandbox {
-            network_access: network_sandbox_policy.is_enabled(),
-        },
-        SandboxEnforcement::Managed => file_system_sandbox_policy
-            .to_legacy_sandbox_policy(network_sandbox_policy, cwd)
-            .unwrap_or_else(|_| SandboxPolicy::ReadOnly {
-                network_access: network_sandbox_policy.is_enabled(),
-            }),
-    }
-}
 
 pub const CONFIG_TOML_FILE: &str = "config.toml";
 const CONFIG_PROFILE_V2_SUFFIX: &str = ".config.toml";
@@ -840,7 +815,6 @@ pub struct Config {
     pub codex_self_exe: Option<PathBuf>,
 
     /// Path to the `codex-linux-sandbox` executable. This must be set if
-    /// Linux seccomp sandboxing is used. Note that this
     /// cannot be set in the config file: it must be set in code via
     /// [`ConfigOverrides`].
     ///
@@ -1300,7 +1274,6 @@ impl Config {
             },
             configured_mcp_servers,
             plugin_ids_by_mcp_server_name,
-            plugin_capability_summaries: Vec::new(),
         }
     }
 
@@ -2485,8 +2458,6 @@ impl Config {
             &mut startup_warnings,
         )?;
         let enable_network_proxy = features.enabled(Feature::NetworkProxy);
-        let windows_sandbox_mode = None;
-        let windows_sandbox_private_desktop = true;
         let resolved_cwd = AbsolutePathBuf::try_from(normalize_for_native_workdir({
             use std::env;
 
@@ -2543,7 +2514,6 @@ impl Config {
             ));
         }
 
-        let windows_sandbox_level = WindowsSandboxLevel::from_features(&features);
         let memories_root = codex_home.join(RETAINED_MEMORIES_ROOT_DIR);
         std::fs::create_dir_all(&memories_root)?;
         let internal_writable_roots = vec![memories_root];
@@ -2881,7 +2851,6 @@ impl Config {
         };
         let terminal_resize_reflow = resolve_terminal_resize_reflow_config(&cfg);
 
-        let agent_roles = BTreeMap::new();
 
         let openai_base_url = cfg
             .openai_base_url

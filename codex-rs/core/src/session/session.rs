@@ -462,7 +462,6 @@ async fn warm_plugins_and_skills_for_session_init(
     skills_manager: Arc<SkillsManager>,
     _environments: Vec<TurnEnvironmentSelection>,
 ) -> Vec<SkillError> {
-    let skills_input = skills_load_input_from_config(config.as_ref());
     skills_manager
         .skills_for_config(&skills_input, None)
         .await
