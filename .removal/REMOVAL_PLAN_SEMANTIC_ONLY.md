@@ -486,6 +486,17 @@ done as blind deletion or line-range cleanup.
 - 2026-05-28 root serial follow-up removed the unused
   `codex_mcp::SandboxState` re-export from `core/src/lib.rs`; `rg SandboxState`
   is now empty in `codex-rs`.
+- 2026-05-28 refreshed root `cargo-modal --repo codex-rs --dirty check -p
+  codex-core --no-default-features --lib` after the skills/plugin and
+  `SandboxState` trims. The first attempt failed before Cargo on a rustup
+  manifest connection reset; the retry reached Cargo and failed with 220 core
+  lib errors. The top blockers are now the remaining broad session/runtime
+  surfaces: deleted `agent`, `goals`, `environment_selection`, `exec_policy`,
+  realtime, MCP/RMCP, request-permissions, guardian, network approval,
+  sandboxing, Windows sandbox, connectors/mentions/plugins, `codex_exec_server`
+  environment surfaces, and stale `SubagentNotification`. No
+  `codex_shell_command`, `codex_core_skills`, `codex_utils_plugins`,
+  `codex_file_system`, or `SandboxState` references remain in `codex-rs`.
 
 ## Analytics removal follow-through
 
