@@ -16,8 +16,6 @@ use crate::config::ManagedFeatures;
 use crate::config::resolve_tool_suggest_config_from_layer_stack;
 use crate::connectors;
 use crate::context::ApprovedCommandPrefixSaved;
-use crate::context::AppsInstructions;
-use crate::context::AvailablePluginsInstructions;
 use crate::context::AvailableSkillsInstructions;
 use crate::context::CollaborationModeInstructions;
 use crate::context::ContextualUserFragment;
@@ -1546,7 +1544,6 @@ impl Session {
             state.previous_turn_settings()
         };
         let shell = self.user_shell();
-        let exec_policy = self.services.exec_policy.current();
         let permissions_instructions = current_context
             .config
             .include_permissions_instructions
@@ -1555,7 +1552,6 @@ impl Session {
                     &current_context.permission_profile,
                     current_context.approval_policy.value(),
                     current_context.config.approvals_reviewer,
-                    exec_policy.as_ref(),
                     #[allow(deprecated)]
                     &current_context.cwd,
                     current_context
@@ -2655,7 +2651,6 @@ impl Session {
                     &turn_context.permission_profile,
                     turn_context.approval_policy.value(),
                     turn_context.config.approvals_reviewer,
-                    self.services.exec_policy.current().as_ref(),
                     #[allow(deprecated)]
                     &turn_context.cwd,
                     turn_context
@@ -2709,20 +2704,6 @@ impl Session {
                     .push(PersonalitySpecInstructions::new(personality_message).render());
             }
         }
-        if turn_context.config.include_apps_instructions && turn_context.apps_enabled() {
-            let mcp_connection_manager = self.services.mcp_connection_manager.read().await;
-            let accessible_and_enabled_connectors =
-                connectors::list_accessible_and_enabled_connectors_from_manager(
-                    &mcp_connection_manager,
-                    &turn_context.config,
-                )
-                .await;
-            if let Some(apps_instructions) =
-                AppsInstructions::from_connectors(&accessible_and_enabled_connectors)
-            {
-                developer_sections.push(apps_instructions.render());
-            }
-        }
         if turn_context.config.include_skill_instructions {
             let available_skills = build_available_skills(
                 &turn_context.turn_skills.outcome,
@@ -2733,7 +2714,10 @@ impl Session {
             );
             if let Some(available_skills) = available_skills {
                 let warning_message = available_skills.warning_message.clone();
-                let skills_instructions = AvailableSkillsInstructions::from(available_skills);
+                let skills_instructions = AvailableSkillsInstructions::new(
+                    available_skills.skill_root_lines,
+                    available_skills.skill_lines,
+                );
                 if let Some(warning_message) = warning_message {
                     self.send_event_raw(Event {
                         id: String::new(),
@@ -2745,16 +2729,6 @@ impl Session {
                 }
                 developer_sections.push(skills_instructions.render());
             }
-        }
-        let loaded_plugins = self
-            .services
-            .plugins_manager
-            .plugins_for_config(&turn_context.config.plugins_config_input())
-            .await;
-        if let Some(plugin_instructions) =
-            AvailablePluginsInstructions::from_plugins(loaded_plugins.capability_summaries())
-        {
-            developer_sections.push(plugin_instructions.render());
         }
         if turn_context.config.include_environment_context {
             let shell = self.user_shell();

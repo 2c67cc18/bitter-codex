@@ -1,6 +1,8 @@
 //! Context fragments injected into model input.
 
 mod approved_command_prefix_saved;
+mod available_skills_instructions;
+mod collaboration_mode_instructions;
 mod contextual_user_message;
 mod environment_context;
 mod fragment;
@@ -8,10 +10,19 @@ mod image_generation_instructions;
 mod legacy_model_mismatch_warning;
 mod legacy_unified_exec_process_limit_warning;
 mod model_switch_instructions;
+mod network_rule_saved;
+mod permissions_instructions;
+mod personality_spec_instructions;
+mod realtime_end_instructions;
+mod realtime_start_instructions;
+mod realtime_start_with_instructions;
+mod skill_instructions;
 mod turn_aborted;
 mod user_shell_command;
 
 pub(crate) use approved_command_prefix_saved::ApprovedCommandPrefixSaved;
+pub(crate) use available_skills_instructions::AvailableSkillsInstructions;
+pub(crate) use collaboration_mode_instructions::CollaborationModeInstructions;
 pub(crate) use contextual_user_message::is_contextual_user_fragment;
 pub(crate) use environment_context::EnvironmentContext;
 pub use fragment::ContextualUserFragment;
@@ -21,5 +32,12 @@ pub(crate) use image_generation_instructions::ImageGenerationInstructions;
 pub(crate) use legacy_model_mismatch_warning::LegacyModelMismatchWarning;
 pub(crate) use legacy_unified_exec_process_limit_warning::LegacyUnifiedExecProcessLimitWarning;
 pub(crate) use model_switch_instructions::ModelSwitchInstructions;
+pub(crate) use network_rule_saved::NetworkRuleSaved;
+pub(crate) use permissions_instructions::PermissionsInstructions;
+pub(crate) use personality_spec_instructions::PersonalitySpecInstructions;
+pub(crate) use realtime_end_instructions::RealtimeEndInstructions;
+pub(crate) use realtime_start_instructions::RealtimeStartInstructions;
+pub(crate) use realtime_start_with_instructions::RealtimeStartWithInstructions;
+pub(crate) use skill_instructions::SkillInstructions;
 pub(crate) use turn_aborted::TurnAborted;
 pub(crate) use user_shell_command::UserShellCommand;
