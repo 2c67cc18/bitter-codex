@@ -67,7 +67,6 @@ async fn exec_command_with_tty(
                     .environments
                     .primary_environment()
                     .expect("primary environment"),
-                network: turn.network.clone(),
                 tty,
             },
             &context,
