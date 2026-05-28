@@ -1232,3 +1232,19 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   codex-core --lib` still failed at 202 broader errors; remaining
   `turn.rs` diagnostics were unrelated deleted-module references to
   `goals`, `turn_diff_tracker`, and `guardian`.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/core-tools-runtime-trim` as
+  merge commit `Merge core tools runtime trim` after root review amended the
+  worker branch for the session/turn tracker import and stale
+  `DiscoverableTool` router type. The accepted slice removed tools-owned
+  dependencies on deleted goal progress accounting, memory-use metrics, sandbox
+  telemetry tags, tool-search source metadata, and `resolve_tool_environment`;
+  retained `exec_command`/`view_image` now use the primary turn environment and
+  reject non-empty `environment_id` values with model-facing errors. A no-op
+  retained `TurnDiffTracker` lives in `tools::context` to keep retained tool
+  plumbing type-compatible while patch-diff tracking is removed. Focused
+  `cargo-modal --repo codex-rs --dirty check -p codex-core
+  --no-default-features --lib` still failed at 192 broader errors. Remaining
+  tools errors are now in the separate runtime/sandbox slice
+  (`tools/runtimes/*`, sandboxing/network approval/guardian/canonicalization)
+  and should not be solved by restoring deleted crates.
