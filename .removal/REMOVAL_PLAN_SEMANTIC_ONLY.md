@@ -1481,3 +1481,10 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   untouched legacy tests. Its focused `cargo-modal --repo codex-rs --dirty
   check -p codex-core --lib` run still failed on broader unresolved deleted
   surfaces such as agent, MCP, exec-policy, and exec-server plumbing.
+  Root reran `cargo-modal --repo codex-rs --dirty check -p codex-core --lib
+  --no-default-features` after merge; it failed at 149 broader errors, with
+  request-permissions removed from the live compile blockers and remaining
+  blockers concentrated in agent status/control, environment selection,
+  exec-policy/network approval/sandboxing, MCP/realtime/session state service,
+  deleted exec-server/plugin/rollout-trace crates, managed network proxy, and
+  legacy tests.
