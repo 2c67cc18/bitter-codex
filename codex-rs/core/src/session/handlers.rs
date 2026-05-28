@@ -1,12 +1,7 @@
-use crate::realtime_conversation::handle_audio as handle_realtime_conversation_audio;
-use crate::realtime_conversation::handle_close as handle_realtime_conversation_close;
-use crate::realtime_conversation::handle_start as handle_realtime_conversation_start;
-use crate::realtime_conversation::handle_text as handle_realtime_conversation_text;
 use async_channel::Receiver;
 use codex_otel::set_parent_from_w3c_trace_context;
 use codex_protocol::protocol::Submission;
 use tracing::Instrument;
-use tracing::debug_span;
 use tracing::info_span;
 
 use crate::session::SteerInputError;
@@ -14,31 +9,17 @@ use crate::session::session::Session;
 use crate::session::session::SessionSettingsUpdate;
 
 use crate::config::Config;
-use crate::realtime_context::REALTIME_TURN_TOKEN_BUDGET;
-use crate::realtime_context::truncate_realtime_text_to_token_budget;
-use crate::realtime_conversation::REALTIME_USER_TEXT_PREFIX;
-use crate::realtime_conversation::prefix_realtime_v2_text;
-use crate::review_prompts::resolve_review_request;
-use crate::session::spawn_review_thread;
 use crate::tasks::CompactTask;
 use crate::tasks::UserShellCommandMode;
 use crate::tasks::UserShellCommandTask;
 use crate::tasks::execute_user_shell_command;
-use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseInputItem;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::ErrorEvent;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
-use codex_protocol::protocol::GuardianAssessmentEvent;
-use codex_protocol::protocol::GuardianAssessmentStatus;
 use codex_protocol::protocol::InterAgentCommunication;
-use codex_protocol::protocol::McpServerRefreshConfig;
 use codex_protocol::protocol::Op;
-use codex_protocol::protocol::RealtimeConversationListVoicesResponseEvent;
-use codex_protocol::protocol::RealtimeVoicesList;
 use codex_protocol::protocol::ReviewDecision;
-use codex_protocol::protocol::ReviewRequest;
 use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::ThreadMemoryMode;
 use codex_protocol::protocol::ThreadRolledBackEvent;
@@ -47,17 +28,10 @@ use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::protocol::ThreadSettingsSnapshot;
 use codex_protocol::protocol::TurnAbortReason;
 use codex_protocol::protocol::WarningEvent;
-use codex_protocol::request_permissions::RequestPermissionsResponse;
 use codex_protocol::request_user_input::RequestUserInputResponse;
 
 use crate::context_manager::is_user_turn_boundary;
 use codex_protocol::dynamic_tools::DynamicToolResponse;
-use codex_protocol::items::UserMessageItem;
-use codex_protocol::mcp::RequestId as ProtocolRequestId;
-use codex_protocol::user_input::UserInput;
-use codex_rmcp_client::ElicitationAction;
-use codex_rmcp_client::ElicitationResponse;
-use serde_json::Value;
 use std::sync::Arc;
 use tracing::debug;
 use tracing::info;
@@ -71,26 +45,8 @@ pub async fn clean_background_terminals(sess: &Arc<Session>) {
     sess.close_unified_exec_processes().await;
 }
 
-pub async fn realtime_conversation_list_voices(sess: &Session, sub_id: String) {
-    sess.send_event_raw(Event {
-        id: sub_id,
-        msg: EventMsg::RealtimeConversationListVoicesResponse(
-            RealtimeConversationListVoicesResponseEvent {
-                voices: RealtimeVoicesList::builtin(),
-            },
-        ),
-    })
-    .await;
-}
-
 pub async fn user_input_or_turn(sess: &Arc<Session>, sub_id: String, op: Op) {
-    user_input_or_turn_inner(
-        sess,
-        sub_id,
-        op,
-        /*mirror_user_text_to_realtime*/ Some(()),
-    )
-    .await;
+    user_input_or_turn_inner(sess, sub_id, op).await;
 }
 
 pub async fn update_thread_settings(
@@ -187,7 +143,6 @@ pub(super) async fn user_input_or_turn_inner(
     sess: &Arc<Session>,
     sub_id: String,
     op: Op,
-    mirror_user_text_to_realtime: Option<()>,
 ) {
     let Op::UserInput {
         items,
@@ -221,7 +176,7 @@ pub(super) async fn user_input_or_turn_inner(
     }
     sess.maybe_emit_unknown_model_warning_for_turn(current_context.as_ref())
         .await;
-    let accepted_items = match sess
+    match sess
         .steer_input(
             items.clone(),
             /*expected_turn_id*/ None,
@@ -231,7 +186,6 @@ pub(super) async fn user_input_or_turn_inner(
     {
         Ok(_) => {
             current_context.session_telemetry.user_prompt(&items);
-            Some(items)
         }
         Err(SteerInputError::NoActiveTurn(items)) => {
             if let Some(responsesapi_client_metadata) = responsesapi_client_metadata {
@@ -240,19 +194,12 @@ pub(super) async fn user_input_or_turn_inner(
                     .set_responsesapi_client_metadata(responsesapi_client_metadata);
             }
             current_context.session_telemetry.user_prompt(&items);
-            sess.refresh_mcp_servers_if_requested(
-                &current_context,
-                Some(sess.mcp_elicitation_reviewer()),
-            )
-            .await;
-            let accepted_items = items.clone();
             sess.spawn_task(
                 Arc::clone(&current_context),
                 items,
                 crate::tasks::RegularTask::new(),
             )
             .await;
-            Some(accepted_items)
         }
         Err(err) => {
             sess.send_event_raw(Event {
@@ -260,33 +207,7 @@ pub(super) async fn user_input_or_turn_inner(
                 msg: EventMsg::Error(err.to_error_event()),
             })
             .await;
-            None
         }
-    };
-    if let (Some(items), Some(())) = (accepted_items, mirror_user_text_to_realtime) {
-        self::mirror_user_text_to_realtime(sess, &items).await;
-    }
-}
-
-async fn mirror_user_text_to_realtime(sess: &Arc<Session>, items: &[UserInput]) {
-    let text = UserMessageItem::new(items).message();
-    if text.is_empty() {
-        return;
-    }
-    let text = if sess.conversation.is_running_v2().await {
-        prefix_realtime_v2_text(text, REALTIME_USER_TEXT_PREFIX)
-    } else {
-        text
-    };
-    let text = truncate_realtime_text_to_token_budget(&text, REALTIME_TURN_TOKEN_BUDGET);
-    if text.is_empty() {
-        return;
-    }
-    if sess.conversation.running_state().await.is_none() {
-        return;
-    }
-    if let Err(err) = sess.conversation.text_in(text).await {
-        debug!("failed to mirror user text to realtime conversation: {err}");
     }
 }
 
@@ -332,46 +253,6 @@ pub async fn run_user_shell_command(sess: &Arc<Session>, sub_id: String, command
         UserShellCommandTask::new(command),
     )
     .await;
-}
-
-pub async fn resolve_elicitation(
-    sess: &Arc<Session>,
-    server_name: String,
-    request_id: ProtocolRequestId,
-    decision: codex_protocol::approvals::ElicitationAction,
-    content: Option<Value>,
-    meta: Option<Value>,
-) {
-    let action = match decision {
-        codex_protocol::approvals::ElicitationAction::Accept => ElicitationAction::Accept,
-        codex_protocol::approvals::ElicitationAction::Decline => ElicitationAction::Decline,
-        codex_protocol::approvals::ElicitationAction::Cancel => ElicitationAction::Cancel,
-    };
-    let content = match action {
-        // Preserve the legacy fallback for clients that only send an action.
-        ElicitationAction::Accept => Some(content.unwrap_or_else(|| serde_json::json!({}))),
-        ElicitationAction::Decline | ElicitationAction::Cancel => None,
-    };
-    let response = ElicitationResponse {
-        action,
-        content,
-        meta,
-    };
-    let request_id = match request_id {
-        ProtocolRequestId::String(value) => {
-            rmcp::model::NumberOrString::String(std::sync::Arc::from(value))
-        }
-        ProtocolRequestId::Integer(value) => rmcp::model::NumberOrString::Number(value),
-    };
-    if let Err(err) = sess
-        .resolve_elicitation(server_name, request_id, response)
-        .await
-    {
-        warn!(
-            error = %err,
-            "failed to resolve elicitation request in session"
-        );
-    }
 }
 
 /// Propagate a user's exec approval decision to the session.
@@ -435,22 +316,8 @@ pub async fn request_user_input_response(
     sess.notify_user_input_response(&id, response).await;
 }
 
-pub async fn request_permissions_response(
-    sess: &Arc<Session>,
-    id: String,
-    response: RequestPermissionsResponse,
-) {
-    sess.notify_request_permissions_response(&id, response)
-        .await;
-}
-
 pub async fn dynamic_tool_response(sess: &Arc<Session>, id: String, response: DynamicToolResponse) {
     sess.notify_dynamic_tool_response(&id, response).await;
-}
-
-pub async fn refresh_mcp_servers(sess: &Arc<Session>, refresh_config: McpServerRefreshConfig) {
-    let mut guard = sess.pending_mcp_server_refresh_config.lock().await;
-    *guard = Some(refresh_config);
 }
 
 pub async fn reload_user_config(sess: &Arc<Session>) {
@@ -598,17 +465,10 @@ pub async fn set_thread_memory_mode(sess: &Arc<Session>, sub_id: String, mode: T
 
 async fn shutdown_session_runtime(sess: &Arc<Session>) {
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
-    let _ = sess.conversation.shutdown().await;
     sess.services
         .unified_exec_manager
         .terminate_all_processes()
         .await;
-    let mcp_shutdown = {
-        let mut manager = sess.services.mcp_connection_manager.write().await;
-        manager.begin_shutdown()
-    };
-    mcp_shutdown.await;
-    sess.guardian_review_session.shutdown().await;
 }
 
 async fn emit_thread_stop_lifecycle(sess: &Session) {
@@ -656,46 +516,23 @@ pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
         .rollout_thread_trace
         .record_protocol_event(&event.msg);
     sess.deliver_event_raw(event).await;
-    sess.services
-        .rollout_thread_trace
-        .record_ended(codex_rollout_trace::RolloutStatus::Completed);
     true
 }
 
 pub async fn review(
     sess: &Arc<Session>,
-    config: &Arc<Config>,
+    _config: &Arc<Config>,
     sub_id: String,
-    review_request: ReviewRequest,
+    _review_request: impl std::fmt::Debug,
 ) {
-    let turn_context = sess.new_default_turn_with_sub_id(sub_id.clone()).await;
-    sess.maybe_emit_unknown_model_warning_for_turn(turn_context.as_ref())
-        .await;
-    sess.refresh_mcp_servers_if_requested(&turn_context, Some(sess.mcp_elicitation_reviewer()))
-        .await;
-    #[allow(deprecated)]
-    match resolve_review_request(review_request, &turn_context.cwd) {
-        Ok(resolved) => {
-            spawn_review_thread(
-                Arc::clone(sess),
-                Arc::clone(config),
-                turn_context.clone(),
-                sub_id,
-                resolved,
-            )
-            .await;
-        }
-        Err(err) => {
-            let event = Event {
-                id: sub_id,
-                msg: EventMsg::Error(ErrorEvent {
-                    message: err.to_string(),
-                    codex_error_info: Some(CodexErrorInfo::Other),
-                }),
-            };
-            sess.send_event(&turn_context, event.msg).await;
-        }
-    }
+    sess.send_event_raw(Event {
+        id: sub_id,
+        msg: EventMsg::Error(ErrorEvent {
+            message: "review mode has been removed".to_string(),
+            codex_error_info: Some(CodexErrorInfo::BadRequest),
+        }),
+    })
+    .await;
 }
 
 pub(super) async fn submission_loop(
@@ -716,37 +553,6 @@ pub(super) async fn submission_loop(
                 }
                 Op::CleanBackgroundTerminals => {
                     clean_background_terminals(&sess).await;
-                    false
-                }
-                Op::RealtimeConversationStart(params) => {
-                    if let Err(err) =
-                        handle_realtime_conversation_start(&sess, sub.id.clone(), params).await
-                    {
-                        sess.send_event_raw(Event {
-                            id: sub.id.clone(),
-                            msg: EventMsg::Error(ErrorEvent {
-                                message: err.to_string(),
-                                codex_error_info: Some(CodexErrorInfo::Other),
-                            }),
-                        })
-                        .await;
-                    }
-                    false
-                }
-                Op::RealtimeConversationAudio(params) => {
-                    handle_realtime_conversation_audio(&sess, sub.id.clone(), params).await;
-                    false
-                }
-                Op::RealtimeConversationText(params) => {
-                    handle_realtime_conversation_text(&sess, sub.id.clone(), params).await;
-                    false
-                }
-                Op::RealtimeConversationClose => {
-                    handle_realtime_conversation_close(&sess, sub.id.clone()).await;
-                    false
-                }
-                Op::RealtimeConversationListVoices => {
-                    realtime_conversation_list_voices(&sess, sub.id.clone()).await;
                     false
                 }
                 Op::UserInput { .. } => {
@@ -777,16 +583,8 @@ pub(super) async fn submission_loop(
                     request_user_input_response(&sess, id, response).await;
                     false
                 }
-                Op::RequestPermissionsResponse { id, response } => {
-                    request_permissions_response(&sess, id, response).await;
-                    false
-                }
                 Op::DynamicToolResponse { id, response } => {
                     dynamic_tool_response(&sess, id, response).await;
-                    false
-                }
-                Op::RefreshMcpServers { config } => {
-                    refresh_mcp_servers(&sess, config).await;
                     false
                 }
                 Op::ReloadUserConfig => {
@@ -809,24 +607,9 @@ pub(super) async fn submission_loop(
                     run_user_shell_command(&sess, sub.id.clone(), command).await;
                     false
                 }
-                Op::ResolveElicitation {
-                    server_name,
-                    request_id,
-                    decision,
-                    content,
-                    meta,
-                } => {
-                    resolve_elicitation(&sess, server_name, request_id, decision, content, meta)
-                        .await;
-                    false
-                }
                 Op::Shutdown => shutdown(&sess, sub.id.clone()).await,
                 Op::Review { review_request } => {
                     review(&sess, &config, sub.id.clone(), review_request).await;
-                    false
-                }
-                Op::ApproveGuardianDeniedAction { event } => {
-                    approve_guardian_denied_action(&sess, event).await;
                     false
                 }
                 _ => false, // Ignore unknown ops; enum is non_exhaustive for future variants.
@@ -848,68 +631,15 @@ pub(super) async fn submission_loop(
     debug!("Agent loop exited");
 }
 
-async fn approve_guardian_denied_action(sess: &Arc<Session>, event: GuardianAssessmentEvent) {
-    if event.status != GuardianAssessmentStatus::Denied {
-        warn!(
-            review_id = event.id.as_str(),
-            "ignoring approval for non-denied Guardian assessment"
-        );
-        return;
-    }
-
-    let approved_action = serde_json::json!({
-        "action": &event.action,
-        "outcome": "allowed",
-    });
-    let approved_action_json = match serde_json::to_string_pretty(&approved_action) {
-        Ok(approved_action_json) => approved_action_json,
-        Err(error) => {
-            warn!(%error, review_id = event.id.as_str(), "failed to serialize approved Guardian action");
-            return;
-        }
-    };
-    let approval_prefix = crate::guardian::AUTO_REVIEW_DENIED_ACTION_APPROVAL_DEVELOPER_PREFIX;
-    let text = format!(
-        r#"{approval_prefix}
-
-Treat this as approval to perform that exact action in the same context in which it was originally requested.
-Do not assume this also authorizes similar operations with different payloads.
-
-Approved action:
-{approved_action_json}"#,
-    );
-    let items = vec![ResponseInputItem::Message {
-        role: "developer".to_string(),
-        content: vec![ContentItem::InputText { text }],
-        phase: None,
-    }];
-
-    if let Err(items) = sess.inject_response_items(items).await {
-        sess.input_queue
-            .queue_response_items_for_next_turn(items)
-            .await;
-    }
-}
-
 pub(super) fn submission_dispatch_span(sub: &Submission) -> tracing::Span {
     let op_name = sub.op.kind();
     let span_name = format!("op.dispatch.{op_name}");
-    let dispatch_span = match &sub.op {
-        Op::RealtimeConversationAudio(_) => {
-            debug_span!(
-                "submission_dispatch",
-                otel.name = span_name.as_str(),
-                submission.id = sub.id.as_str(),
-                codex.op = op_name
-            )
-        }
-        _ => info_span!(
-            "submission_dispatch",
-            otel.name = span_name.as_str(),
-            submission.id = sub.id.as_str(),
-            codex.op = op_name
-        ),
-    };
+    let dispatch_span = info_span!(
+        "submission_dispatch",
+        otel.name = span_name.as_str(),
+        submission.id = sub.id.as_str(),
+        codex.op = op_name
+    );
     if let Some(trace) = sub.trace.as_ref()
         && !set_parent_from_w3c_trace_context(&dispatch_span, trace)
     {
