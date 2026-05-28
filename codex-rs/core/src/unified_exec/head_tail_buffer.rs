@@ -73,12 +73,6 @@ impl HeadTailBuffer {
         self.push_to_tail(chunk);
     }
 
-    pub(crate) fn snapshot_chunks(&self) -> Vec<Vec<u8>> {
-        let mut out = Vec::new();
-        out.extend(self.head.iter().cloned());
-        out.extend(self.tail.iter().cloned());
-        out
-    }
 
     pub(crate) fn to_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.retained_bytes());

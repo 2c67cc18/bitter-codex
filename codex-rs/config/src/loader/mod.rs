@@ -634,20 +634,6 @@ async fn find_project_root(
     Ok(cwd.clone())
 }
 
-async fn find_git_checkout_root(cwd: &AbsolutePathBuf) -> Option<AbsolutePathBuf> {
-    let base = match tokio::fs::metadata(cwd.as_path()).await {
-        Ok(metadata) if metadata.is_dir() => cwd.clone(),
-        _ => cwd.parent()?,
-    };
-
-    for dir in base.ancestors() {
-        let dot_git = dir.join(".git");
-        if tokio::fs::metadata(dot_git.as_path()).await.is_ok() {
-            return Some(dir);
-        }
-    }
-    None
-}
 
 struct LoadedProjectLayers {
     layers: Vec<ConfigLayerEntry>,

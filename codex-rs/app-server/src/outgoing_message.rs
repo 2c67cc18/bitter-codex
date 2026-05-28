@@ -127,9 +127,6 @@ impl ThreadScopedOutgoingMessageSender {
             .await;
     }
 
-    pub(crate) async fn send_global_server_notification(&self, notification: ServerNotification) {
-        self.outgoing.send_server_notification(notification).await;
-    }
 
     pub(crate) async fn abort_pending_server_requests(&self) {
         self.outgoing

@@ -131,16 +131,6 @@ impl ExecExpiration {
         }
     }
 
-    pub(crate) fn timeout_ms(&self) -> Option<u64> {
-        match self {
-            ExecExpiration::Timeout(duration) => Some(duration.as_millis() as u64),
-            ExecExpiration::DefaultTimeout => Some(DEFAULT_EXEC_COMMAND_TIMEOUT_MS),
-            ExecExpiration::Cancellation(_) => None,
-            ExecExpiration::TimeoutOrCancellation { timeout, .. } => {
-                Some(timeout.as_millis() as u64)
-            }
-        }
-    }
 
 }
 

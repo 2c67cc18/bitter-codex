@@ -30,7 +30,6 @@ pub(crate) struct ToolCallRuntime {
     router: Arc<ToolRouter>,
     session: Arc<Session>,
     turn_context: Arc<TurnContext>,
-    tracker: SharedTurnDiffTracker,
     parallel_execution: Arc<RwLock<()>>,
 }
 
@@ -39,13 +38,12 @@ impl ToolCallRuntime {
         router: Arc<ToolRouter>,
         session: Arc<Session>,
         turn_context: Arc<TurnContext>,
-        tracker: SharedTurnDiffTracker,
+        _tracker: SharedTurnDiffTracker,
     ) -> Self {
         Self {
             router,
             session,
             turn_context,
-            tracker,
             parallel_execution: Arc::new(RwLock::new(())),
         }
     }

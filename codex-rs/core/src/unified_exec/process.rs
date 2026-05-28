@@ -151,13 +151,6 @@ impl UnifiedExecProcess {
         }
     }
 
-    pub(super) fn fail_and_terminate(&self, message: String) {
-        let state = self.state_rx.borrow().clone();
-        if state.failure_message.is_none() {
-            let _ = self.state_tx.send_replace(state.failed(message));
-        }
-        self.terminate();
-    }
 
     pub(super) fn failure_message(&self) -> Option<String> {
         self.state_rx.borrow().failure_message.clone()

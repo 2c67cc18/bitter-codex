@@ -260,9 +260,6 @@ impl ModelClient {
         }
     }
 
-    pub(crate) fn auth_manager(&self) -> Option<Arc<AuthManager>> {
-        self.state.provider.auth_manager()
-    }
 
     pub(crate) fn set_window_generation(&self, window_generation: u64) {
         self.state

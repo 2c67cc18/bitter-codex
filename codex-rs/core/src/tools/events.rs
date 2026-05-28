@@ -129,9 +129,6 @@ impl ToolEmitter {
         }
     }
 
-    pub async fn begin(&self, ctx: ToolEventCtx<'_>) {
-        self.emit(ctx, ToolEventStage::Begin).await;
-    }
 
 
 }

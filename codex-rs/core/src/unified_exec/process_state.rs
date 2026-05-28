@@ -14,11 +14,4 @@ impl ProcessState {
         }
     }
 
-    pub(crate) fn failed(&self, message: String) -> Self {
-        Self {
-            has_exited: true,
-            exit_code: self.exit_code,
-            failure_message: Some(message),
-        }
-    }
 }
