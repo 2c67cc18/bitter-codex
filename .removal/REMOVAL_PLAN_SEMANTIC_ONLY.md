@@ -450,6 +450,15 @@ done as blind deletion or line-range cleanup.
   execpolicy, realtime, MCP/request-permissions, sandboxing, guardian, and
   related missing crates/modules), with no remaining owned-file
   `codex_shell_command` references.
+- 2026-05-28 root serial follow-up removed the last app-server
+  `codex_shell_command` dependency by replacing `shlex_join` in
+  `app-server/src/bespoke_event_handling.rs` with the same local display-only
+  shell join used by the core shell-command trim. `git diff --check` passed and
+  `rg codex_shell_command codex-rs` is empty. Focused
+  `cargo-modal --repo codex-rs --dirty check -p codex-app-server --lib` still
+  fails before reaching app-server because `codex-core` has the broader
+  unresolved deleted session/runtime surfaces documented above; this is not an
+  app-server shell-command regression.
 
 ## Analytics removal follow-through
 
