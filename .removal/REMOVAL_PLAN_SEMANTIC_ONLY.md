@@ -1402,3 +1402,16 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   `cargo-modal --repo codex-rs --dirty check -p codex-core --lib
   --no-default-features` run still failed on broader missing/deleted surfaces
   such as agent, MCP, request-permissions, goals, and network policy imports.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/client-feedback-debug-trim`
+  as merge commit `Merge client feedback debug trim`. The slice removed
+  `client.rs` source dependencies on deleted `codex_feedback` and
+  `codex_response_debug_context` crates by moving request feedback tag emission
+  onto the retained local `feedback_tags!` tracing path and by adding local
+  response-debug extraction from retained API transport headers. Root review
+  added a follow-up commit preserving the existing base64 `x-error-json`
+  `error.code` parsing shape for auth error telemetry. The worker reached
+  terminal `completed` normally with a clean branch, `git diff --check` passed,
+  and its focused `cargo-modal --repo codex-rs --dirty check -p codex-core
+  --lib` rerun still failed only on broader session/MCP/goals/request-permission
+  cleanup blockers after the local helper type mismatch was fixed.
