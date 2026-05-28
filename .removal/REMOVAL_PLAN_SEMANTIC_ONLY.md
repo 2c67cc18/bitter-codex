@@ -1391,3 +1391,14 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   existing unused unified-exec re-export warnings. Tests still reference removed
   exec-server helpers and must be handled in the later all-target/test rebuild
   phase rather than restoring the deleted exec-server transport.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/session-route-realtime-call-trim`
+  as merge commit `Merge realtime text handler call trim`. The slice removed
+  the stale fourth `mirror_user_text_to_realtime` argument from the
+  `Session::route_realtime_text_input` call to `handlers::user_input_or_turn_inner`
+  after the handler signature was trimmed, preserving the existing realtime
+  text `Op::UserInput` routing. The worker reached terminal `completed`
+  normally with a clean branch, and `git diff --check` passed. Its
+  `cargo-modal --repo codex-rs --dirty check -p codex-core --lib
+  --no-default-features` run still failed on broader missing/deleted surfaces
+  such as agent, MCP, request-permissions, goals, and network policy imports.
