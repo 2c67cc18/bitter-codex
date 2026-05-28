@@ -316,12 +316,17 @@ async fn build_skill_injection_items(
         .cloned()
         .collect::<Vec<_>>();
     let skills_outcome = turn_context.turn_skills.outcome.as_ref();
-    let mentioned_skills = collect_explicit_skill_mentions(
-        &user_input,
-        &skills_outcome.skills,
-        &skills_outcome.disabled_paths,
-        &HashMap::new(),
-    );
+    let mentioned_skills = user_input
+        .iter()
+        .flat_map(|input| {
+            collect_explicit_skill_mentions(
+                input,
+                &skills_outcome.skills,
+                &skills_outcome.disabled_paths,
+                &HashMap::new(),
+            )
+        })
+        .collect::<Vec<_>>();
 
     let SkillInjections {
         items: skill_injections,
