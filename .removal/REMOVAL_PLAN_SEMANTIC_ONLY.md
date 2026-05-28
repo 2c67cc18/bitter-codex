@@ -418,6 +418,22 @@ done as blind deletion or line-range cleanup.
   retry `user_shell.rs` alone for this dependency; include the relevant
   `exec.rs`/`sandboxing` request type ownership or leave the reference until
   that broader runtime cleanup is scheduled.
+- 2026-05-28 accepted retained context-fragment re-export slice
+  `semantic-root-20260528-context-fragment-reexports/context-fragment-reexports`
+  as merge commit `Merge context fragment reexports`. It restored only the
+  context fragments still needed by surviving prompt flows: permissions,
+  collaboration mode, personality, realtime start/end, available skills,
+  individual skill injections, and saved network rules. The patch removed the
+  initial app/plugin inventory instruction call sites rather than restoring
+  app/plugin/MCP prompt surfaces, and simplified permission rendering so it no
+  longer depends on deleted execpolicy prompt types. The worker reached
+  terminal `completed` normally with clean branch
+  `semantic-context-fragment-reexports` at `1a0645247`. `git diff --check`
+  passed. Focused cargo-modal core lib checks still fail from broader
+  unresolved session/runtime surfaces (`agent`, `environment_selection`,
+  `exec_policy`, `sandboxing`, MCP/RMCP, connectors, guardian,
+  request-permissions, and deleted skill/app/plugin infrastructure), but no
+  remaining diagnostics are from the restored context fragment files.
 
 ## Analytics removal follow-through
 
