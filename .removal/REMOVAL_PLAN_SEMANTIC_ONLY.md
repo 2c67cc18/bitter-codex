@@ -26,6 +26,13 @@ done as blind deletion or line-range cleanup.
   dependency, inlined the retained models-manager collaboration mode presets
   after removing the deleted template crate, and replaced rollout's removed
   file-search fallback plus deleted request-permissions event reference.
+- 2026-05-28 workspace check after those merges advanced to `codex-core`.
+  Remaining core cleanup is broad and not yet merged: deleted module
+  declarations remain for apply-patch, apps, realtime, multi-agent/review,
+  plugin/context/permission prompt files, and core still references removed
+  sandboxing, execpolicy, network-proxy, plugin, windows-sandbox, and rollout
+  trace crates. Treat this as the next independent semantic slice with a tight
+  core-only contract; do not mix it with app-server protocol work.
 
 ## Analytics removal follow-through
 
@@ -312,6 +319,11 @@ done as blind deletion or line-range cleanup.
   repairs after workspace check advanced to removed template/file-search
   dependencies. Re-run full workspace `cargo-modal` check, clippy, and test
   from main after those merges.
+- 2026-05-28 final workspace check after model-provider telemetry cleanup
+  failed in `codex-core` with 311 errors from broad stale module declarations,
+  removed-crate references, and malformed schema constructor fallout. This
+  blocks clean final check/clippy/test until the core-only semantic slice is
+  completed.
 - After semantic cleanup only, run the equivalent of:
 
 ```bash
