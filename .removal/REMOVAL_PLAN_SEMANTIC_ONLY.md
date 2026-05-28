@@ -1208,3 +1208,14 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   `codex-rs/git-utils/src/info.rs` and `lib.rs`. These edits may be the right
   local-only direction, but they are uncommitted and need a focused review or
   fresh worker slice before inclusion.
+- 2026-05-28 root accepted a narrow session-prefix follow-up that removed the
+  last direct reference to the deleted `SubagentNotification` context fragment.
+  `core/src/session_prefix.rs` now formats the retained
+  `<subagent_notification>` marker locally for the still-present child-agent
+  completion forwarding path. Focused
+  `cargo-modal --repo codex-rs --dirty check -p codex-core
+  --no-default-features --lib` still failed at 219 broader errors, but no
+  `SubagentNotification` diagnostics remained. The top remaining blockers are
+  deleted agent/goals/connectors/environment-selection/exec-policy/realtime,
+  MCP/request-permissions/guardian/network-approval/sandboxing, exec-server,
+  and connector/plugin turn-construction surfaces.
