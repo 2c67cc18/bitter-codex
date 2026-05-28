@@ -20,7 +20,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Weak;
 
-use codex_exec_server::Environment;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_output_truncation::TruncationPolicy;
 use rand::Rng;
@@ -84,7 +83,6 @@ pub(crate) struct ExecCommandRequest {
     pub yield_time_ms: u64,
     pub max_output_tokens: Option<usize>,
     pub cwd: AbsolutePathBuf,
-    pub environment: Arc<Environment>,
     pub tty: bool,
 }
 

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::function_tool::FunctionCallError;
 use crate::tools::context::ExecCommandToolOutput;
 use crate::tools::context::ToolInvocation;
@@ -118,7 +116,6 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
                 || turn_environment.cwd.clone(),
                 |workdir| turn_environment.cwd.join(workdir),
             );
-        let environment = Arc::clone(&turn_environment.environment);
         let args: ExecCommandArgs = parse_arguments_with_base_path(&arguments, &cwd)?;
         let process_id = manager.allocate_process_id().await;
         let resolved_command = get_command(
@@ -150,7 +147,6 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
                     yield_time_ms,
                     max_output_tokens,
                     cwd,
-                    environment,
                     tty,
                 },
                 &context,
