@@ -88,6 +88,20 @@ done as blind deletion or line-range cleanup.
   `session::{multi_agents,review}` and `tasks::review` declarations plus
   non-tools-declaration references to removed sandboxing, execpolicy,
   network-proxy, Windows sandbox, rollout-trace, and MCP surfaces.
+- 2026-05-28 accepted narrow session/tasks declaration slice
+  `semantic-root-20260528-core-session-task-decls/core-session-task-decls` as
+  merge commit `Merge core session task declaration trim`. It removed stale
+  declarations/re-exports for deleted `session::{multi_agents,review}` and
+  `tasks::review`, plus the now-dead in-file multi-agent usage hint hook and
+  stale review imports in `core/src/session/mod.rs`. The worker reached
+  terminal `completed` normally at `2026-05-28T01:33:25Z`. Its first focused
+  cargo-modal check hit a transient `static.rust-lang.org` connection reset
+  during rustup self-update; the retry reached Cargo and failed at 373
+  out-of-scope `codex-core` errors. Remaining cleanup is now broad unresolved
+  deleted surfaces rather than missing session/tasks declaration files: agent,
+  attestation, realtime, MCP/request-permissions, sandboxing, execpolicy,
+  network-proxy, Windows sandbox, rollout-trace, compact, tools, and
+  thread-manager references.
 
 ## Analytics removal follow-through
 
