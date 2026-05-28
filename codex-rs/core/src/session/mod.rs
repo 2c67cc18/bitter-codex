@@ -81,6 +81,7 @@ use codex_protocol::items::UserMessageItem;
 use codex_protocol::mcp::CallToolResult;
 use codex_protocol::models::ActivePermissionProfile;
 use codex_protocol::models::AdditionalPermissionProfile;
+use codex_protocol::models::FileSystemPermissions;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::SandboxEnforcement;
@@ -88,6 +89,9 @@ use codex_protocol::models::format_allow_prefixes;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::permissions::FileSystemSandboxPolicy;
+use codex_protocol::permissions::FileSystemAccessMode;
+use codex_protocol::permissions::FileSystemPath;
+use codex_protocol::permissions::FileSystemSpecialPath;
 use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::protocol::FileChange;
 use codex_protocol::protocol::HasLegacyEvent;
@@ -116,7 +120,6 @@ use codex_rollout::state_db;
 use codex_rollout_trace::AgentResultTracePayload;
 use codex_rollout_trace::ThreadStartedTraceMetadata;
 use codex_rollout_trace::ThreadTraceContext;
-use codex_sandboxing::policy_transforms::intersect_permission_profiles;
 use codex_shell_command::parse_command::parse_command;
 use codex_thread_store::CreateThreadParams;
 use codex_thread_store::LiveThread;
@@ -773,6 +776,101 @@ fn session_permission_profile_state_from_config(
     config: &Config,
 ) -> CodexResult<PermissionProfileState> {
     Ok(config.permissions.permission_profile_state().clone())
+}
+
+fn clamp_granted_permissions_to_request(
+    requested_permissions: RequestPermissionProfile,
+    granted_permissions: AdditionalPermissionProfile,
+    cwd: &Path,
+) -> RequestPermissionProfile {
+    let network = match (requested_permissions.network, granted_permissions.network) {
+        (Some(requested), Some(granted)) if requested.enabled == Some(true) => {
+            (granted.enabled == Some(true)).then_some(granted)
+        }
+        _ => None,
+    };
+
+    let file_system = match (
+        requested_permissions.file_system,
+        granted_permissions.file_system,
+    ) {
+        (Some(requested), Some(granted)) => {
+            let requested = materialize_file_system_project_roots(requested, cwd);
+            let granted = materialize_file_system_project_roots(granted, cwd);
+            let entries = granted
+                .entries
+                .into_iter()
+                .filter(|entry| {
+                    requested
+                        .entries
+                        .iter()
+                        .any(|requested| file_system_entry_allows(requested, entry))
+                })
+                .collect::<Vec<_>>();
+            (!entries.is_empty()).then_some(FileSystemPermissions {
+                entries,
+                glob_scan_max_depth: granted.glob_scan_max_depth,
+            })
+        }
+        _ => None,
+    };
+
+    AdditionalPermissionProfile {
+        network,
+        file_system,
+    }
+    .into()
+}
+
+fn materialize_file_system_project_roots(
+    mut permissions: FileSystemPermissions,
+    cwd: &Path,
+) -> FileSystemPermissions {
+    let Some(cwd) = codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(cwd).ok() else {
+        return permissions;
+    };
+
+    for entry in &mut permissions.entries {
+        if let FileSystemPath::Special {
+            value: FileSystemSpecialPath::ProjectRoots { subpath },
+        } = &entry.path
+        {
+            let path = match subpath {
+                Some(subpath) => cwd.join(subpath),
+                None => cwd.clone(),
+            };
+            entry.path = FileSystemPath::Path { path };
+        }
+    }
+    permissions
+}
+
+fn file_system_entry_allows(
+    requested: &codex_protocol::permissions::FileSystemSandboxEntry,
+    granted: &codex_protocol::permissions::FileSystemSandboxEntry,
+) -> bool {
+    file_system_access_allows(requested.access, granted.access)
+        && file_system_path_allows(&requested.path, &granted.path)
+}
+
+fn file_system_access_allows(
+    requested: FileSystemAccessMode,
+    granted: FileSystemAccessMode,
+) -> bool {
+    match granted {
+        FileSystemAccessMode::Read => requested.can_read(),
+        FileSystemAccessMode::Write => requested.can_write(),
+        FileSystemAccessMode::Deny => false,
+    }
+}
+
+fn file_system_path_allows(requested: &FileSystemPath, granted: &FileSystemPath) -> bool {
+    match (requested, granted) {
+        (FileSystemPath::Path { path: requested }, FileSystemPath::Path { path: granted }) => {
+            granted == requested || granted.starts_with(requested)
+        }
+        _ => requested == granted,
+    }
 }
 
 #[cfg(test)]
@@ -2305,12 +2403,11 @@ impl Session {
         }
 
         RequestPermissionsResponse {
-            permissions: intersect_permission_profiles(
-                requested_permissions.into(),
+            permissions: clamp_granted_permissions_to_request(
+                requested_permissions,
                 response.permissions.into(),
                 cwd,
-            )
-            .into(),
+            ),
             scope: response.scope,
             strict_auto_review: response.strict_auto_review,
         }
