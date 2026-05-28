@@ -148,6 +148,18 @@ done as blind deletion or line-range cleanup.
   attestation, agent, realtime, MCP/request-permissions, sandboxing,
   execpolicy, network-proxy, Windows sandbox, and remaining rollout trace
   surfaces.
+- 2026-05-28 accepted attestation provider trim
+  `semantic-root-20260528-core-attestation-trim/core-attestation-trim` as merge
+  commit `Merge core attestation trim`. The worker's initial two-file patch was
+  completed by root review before merge because the same deleted provider
+  plumbing also lived in `session/session.rs`, `state/service.rs`,
+  `thread_manager.rs`, app-server startup, and the thread-manager sample. The
+  accepted commit removes `crate::attestation` imports, attestation header
+  insertion, provider fields, constructor arguments, and production call-site
+  arguments without reintroducing the deleted attestation module. Focused
+  cargo-modal core lib check after the root fix failed at 344 out-of-scope
+  errors in the remaining session/runtime surfaces; no attestation-specific
+  errors remained in the focused output.
 
 ## Analytics removal follow-through
 
