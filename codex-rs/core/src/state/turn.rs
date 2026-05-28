@@ -9,11 +9,8 @@ use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::AbortOnDropHandle;
 use codex_protocol::dynamic_tools::DynamicToolResponse;
-use codex_protocol::request_permissions::RequestPermissionProfile;
-use codex_protocol::request_permissions::RequestPermissionsResponse;
 use codex_protocol::request_user_input::RequestUserInputResponse;
 use codex_rmcp_client::ElicitationResponse;
-use codex_utils_absolute_path::AbsolutePathBuf;
 use rmcp::model::RequestId;
 use tokio::sync::oneshot;
 
@@ -108,7 +105,6 @@ impl ActiveTurn {
 #[derive(Default)]
 pub(crate) struct TurnState {
     pending_approvals: HashMap<String, oneshot::Sender<ReviewDecision>>,
-    pending_request_permissions: HashMap<String, PendingRequestPermissions>,
     pending_user_input: HashMap<String, oneshot::Sender<RequestUserInputResponse>>,
     pending_elicitations: HashMap<(String, RequestId), oneshot::Sender<ElicitationResponse>>,
     pending_dynamic_tools: HashMap<String, oneshot::Sender<DynamicToolResponse>>,
@@ -119,12 +115,6 @@ pub(crate) struct TurnState {
     pub(crate) tool_calls: u64,
     pub(crate) has_memory_citation: bool,
     pub(crate) token_usage_at_turn_start: TokenUsage,
-}
-
-pub(crate) struct PendingRequestPermissions {
-    pub(crate) tx_response: oneshot::Sender<RequestPermissionsResponse>,
-    pub(crate) requested_permissions: RequestPermissionProfile,
-    pub(crate) cwd: AbsolutePathBuf,
 }
 
 impl TurnState {
@@ -145,26 +135,9 @@ impl TurnState {
 
     pub(crate) fn clear_pending_waiters(&mut self) {
         self.pending_approvals.clear();
-        self.pending_request_permissions.clear();
         self.pending_user_input.clear();
         self.pending_elicitations.clear();
         self.pending_dynamic_tools.clear();
-    }
-
-    pub(crate) fn insert_pending_request_permissions(
-        &mut self,
-        key: String,
-        pending_request_permissions: PendingRequestPermissions,
-    ) -> Option<PendingRequestPermissions> {
-        self.pending_request_permissions
-            .insert(key, pending_request_permissions)
-    }
-
-    pub(crate) fn remove_pending_request_permissions(
-        &mut self,
-        key: &str,
-    ) -> Option<PendingRequestPermissions> {
-        self.pending_request_permissions.remove(key)
     }
 
     pub(crate) fn insert_pending_user_input(
