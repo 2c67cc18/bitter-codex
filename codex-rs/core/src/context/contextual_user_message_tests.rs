@@ -1,7 +1,6 @@
 use super::*;
 use crate::context::ContextualUserFragment;
-use crate::context::GoalContext;
-use crate::context::SubagentNotification;
+use crate::context::TurnAborted;
 use pretty_assertions::assert_eq;
 
 #[test]
@@ -12,31 +11,10 @@ fn detects_environment_context_fragment() {
 }
 
 #[test]
-fn detects_subagent_notification_fragment_case_insensitively() {
-    assert!(SubagentNotification::matches_text(
-        "<SUBAGENT_NOTIFICATION>{}</subagent_notification>"
-    ));
-}
-
-#[test]
-fn detects_goal_context_fragment() {
-    let text = GoalContext::new("Continue working toward the active thread goal.").render();
-
-    assert!(is_contextual_user_fragment(&ContentItem::InputText {
-        text
-    }));
-}
-
-#[test]
 fn contextual_user_fragment_is_dyn_compatible() {
-    let fragment: Box<dyn ContextualUserFragment> = Box::new(GoalContext::new(
-        "Continue working toward the active thread goal.",
-    ));
+    let fragment: Box<dyn ContextualUserFragment> = Box::new(TurnAborted);
 
-    assert_eq!(
-        fragment.render(),
-        "<goal_context>\nContinue working toward the active thread goal.\n</goal_context>"
-    );
+    assert_eq!(fragment.render(), "<turn_aborted />");
 }
 
 #[test]
