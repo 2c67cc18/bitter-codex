@@ -1415,3 +1415,7 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   and its focused `cargo-modal --repo codex-rs --dirty check -p codex-core
   --lib` rerun still failed only on broader session/MCP/goals/request-permission
   cleanup blockers after the local helper type mismatch was fixed.
+  Root reran `cargo-modal --repo codex-rs --dirty check -p codex-core --lib
+  --no-default-features` after merge; it still failed at 179 broader errors
+  with no remaining `codex_feedback` or `codex_response_debug_context`
+  diagnostics in the owned client/util source.
