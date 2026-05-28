@@ -5,7 +5,6 @@ use codex_utils_path as path_utils;
 use std::cmp::Reverse;
 use std::ffi::OsStr;
 use std::io;
-use std::num::NonZero;
 use std::ops::ControlFlow;
 use std::path::Path;
 use std::path::PathBuf;
@@ -20,7 +19,6 @@ use super::ARCHIVED_SESSIONS_SUBDIR;
 use super::SESSIONS_SUBDIR;
 use crate::protocol::EventMsg;
 use crate::state_db;
-use codex_file_search as file_search;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::RolloutLine;
@@ -1356,20 +1354,7 @@ async fn find_thread_path_by_id_str_in_subdir(
     if !root.exists() {
         return Ok(unverified_db_path);
     }
-    // This is safe because we know the values are valid.
-    #[allow(clippy::unwrap_used)]
-    let limit = NonZero::new(1).unwrap();
-    let options = file_search::FileSearchOptions {
-        limit,
-        compute_indices: false,
-        respect_gitignore: false,
-        ..Default::default()
-    };
-
-    let results = file_search::run(id_str, vec![root], options, /*cancel_flag*/ None)
-        .map_err(|e| io::Error::other(format!("file search failed: {e}")))?;
-
-    let found = results.matches.into_iter().next().map(|m| m.full_path());
+    let found = find_rollout_path_by_thread_id(root.as_path(), id_str, thread_id).await?;
     if let Some(found_path) = found.as_ref() {
         tracing::debug!("state db missing rollout path for thread {id_str}");
         tracing::warn!(
@@ -1392,6 +1377,60 @@ async fn find_thread_path_by_id_str_in_subdir(
     }
 
     Ok(found.or(unverified_db_path))
+}
+
+async fn find_rollout_path_by_thread_id(
+    root: &Path,
+    id_str: &str,
+    thread_id: Option<ThreadId>,
+) -> io::Result<Option<PathBuf>> {
+    let mut scanned_files = 0usize;
+    let mut dirs = vec![root.to_path_buf()];
+
+    while let Some(dir) = dirs.pop() {
+        let mut entries = match tokio::fs::read_dir(dir).await {
+            Ok(entries) => entries,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+            Err(err) => return Err(err),
+        };
+
+        while let Some(entry) = entries.next_entry().await? {
+            let file_type = entry.file_type().await?;
+            let path = entry.path();
+            if file_type.is_dir() {
+                dirs.push(path);
+                continue;
+            }
+            if !file_type.is_file()
+                || path.extension().and_then(|extension| extension.to_str()) != Some("jsonl")
+            {
+                continue;
+            }
+
+            scanned_files += 1;
+            if scanned_files > MAX_SCAN_FILES {
+                return Ok(None);
+            }
+
+            let name_matches = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .and_then(parse_timestamp_uuid_from_filename)
+                .is_some_and(|(_ts, id)| id.to_string() == id_str);
+            if name_matches {
+                return Ok(Some(path));
+            }
+
+            if let Some(thread_id) = thread_id
+                && let Ok(meta_line) = read_session_meta_line(path.as_path()).await
+                && meta_line.meta.id == thread_id
+            {
+                return Ok(Some(path));
+            }
+        }
+    }
+
+    Ok(None)
 }
 
 /// Locate a recorded thread rollout file by its UUID string using the existing
