@@ -45,6 +45,22 @@ done as blind deletion or line-range cleanup.
   manual review or rerun narrower slices with file ownership such as
   `core/src/config/**`, `core/src/session/{turn,handlers}.rs`, or
   `core/src/tools/**`.
+- 2026-05-28 accepted narrow config slice
+  `semantic-root-20260528-core-config-trim/core-config-trim` as merge commit
+  `Merge core config semantic trim`. It removed config-owned references to
+  deleted plugin manager, managed network proxy, sandboxing, Windows sandbox
+  helper, and agent role loader surfaces; restored config-owned permission
+  profile code; and kept `Config::to_mcp_config` call-compatible without
+  reintroducing plugin crate dependencies. Focused
+  `cargo-modal --repo codex-rs --dirty check -p codex-core
+  --no-default-features --lib` still failed at 301 errors from non-config
+  blockers: stale deleted module declarations in `core/src/lib.rs`,
+  `core/src/context/mod.rs`, and `core/src/session/mod.rs`, malformed
+  `view_image_spec` schema constructors, and non-config references to removed
+  sandboxing, execpolicy, network-proxy, Windows sandbox, and rollout-trace
+  crates. Worker stop evidence: it emitted a final report and marked its own
+  goal blocked, but `bitter-loop` status stayed `running` with no new output;
+  root stopped it at `2026-05-28T01:13:27Z` to collect the clean branch.
 
 ## Analytics removal follow-through
 
