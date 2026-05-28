@@ -1453,3 +1453,16 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   passed, and its focused `cargo-modal --dirty --repo codex-rs check -p
   codex-core` run failed at 164 broader errors in the remaining
   agent/MCP/exec-policy/request-permissions/realtime/state service cleanup.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/session-windows-sandbox-level-trim`
+  as merge commit `Merge session Windows sandbox level trim`. The slice removed
+  the stale `crate::windows_sandbox::WindowsSandboxLevelExt` import from
+  `session/mod.rs` and defaulted new session configuration to
+  `WindowsSandboxLevel::Disabled` instead of calling the removed
+  `WindowsSandboxLevel::from_config(&config)` helper. This keeps the retained
+  runtime on the local/full-access path without restoring Windows sandbox
+  plumbing. The worker reached terminal `completed` normally with a clean
+  branch, `git diff --check` passed, and its focused `cargo-modal --dirty
+  --repo codex-rs check -p codex-core` run failed at 162 broader errors in
+  remaining agent/MCP/exec-policy/request-permissions/realtime/state service
+  cleanup.
