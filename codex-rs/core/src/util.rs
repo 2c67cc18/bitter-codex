@@ -2,6 +2,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use codex_login::auth_env_telemetry::AuthEnvTelemetry;
 use rand::Rng;
 use tracing::error;
 
@@ -10,9 +11,8 @@ const BACKOFF_FACTOR: f64 = 2.0;
 
 /// Emit structured feedback metadata as key/value pairs.
 ///
-/// This logs a tracing event with `target: "feedback_tags"`. If
-/// `codex_feedback::CodexFeedback::metadata_layer()` is installed, these fields are captured and
-/// later attached as tags when feedback is uploaded.
+/// This logs a tracing event with `target: "feedback_tags"`. Feedback collectors can capture these
+/// fields and later attach them as tags when feedback is uploaded.
 ///
 /// Values are wrapped with [`tracing::field::DebugValue`], so the expression only needs to
 /// implement [`std::fmt::Debug`].
@@ -54,6 +54,60 @@ impl<'a> Auth401FeedbackSnapshot<'a> {
             error_code: error_code.unwrap_or(""),
         }
     }
+}
+
+pub(crate) struct FeedbackRequestTags<'a> {
+    pub(crate) endpoint: &'a str,
+    pub(crate) auth_header_attached: bool,
+    pub(crate) auth_header_name: Option<&'a str>,
+    pub(crate) auth_mode: Option<&'a str>,
+    pub(crate) auth_retry_after_unauthorized: Option<bool>,
+    pub(crate) auth_recovery_mode: Option<&'a str>,
+    pub(crate) auth_recovery_phase: Option<&'a str>,
+    pub(crate) auth_connection_reused: Option<bool>,
+    pub(crate) auth_request_id: Option<&'a str>,
+    pub(crate) auth_cf_ray: Option<&'a str>,
+    pub(crate) auth_error: Option<&'a str>,
+    pub(crate) auth_error_code: Option<&'a str>,
+    pub(crate) auth_recovery_followup_success: Option<bool>,
+    pub(crate) auth_recovery_followup_status: Option<u16>,
+}
+
+pub(crate) fn emit_feedback_request_tags_with_auth_env(
+    tags: &FeedbackRequestTags<'_>,
+    auth_env: &AuthEnvTelemetry,
+) {
+    let auth_request_id = tags.auth_request_id.unwrap_or("");
+    let auth_cf_ray = tags.auth_cf_ray.unwrap_or("");
+    let auth_error = tags.auth_error.unwrap_or("");
+    let auth_error_code = tags.auth_error_code.unwrap_or("");
+    let provider_env_key_name = auth_env.provider_env_key_name.as_deref().unwrap_or("");
+    let auth_header_name = tags.auth_header_name.unwrap_or("");
+    let auth_mode = tags.auth_mode.unwrap_or("");
+    let auth_recovery_mode = tags.auth_recovery_mode.unwrap_or("");
+    let auth_recovery_phase = tags.auth_recovery_phase.unwrap_or("");
+    feedback_tags!(
+        endpoint = tags.endpoint,
+        auth_header_attached = tags.auth_header_attached,
+        auth_header_name = auth_header_name,
+        auth_mode = auth_mode,
+        auth_retry_after_unauthorized = tags.auth_retry_after_unauthorized,
+        auth_recovery_mode = auth_recovery_mode,
+        auth_recovery_phase = auth_recovery_phase,
+        auth_connection_reused = tags.auth_connection_reused,
+        auth_request_id = auth_request_id,
+        auth_cf_ray = auth_cf_ray,
+        auth_error = auth_error,
+        auth_error_code = auth_error_code,
+        auth_recovery_followup_success = tags.auth_recovery_followup_success,
+        auth_recovery_followup_status = tags.auth_recovery_followup_status,
+        openai_api_key_env_present = auth_env.openai_api_key_env_present,
+        codex_api_key_env_present = auth_env.codex_api_key_env_present,
+        codex_api_key_env_enabled = auth_env.codex_api_key_env_enabled,
+        provider_env_key_name = provider_env_key_name,
+        provider_env_key_present = auth_env.provider_env_key_present,
+        refresh_token_url_override_present = auth_env.refresh_token_url_override_present,
+    );
 }
 
 pub(crate) fn emit_feedback_auth_recovery_tags(

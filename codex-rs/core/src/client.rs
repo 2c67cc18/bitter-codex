@@ -31,6 +31,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
+use base64::Engine;
 use codex_api::ApiError;
 use codex_api::AuthProvider;
 use codex_api::CompactClient as ApiCompactClient;
@@ -107,9 +108,9 @@ use crate::client_common::ResponseEvent;
 use crate::client_common::ResponseStream;
 use crate::feedback_tags;
 use crate::util::emit_feedback_auth_recovery_tags;
+use crate::util::emit_feedback_request_tags_with_auth_env;
+use crate::util::FeedbackRequestTags;
 use codex_api::map_api_error;
-use codex_feedback::FeedbackRequestTags;
-use codex_feedback::emit_feedback_request_tags_with_auth_env;
 use codex_login::auth_env_telemetry::AuthEnvTelemetry;
 use codex_login::auth_env_telemetry::collect_auth_env_telemetry;
 use codex_model_provider::SharedModelProvider;
@@ -120,10 +121,6 @@ use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result;
-use codex_response_debug_context::extract_response_debug_context;
-use codex_response_debug_context::extract_response_debug_context_from_api_error;
-use codex_response_debug_context::telemetry_api_error_message;
-use codex_response_debug_context::telemetry_transport_error_message;
 
 pub const OPENAI_BETA_HEADER: &str = "OpenAI-Beta";
 pub const X_CODEX_INSTALLATION_ID_HEADER: &str = "x-codex-installation-id";
@@ -138,6 +135,76 @@ pub const X_RESPONSESAPI_INCLUDE_TIMING_METRICS_HEADER: &str =
 const X_CODEX_WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY: &str =
     "x-codex-ws-stream-request-start-ms";
 const RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE: &str = "responses_websockets=2026-02-06";
+const REQUEST_ID_HEADER: &str = "x-request-id";
+const OAI_REQUEST_ID_HEADER: &str = "x-oai-request-id";
+const CF_RAY_HEADER: &str = "cf-ray";
+const X_OPENAI_AUTHORIZATION_ERROR_HEADER: &str = "x-openai-authorization-error";
+const X_ERROR_JSON_HEADER: &str = "x-error-json";
+
+#[derive(Default)]
+struct ResponseDebugContext {
+    request_id: Option<String>,
+    cf_ray: Option<String>,
+    auth_error: Option<String>,
+    auth_error_code: Option<String>,
+}
+
+fn extract_response_debug_context_from_api_error(error: &ApiError) -> ResponseDebugContext {
+    match error {
+        ApiError::Transport(transport) => extract_response_debug_context(transport),
+        _ => ResponseDebugContext::default(),
+    }
+}
+
+fn extract_response_debug_context(error: &TransportError) -> ResponseDebugContext {
+    let TransportError::Http { headers, .. } = error else {
+        return ResponseDebugContext::default();
+    };
+    ResponseDebugContext {
+        request_id: extract_request_id(headers.as_ref()),
+        cf_ray: extract_header(headers.as_ref(), CF_RAY_HEADER),
+        auth_error: extract_header(headers.as_ref(), X_OPENAI_AUTHORIZATION_ERROR_HEADER),
+        auth_error_code: extract_x_error_json_code(headers.as_ref()),
+    }
+}
+
+fn telemetry_api_error_message(error: &ApiError) -> String {
+    match error {
+        ApiError::Transport(transport) => telemetry_transport_error_message(transport),
+        _ => error.to_string(),
+    }
+}
+
+fn telemetry_transport_error_message(error: &TransportError) -> String {
+    error.to_string()
+}
+
+fn extract_request_id(headers: Option<&ApiHeaderMap>) -> Option<String> {
+    extract_header(headers, REQUEST_ID_HEADER)
+        .or_else(|| extract_header(headers, OAI_REQUEST_ID_HEADER))
+}
+
+fn extract_header(headers: Option<&ApiHeaderMap>, name: &str) -> Option<String> {
+    headers.and_then(|map| {
+        map.get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string)
+    })
+}
+
+fn extract_x_error_json_code(headers: Option<&ApiHeaderMap>) -> Option<String> {
+    let encoded = extract_header(headers, X_ERROR_JSON_HEADER)?;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()?;
+    let parsed = serde_json::from_slice::<serde_json::Value>(&decoded).ok()?;
+    parsed
+        .get("error")
+        .and_then(|error| error.get("code"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+}
+
 const RESPONSES_ENDPOINT: &str = "/responses";
 const RESPONSES_COMPACT_ENDPOINT: &str = "/responses/compact";
 // `/responses/compact` is unary, so the timeout covers the full response rather than one idle
