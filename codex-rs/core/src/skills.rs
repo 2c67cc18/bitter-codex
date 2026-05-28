@@ -101,7 +101,9 @@ pub(crate) fn build_skill_name_counts(
     (HashMap::new(), HashMap::new())
 }
 
-pub(crate) fn default_skill_metadata_budget(_context_window: u64) -> render::SkillMetadataBudget {
+pub(crate) fn default_skill_metadata_budget(
+    _context_window: Option<i64>,
+) -> render::SkillMetadataBudget {
     render::SkillMetadataBudget::Characters(0)
 }
 
