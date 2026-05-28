@@ -238,6 +238,24 @@ done as blind deletion or line-range cleanup.
   `tools/runtimes/mod.rs`, and tests. The now-stale
   `unified_exec/process_tests.rs` calls to `from_exec_server_started(...,
   SandboxType::None)` are test follow-up outside this lib-only worker contract.
+- 2026-05-28 accepted narrow session sandbox-policy compatibility trim
+  `semantic-root-20260528-core-session-sandbox-policy-trim/core-session-sandbox-policy-trim`
+  as merge commit `Merge session sandbox policy compatibility trim`. It kept
+  ownership to `core/src/codex_thread.rs`,
+  `core/src/session/session.rs`, and `core/src/session/turn_context.rs`, and
+  removed direct calls/imports of the deleted
+  `codex_sandboxing::compatibility_sandbox_policy_for_permission_profile`.
+  `ThreadConfigSnapshot::sandbox_policy` and `TurnContext::sandbox_policy` now
+  use retained `PermissionProfile::to_legacy_sandbox_policy` with the same
+  read-only fallback for unbridgeable managed profiles; `SessionConfiguration`
+  keeps a local fallback helper for the materialized filesystem policy path.
+  The worker reached terminal `completed` normally with clean branch
+  `semantic/core-session-sandbox-policy-trim` at `7607e1690`. Focused
+  cargo-modal core lib checks failed at 285 broader errors with no remaining
+  owned-file diagnostics for the removed compatibility function. Separate
+  `codex_sandboxing::policy_transforms` use in `session/turn_context.rs`
+  remains intentionally outside this compatibility-only slice and should be
+  removed with the runtime/additional-permissions sandbox cleanup.
 
 ## Analytics removal follow-through
 
