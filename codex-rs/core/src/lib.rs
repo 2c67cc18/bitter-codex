@@ -5,13 +5,8 @@
 // the TUI or the tracing stack).
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
-mod apply_patch;
-mod apps;
 mod client;
 mod client_common;
-mod realtime_context;
-mod realtime_conversation;
-mod realtime_prompt;
 pub(crate) mod session;
 pub use session::SteerInputError;
 mod codex_thread;
@@ -21,62 +16,26 @@ mod config_lock;
 pub use codex_thread::CodexThread;
 pub use codex_thread::CodexThreadSettingsOverrides;
 pub use codex_thread::ThreadConfigSnapshot;
-pub use session::turn_context::TurnContext;
-mod agent;
-mod attestation;
-mod codex_delegate;
-mod command_canonicalization;
 pub mod config;
-pub mod connectors;
 pub mod context;
 mod context_manager;
-mod environment_selection;
 pub mod exec;
 pub mod exec_env;
-mod exec_policy;
 #[cfg(test)]
 mod git_info_tests;
-mod goals;
-pub use goals::ExternalGoalPreviousStatus;
-pub use goals::ExternalGoalSet;
-mod guardian;
 mod installation_id;
-pub(crate) mod landlock;
-pub use landlock::spawn_command_under_linux_sandbox;
 pub(crate) mod mcp;
-mod mcp_skill_dependencies;
-mod mcp_tool_approval_templates;
-mod mcp_tool_exposure;
-mod network_policy_decision;
-pub(crate) mod network_proxy_loader;
 pub use mcp::McpManager;
-pub use network_proxy_loader::MtimeConfigReloader;
-pub use network_proxy_loader::build_network_proxy_state;
-pub use network_proxy_loader::build_network_proxy_state_and_reloader;
 mod original_image_detail;
-pub use codex_mcp::SandboxState;
-mod mcp_openai_file;
 mod mcp_tool_call;
 pub(crate) mod mention_syntax;
 pub(crate) mod utils;
-pub use mention_syntax::PLUGIN_TEXT_MENTION_SIGIL;
 pub use mention_syntax::TOOL_MENTION_SIGIL;
 pub use utils::path_utils;
-pub mod personality_migration;
-pub(crate) mod plugins;
 #[doc(hidden)]
 pub(crate) mod prompt_debug;
 #[doc(hidden)]
 pub use prompt_debug::build_prompt_input;
-pub(crate) mod mentions {
-    pub(crate) use crate::plugins::build_connector_slug_counts;
-    pub(crate) use crate::plugins::build_skill_name_counts;
-    pub(crate) use crate::plugins::collect_explicit_app_ids;
-    pub(crate) use crate::plugins::collect_explicit_plugin_mentions;
-    pub(crate) use crate::plugins::collect_tool_mentions_from_messages;
-}
-mod sandbox_tags;
-pub mod sandboxing;
 mod session_prefix;
 mod session_startup_prewarm;
 mod shell_detect;
@@ -96,15 +55,11 @@ pub(crate) use skills::skills_load_input_from_config;
 mod stream_events_utils;
 pub mod test_support;
 mod unified_exec;
-pub mod windows_sandbox;
 pub use client::X_RESPONSESAPI_INCLUDE_TIMING_METRICS_HEADER;
 pub use codex_protocol::config_types::ModelProviderAuthInfo;
 mod event_mapping;
-pub mod review_format;
-pub mod review_prompts;
 mod thread_manager;
 pub(crate) mod web_search;
-pub(crate) mod windows_sandbox_read_grants;
 pub use thread_manager::ForkSnapshot;
 pub use thread_manager::NewThread;
 pub use thread_manager::StartThreadOptions;
@@ -114,7 +69,6 @@ pub use thread_manager::build_models_manager;
 pub use thread_manager::thread_store_from_config;
 pub use web_search::web_search_action_detail;
 pub use web_search::web_search_detail;
-pub use windows_sandbox_read_grants::grant_read_root_non_elevated;
 #[deprecated(note = "use ThreadManager")]
 pub type ConversationManager = ThreadManager;
 #[deprecated(note = "use NewThread")]
@@ -165,9 +119,6 @@ mod tasks;
 mod user_shell_command;
 pub mod util;
 
-pub use attestation::AttestationContext;
-pub use attestation::AttestationProvider;
-pub use attestation::GenerateAttestationFuture;
 pub use client::ModelClient;
 pub use client::ModelClientSession;
 pub use client::X_CODEX_INSTALLATION_ID_HEADER;
@@ -178,10 +129,6 @@ pub use client_common::ResponseEvent;
 pub use client_common::ResponseStream;
 pub use compact::content_items_to_text;
 pub use event_mapping::parse_turn_item;
-pub use exec_policy::ExecPolicyError;
-pub use exec_policy::check_execpolicy_for_warnings;
-pub use exec_policy::format_exec_policy_error_with_source;
-pub use exec_policy::load_exec_policy;
 pub use installation_id::resolve_installation_id;
 pub use turn_metadata::build_turn_metadata_header;
 pub mod compact;
