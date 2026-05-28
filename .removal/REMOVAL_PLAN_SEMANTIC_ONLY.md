@@ -1268,3 +1268,15 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   and leftover `codex_network_proxy`/`codex_sandboxing` in
   `tasks/user_shell.rs`. Do not restore those crates or modules to satisfy the
   remaining errors; schedule smaller producer/removal slices.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/tool-dispatch-trace-trim` as
+  merge commit `Merge tool dispatch trace trim`. The slice removed the
+  deleted `codex_rollout_trace`-backed tool-dispatch adapter and tests, removed
+  registry start/complete/failure trace calls, and preserved the retained
+  `session_telemetry` tool result logging path. The worker reached terminal
+  `completed` normally with a clean branch, and `git diff --check` passed. Its
+  focused `cargo-modal --repo codex-rs --dirty check -p codex-core
+  --no-default-features --lib` still failed at 157 broader errors. The
+  remaining `codex_rollout_trace` lib error is now in
+  `core/src/session/handlers.rs` completion tracing and should be handled with
+  the broader session/rollout simplification, not by restoring the trace crate.
