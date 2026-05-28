@@ -1219,3 +1219,16 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   deleted agent/goals/connectors/environment-selection/exec-policy/realtime,
   MCP/request-permissions/guardian/network-approval/sandboxing, exec-server,
   and connector/plugin turn-construction surfaces.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/core-turn-app-plugin-trim` as
+  merge commit `Merge turn app plugin mcp trim`. It kept ownership to
+  `core/src/session/turn.rs` and removed stale app/plugin/connector/MCP mention
+  construction, plugin injection, connector selection merging, MCP dependency
+  prompting, MCP tool exposure, discoverable-tool filtering, and direct
+  `codex_connectors` usage. Retained skill injection still builds from
+  `turn_context.turn_skills`, and dynamic tools remain available through
+  `turn_context.dynamic_tools`. The worker reached terminal `completed`
+  normally. Its focused `cargo-modal --dirty --repo codex-rs check -p
+  codex-core --lib` still failed at 202 broader errors; remaining
+  `turn.rs` diagnostics were unrelated deleted-module references to
+  `goals`, `turn_diff_tracker`, and `guardian`.
