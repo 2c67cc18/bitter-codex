@@ -2,11 +2,11 @@
 
 use codex_protocol::models::AdditionalPermissionProfile;
 use codex_protocol::models::ResponseItem;
-use codex_sandboxing::policy_transforms::merge_permission_profiles;
 use std::collections::HashSet;
 
 use super::auto_compact_window::AutoCompactWindow;
 use super::auto_compact_window::AutoCompactWindowSnapshot;
+use super::merge_granted_permission_profiles;
 use crate::context_manager::ContextManager;
 use crate::session::PreviousTurnSettings;
 use crate::session::session::SessionConfiguration;
@@ -218,7 +218,7 @@ impl SessionState {
 
     pub(crate) fn record_granted_permissions(&mut self, permissions: AdditionalPermissionProfile) {
         self.granted_permissions =
-            merge_permission_profiles(self.granted_permissions.as_ref(), Some(&permissions));
+            merge_granted_permission_profiles(self.granted_permissions.as_ref(), &permissions);
     }
 
     pub(crate) fn granted_permissions(&self) -> Option<AdditionalPermissionProfile> {
