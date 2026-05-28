@@ -14,11 +14,14 @@ done as blind deletion or line-range cleanup.
 - 2026-05-28 `codex-arg0` stale dispatch references to removed apply-patch,
   sandboxing, exec-server, shell-escalation, and Linux sandbox crates were
   removed. Focused `cargo-modal` check/test for `codex-arg0` passed.
-- 2026-05-28 final workspace check now reaches broader remaining cleanup:
-  `codex-tools` has malformed schema/tool model code from prior removal work,
-  `codex-config` still references removed `codex_execpolicy`,
-  `codex_network_proxy`, and `codex_file_system` crates, and retained config
-  surfaces still mention removed sandbox/permission concepts.
+- 2026-05-28 follow-up compile slices resolved the immediate `codex-tools`
+  malformed schema/tool model fallout and removed the obsolete request-plugin
+  install/MCP adapter exports from that crate.
+- 2026-05-28 follow-up compile slices resolved immediate `codex-config`
+  references to removed `codex_execpolicy`, `codex_network_proxy`, and
+  `codex_file_system` crates by keeping config-owned representations for the
+  surviving requirements/network/filesystem-loader surfaces. These retained
+  surfaces should be revisited in the remaining permission/runtime cleanup.
 
 ## Analytics removal follow-through
 
@@ -298,6 +301,9 @@ done as blind deletion or line-range cleanup.
   `codex-config` removed-crate references, and remaining app-server-protocol
   test fixture drift. Clippy/test should be rerun after those blockers are
   resolved.
+- 2026-05-28 final-compile workers merged targeted `codex-tools` and
+  `codex-config` repairs. Re-run full workspace `cargo-modal` check, clippy,
+  and test from main after those merges.
 - After semantic cleanup only, run the equivalent of:
 
 ```bash

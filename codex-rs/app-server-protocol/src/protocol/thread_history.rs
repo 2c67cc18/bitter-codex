@@ -22,7 +22,6 @@ use crate::protocol::v2::WebSearchAction;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::MessagePhase;
 use codex_protocol::items::McpToolCallError;
-use codex_protocol::mcp::CallToolResult as McpToolCallResult;
 use codex_protocol::protocol::AgentReasoningEvent;
 use codex_protocol::protocol::AgentReasoningRawContentEvent;
 use codex_protocol::protocol::AgentStatus;
@@ -2036,7 +2035,7 @@ mod tests {
                 arguments: serde_json::json!({"id":"123"}),
                 mcp_app_resource_uri: Some("ui://widget/lookup.html".into()),
                 plugin_id: Some("sample@test".into()),
-                result: Some(Box::new(McpToolCallResult {
+                result: Some(Box::new(CallToolResult {
                     content: vec![serde_json::json!({
                         "type": "text",
                         "text": "result"
