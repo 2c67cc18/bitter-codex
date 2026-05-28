@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::SkillsManager;
-use crate::agent::AgentControl;
 use crate::client::ModelClient;
 use crate::config::NetworkProxyAuditMetadata;
 use crate::config::StartedNetworkProxy;
@@ -20,6 +19,7 @@ use codex_login::AuthManager;
 use codex_mcp::McpConnectionManager;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_otel::SessionTelemetry;
+use codex_protocol::SessionId;
 use codex_rollout::state_db::StateDbHandle;
 use codex_rollout_trace::ThreadTraceContext;
 use codex_thread_store::LiveThread;
@@ -54,7 +54,7 @@ pub(crate) struct SessionServices {
     pub(crate) skills_manager: Arc<SkillsManager>,
     pub(crate) plugins_manager: Arc<PluginsManager>,
     pub(crate) mcp_manager: Arc<McpManager>,
-    pub(crate) agent_control: AgentControl,
+    pub(crate) session_id: SessionId,
     pub(crate) network_proxy: ArcSwapOption<StartedNetworkProxy>,
     pub(crate) network_proxy_audit_metadata: NetworkProxyAuditMetadata,
     pub(crate) managed_network_requirements_configured: bool,

@@ -484,7 +484,7 @@ impl Session {
 
     /// Returns the identity shared by the root thread and all descendant threads.
     pub(crate) fn session_id(&self) -> SessionId {
-        self.services.agent_control.session_id()
+        self.services.session_id
     }
 
     #[instrument(name = "session_init", level = "info", skip_all)]
@@ -507,7 +507,7 @@ impl Session {
         skills_manager: Arc<SkillsManager>,
         plugins_manager: Arc<PluginsManager>,
         mcp_manager: Arc<McpManager>,
-        agent_control: AgentControl,
+        parent_session_id: Option<SessionId>,
         environment_manager: Arc<EnvironmentManager>,
         thread_store: Arc<dyn ThreadStore>,
         parent_rollout_thread_trace: ThreadTraceContext,
@@ -902,12 +902,7 @@ impl Session {
                 None
             };
 
-            let session_id = if session_configuration.session_source.is_non_root_agent() {
-                agent_control.session_id()
-            } else {
-                SessionId::from(thread_id)
-            };
-            let agent_control = agent_control.with_session_id(session_id);
+            let session_id = parent_session_id.unwrap_or_else(|| SessionId::from(thread_id));
 
             let services = SessionServices {
                 // Initialize the MCP connection manager with an uninitialized
@@ -944,7 +939,7 @@ impl Session {
                 skills_manager,
                 plugins_manager: Arc::clone(&plugins_manager),
                 mcp_manager: Arc::clone(&mcp_manager),
-                agent_control,
+                session_id,
                 network_proxy: arc_swap::ArcSwapOption::from(network_proxy.map(Arc::new)),
                 network_proxy_audit_metadata,
                 managed_network_requirements_configured,

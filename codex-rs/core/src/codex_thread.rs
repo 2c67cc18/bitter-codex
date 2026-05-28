@@ -1,4 +1,3 @@
-use crate::agent::AgentStatus;
 use crate::config::ConstraintResult;
 use crate::session::Codex;
 use crate::session::SessionSettingsUpdate;
@@ -20,6 +19,7 @@ use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::AskForApproval;
+use codex_protocol::protocol::AgentStatus;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::SandboxPolicy;

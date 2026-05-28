@@ -1,5 +1,4 @@
 use crate::SkillsManager;
-use crate::agent::AgentControl;
 use crate::codex_thread::CodexThread;
 use crate::config::Config;
 use crate::config::ThreadStoreConfig;
@@ -26,6 +25,7 @@ use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_protocol::ThreadId;
+use codex_protocol::SessionId;
 use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
@@ -183,15 +183,13 @@ pub struct StartThreadOptions {
 pub(crate) struct ResumeThreadWithHistoryOptions {
     pub(crate) config: Config,
     pub(crate) initial_history: InitialHistory,
-    pub(crate) agent_control: AgentControl,
+    pub(crate) parent_session_id: Option<SessionId>,
     pub(crate) session_source: SessionSource,
     pub(crate) inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
     pub(crate) inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
 }
 
-/// Shared, `Arc`-owned state for [`ThreadManager`]. This `Arc` is required to have a single
-/// `Arc` reference that can be downgraded to by `AgentControl` while preventing every single
-/// function to require an `Arc<&Self>`.
+/// Shared, `Arc`-owned state for [`ThreadManager`].
 pub(crate) struct ThreadManagerState {
     threads: Arc<RwLock<HashMap<ThreadId, Arc<CodexThread>>>>,
     thread_created_tx: broadcast::Sender<ThreadId>,
@@ -511,19 +509,6 @@ impl ThreadManager {
             }
         }
 
-        for descendant_id in thread
-            .codex
-            .session
-            .services
-            .agent_control
-            .list_live_agent_subtree_thread_ids(thread_id)
-            .await?
-        {
-            if seen_thread_ids.insert(descendant_id) {
-                subtree_thread_ids.push(descendant_id);
-            }
-        }
-
         Ok(subtree_thread_ids)
     }
 
@@ -576,7 +561,7 @@ impl ThreadManager {
             options.config,
             options.initial_history,
             Arc::clone(&self.state.auth_manager),
-            self.agent_control(),
+            None,
             session_source,
             thread_source,
             options.dynamic_tools,
@@ -656,7 +641,7 @@ impl ThreadManager {
             config,
             initial_history,
             auth_manager,
-            self.agent_control(),
+            None,
             thread_source,
             Vec::new(),
             persist_extended_history,
@@ -681,7 +666,7 @@ impl ThreadManager {
             config,
             InitialHistory::New,
             Arc::clone(&self.state.auth_manager),
-            self.agent_control(),
+            None,
             /*thread_source*/ None,
             Vec::new(),
             /*persist_extended_history*/ false,
@@ -710,7 +695,7 @@ impl ThreadManager {
             config,
             initial_history,
             auth_manager,
-            self.agent_control(),
+            None,
             thread_source,
             Vec::new(),
             /*persist_extended_history*/ false,
@@ -870,7 +855,7 @@ impl ThreadManager {
             config,
             history,
             Arc::clone(&self.state.auth_manager),
-            self.agent_control(),
+            None,
             thread_source,
             Vec::new(),
             persist_extended_history,
@@ -880,10 +865,6 @@ impl ThreadManager {
             /*user_shell_override*/ None,
         ))
         .await
-    }
-
-    pub(crate) fn agent_control(&self) -> AgentControl {
-        AgentControl::new(Arc::downgrade(&self.state))
     }
 
     #[cfg(test)]
@@ -998,11 +979,11 @@ impl ThreadManagerState {
     pub(crate) async fn spawn_new_thread(
         &self,
         config: Config,
-        agent_control: AgentControl,
+        parent_session_id: Option<SessionId>,
     ) -> CodexResult<NewThread> {
         Box::pin(self.spawn_new_thread_with_source(
             config,
-            agent_control,
+            parent_session_id,
             self.session_source.clone(),
             /*thread_source*/ None,
             /*persist_extended_history*/ false,
@@ -1018,7 +999,7 @@ impl ThreadManagerState {
     pub(crate) async fn spawn_new_thread_with_source(
         &self,
         config: Config,
-        agent_control: AgentControl,
+        parent_session_id: Option<SessionId>,
         session_source: SessionSource,
         thread_source: Option<ThreadSource>,
         persist_extended_history: bool,
@@ -1034,7 +1015,7 @@ impl ThreadManagerState {
             config,
             InitialHistory::New,
             Arc::clone(&self.auth_manager),
-            agent_control,
+            parent_session_id,
             session_source,
             thread_source,
             Vec::new(),
@@ -1056,7 +1037,7 @@ impl ThreadManagerState {
         let ResumeThreadWithHistoryOptions {
             config,
             initial_history,
-            agent_control,
+            parent_session_id,
             session_source,
             inherited_shell_snapshot,
             inherited_exec_policy,
@@ -1068,7 +1049,7 @@ impl ThreadManagerState {
             config,
             initial_history,
             Arc::clone(&self.auth_manager),
-            agent_control,
+            parent_session_id,
             session_source,
             thread_source,
             Vec::new(),
@@ -1088,7 +1069,7 @@ impl ThreadManagerState {
         &self,
         config: Config,
         initial_history: InitialHistory,
-        agent_control: AgentControl,
+        parent_session_id: Option<SessionId>,
         session_source: SessionSource,
         thread_source: Option<ThreadSource>,
         persist_extended_history: bool,
@@ -1103,7 +1084,7 @@ impl ThreadManagerState {
             config,
             initial_history,
             Arc::clone(&self.auth_manager),
-            agent_control,
+            parent_session_id,
             session_source,
             thread_source,
             Vec::new(),
@@ -1125,7 +1106,7 @@ impl ThreadManagerState {
         config: Config,
         initial_history: InitialHistory,
         auth_manager: Arc<AuthManager>,
-        agent_control: AgentControl,
+        parent_session_id: Option<SessionId>,
         thread_source: Option<ThreadSource>,
         dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
         persist_extended_history: bool,
@@ -1138,7 +1119,7 @@ impl ThreadManagerState {
             config,
             initial_history,
             auth_manager,
-            agent_control,
+            parent_session_id,
             self.session_source.clone(),
             thread_source,
             dynamic_tools,
@@ -1159,7 +1140,7 @@ impl ThreadManagerState {
         config: Config,
         initial_history: InitialHistory,
         auth_manager: Arc<AuthManager>,
-        agent_control: AgentControl,
+        mut parent_session_id: Option<SessionId>,
         session_source: SessionSource,
         thread_source: Option<ThreadSource>,
         dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
@@ -1210,6 +1191,17 @@ impl ThreadManagerState {
             _ => Default::default(),
         };
         let tracked_session_source = session_source.clone();
+        if parent_session_id.is_none()
+            && let SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id, ..
+            }) = &session_source
+        {
+            parent_session_id = self
+                .get_thread(*parent_thread_id)
+                .await
+                .ok()
+                .map(|thread| thread.codex.session.session_id());
+        }
         let CodexSpawnOk {
             codex, thread_id, ..
         } = Codex::spawn(CodexSpawnArgs {
@@ -1224,7 +1216,7 @@ impl ThreadManagerState {
             conversation_history: initial_history,
             session_source,
             thread_source,
-            agent_control,
+            parent_session_id,
             dynamic_tools,
             persist_extended_history,
             metrics_service_name,
