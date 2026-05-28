@@ -3,9 +3,6 @@ use crate::config::edit::ConfigEditsBuilder;
 use crate::path_utils::normalize_for_native_workdir;
 use crate::unified_exec::DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS;
 use crate::unified_exec::MIN_EMPTY_YIELD_TIME_MS;
-use crate::windows_sandbox::WindowsSandboxLevelExt;
-use crate::windows_sandbox::resolve_windows_sandbox_mode;
-use crate::windows_sandbox::resolve_windows_sandbox_private_desktop;
 use codex_config::CloudRequirementsLoader;
 use codex_config::ConfigLayerSource;
 use codex_config::ConfigLayerStack;
@@ -52,7 +49,6 @@ use codex_config::types::TuiNotificationSettings;
 use codex_config::types::TuiPetAnchor;
 use codex_config::types::UriBasedFileOpener;
 use codex_config::types::WindowsSandboxModeToml;
-use codex_core_plugins::PluginsConfigInput;
 use codex_exec_server::ExecutorFileSystem;
 use codex_exec_server::LOCAL_FS;
 use codex_features::AppsMcpPathOverrideConfigToml;
@@ -125,11 +121,10 @@ use crate::config::permissions::validate_user_permission_profile_names;
 use crate::config_lock::config_without_lock_controls;
 use crate::config_lock::lock_layer_from_config;
 use crate::config_lock::read_config_lock_from_path;
-use codex_network_proxy::NetworkProxyConfig;
+use codex_config::permissions_toml::NetworkProxyConfig;
 use toml::Value as TomlValue;
 use toml_edit::DocumentMut;
 
-pub(crate) mod agent_roles;
 pub mod edit;
 mod managed_features;
 mod network_proxy_spec;
@@ -143,10 +138,8 @@ pub use codex_config::Constrained;
 pub use codex_config::ConstraintError;
 pub use codex_config::ConstraintResult;
 pub use codex_config::LoaderOverrides;
-pub use codex_network_proxy::NetworkProxyAuditMetadata;
-use codex_sandboxing::compatibility_sandbox_policy_for_permission_profile;
-pub use codex_sandboxing::system_bwrap_warning;
 pub use managed_features::ManagedFeatures;
+pub use network_proxy_spec::NetworkProxyAuditMetadata;
 pub use network_proxy_spec::NetworkProxySpec;
 pub use network_proxy_spec::StartedNetworkProxy;
 pub(crate) use permissions::is_builtin_permission_profile_name;
@@ -188,6 +181,29 @@ pub(crate) const HARD_MAX_MULTI_AGENT_V2_TIMEOUT_MS: i64 =
 pub(crate) const DEFAULT_AGENT_MAX_DEPTH: i32 = 1;
 pub(crate) const DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS: Option<u64> = None;
 const LOCAL_DEV_BUILD_VERSION: &str = "0.0.0";
+
+pub fn system_bwrap_warning(_permission_profile: &PermissionProfile) -> Option<String> {
+    None
+}
+
+fn compatibility_sandbox_policy_for_permission_profile(
+    permission_profile: &PermissionProfile,
+    file_system_sandbox_policy: &FileSystemSandboxPolicy,
+    network_sandbox_policy: NetworkSandboxPolicy,
+    cwd: &Path,
+) -> SandboxPolicy {
+    match permission_profile.enforcement() {
+        SandboxEnforcement::Disabled => SandboxPolicy::DangerFullAccess,
+        SandboxEnforcement::External => SandboxPolicy::ExternalSandbox {
+            network_access: network_sandbox_policy.is_enabled(),
+        },
+        SandboxEnforcement::Managed => file_system_sandbox_policy
+            .to_legacy_sandbox_policy(network_sandbox_policy, cwd)
+            .unwrap_or_else(|_| SandboxPolicy::ReadOnly {
+                network_access: network_sandbox_policy.is_enabled(),
+            }),
+    }
+}
 
 pub const CONFIG_TOML_FILE: &str = "config.toml";
 const CONFIG_PROFILE_V2_SUFFIX: &str = ".config.toml";
@@ -825,7 +841,7 @@ pub struct Config {
     pub codex_self_exe: Option<PathBuf>,
 
     /// Path to the `codex-linux-sandbox` executable. This must be set if
-    /// [`codex_sandboxing::SandboxType::LinuxSeccomp`] is used. Note that this
+    /// Linux seccomp sandboxing is used. Note that this
     /// cannot be set in the config file: it must be set in code via
     /// [`ConfigOverrides`].
     ///
@@ -1248,42 +1264,9 @@ impl Config {
         }
     }
 
-    /// Build the plugin-manager input from the effective config.
-    pub fn plugins_config_input(&self) -> PluginsConfigInput {
-        PluginsConfigInput::new(
-            self.config_layer_stack.clone(),
-            self.features.enabled(Feature::Plugins),
-            self.features.enabled(Feature::RemotePlugin),
-            self.chatgpt_base_url.clone(),
-        )
-    }
-
-    pub async fn to_mcp_config(
-        &self,
-        plugins_manager: &codex_core_plugins::PluginsManager,
-    ) -> McpConfig {
-        let plugins_input = self.plugins_config_input();
-        let loaded_plugins = plugins_manager.plugins_for_config(&plugins_input).await;
+    pub async fn to_mcp_config(&self) -> McpConfig {
         let mut configured_mcp_servers = self.mcp_servers.get().clone();
         let mut plugin_ids_by_mcp_server_name = HashMap::new();
-        for plugin in loaded_plugins
-            .plugins()
-            .iter()
-            .filter(|plugin| plugin.is_active())
-        {
-            let mut plugin_mcp_servers = plugin.mcp_servers.clone();
-            filter_plugin_mcp_servers_by_requirements(
-                &plugin.config_name,
-                &mut plugin_mcp_servers,
-                self.config_layer_stack.requirements().plugins.as_ref(),
-            );
-            for (name, plugin_server) in plugin_mcp_servers {
-                if let Entry::Vacant(entry) = configured_mcp_servers.entry(name.clone()) {
-                    entry.insert(plugin_server);
-                    plugin_ids_by_mcp_server_name.insert(name, plugin.config_name.clone());
-                }
-            }
-        }
         if let Some(mcp_requirements) = self.config_layer_stack.requirements().mcp_servers.as_ref()
             && mcp_requirements.value.is_empty()
         {
@@ -1321,7 +1304,7 @@ impl Config {
             },
             configured_mcp_servers,
             plugin_ids_by_mcp_server_name,
-            plugin_capability_summaries: loaded_plugins.capability_summaries().to_vec(),
+            plugin_capability_summaries: Vec::new(),
         }
     }
 
@@ -2506,8 +2489,8 @@ impl Config {
             &mut startup_warnings,
         )?;
         let enable_network_proxy = features.enabled(Feature::NetworkProxy);
-        let windows_sandbox_mode = resolve_windows_sandbox_mode(&cfg);
-        let windows_sandbox_private_desktop = resolve_windows_sandbox_private_desktop(&cfg);
+        let windows_sandbox_mode = None;
+        let windows_sandbox_private_desktop = true;
         let resolved_cwd = AbsolutePathBuf::try_from(normalize_for_native_workdir({
             use std::env;
 
@@ -2564,11 +2547,7 @@ impl Config {
             ));
         }
 
-        let windows_sandbox_level = match windows_sandbox_mode {
-            Some(WindowsSandboxModeToml::Elevated) => WindowsSandboxLevel::Elevated,
-            Some(WindowsSandboxModeToml::Unelevated) => WindowsSandboxLevel::RestrictedToken,
-            None => WindowsSandboxLevel::from_features(&features),
-        };
+        let windows_sandbox_level = WindowsSandboxLevel::from_features(&features);
         let memories_root = memory_root(&codex_home);
         std::fs::create_dir_all(&memories_root)?;
         let internal_writable_roots = vec![memories_root];
@@ -2906,9 +2885,7 @@ impl Config {
         };
         let terminal_resize_reflow = resolve_terminal_resize_reflow_config(&cfg);
 
-        let agent_roles =
-            agent_roles::load_agent_roles(fs, &cfg, &config_layer_stack, &mut startup_warnings)
-                .await?;
+        let agent_roles = BTreeMap::new();
 
         let openai_base_url = cfg
             .openai_base_url
