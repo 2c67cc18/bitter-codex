@@ -8,8 +8,7 @@ use codex_protocol::SessionId;
 use codex_protocol::models::AdditionalPermissionProfile;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnEnvironmentSelection;
-use codex_sandboxing::policy_transforms::effective_file_system_sandbox_policy;
-use codex_sandboxing::policy_transforms::effective_network_sandbox_policy;
+use codex_protocol::permissions::FileSystemSandboxKind;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
@@ -353,6 +352,52 @@ impl TurnContext {
                 .and_then(codex_config::NetworkDomainPermissionsToml::denied_domains)
                 .unwrap_or_default(),
         })
+    }
+}
+
+fn effective_file_system_sandbox_policy(
+    base: &FileSystemSandboxPolicy,
+    additional_permissions: Option<&AdditionalPermissionProfile>,
+) -> FileSystemSandboxPolicy {
+    let mut policy = base.clone();
+    let Some(file_system) = additional_permissions.and_then(|permissions| {
+        permissions
+            .file_system
+            .as_ref()
+            .filter(|file_system| !file_system.is_empty())
+    }) else {
+        return policy;
+    };
+
+    if !matches!(policy.kind, FileSystemSandboxKind::Restricted) {
+        return policy;
+    }
+
+    if policy.glob_scan_max_depth.is_none() {
+        policy.glob_scan_max_depth = file_system
+            .glob_scan_max_depth
+            .map(|glob_scan_max_depth| glob_scan_max_depth.get());
+    }
+    for entry in &file_system.entries {
+        if !policy.entries.iter().any(|existing| existing == entry) {
+            policy.entries.push(entry.clone());
+        }
+    }
+
+    policy
+}
+
+fn effective_network_sandbox_policy(
+    base: NetworkSandboxPolicy,
+    additional_permissions: Option<&AdditionalPermissionProfile>,
+) -> NetworkSandboxPolicy {
+    match additional_permissions
+        .and_then(|permissions| permissions.network.as_ref())
+        .and_then(|network| network.enabled)
+    {
+        Some(true) => NetworkSandboxPolicy::Enabled,
+        Some(false) => NetworkSandboxPolicy::Restricted,
+        None => base,
     }
 }
 
