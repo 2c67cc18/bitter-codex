@@ -4,6 +4,9 @@ use crate::Prompt;
 use crate::ResponseStream;
 use crate::client::ModelClientSession;
 use crate::client_common::ResponseEvent;
+use crate::compact::CompactionPhase;
+use crate::compact::CompactionReason;
+use crate::compact::CompactionTrigger;
 use crate::compact::InitialContextInjection;
 use crate::compact_remote::build_compact_request_log_data;
 use crate::compact_remote::log_remote_compact_failure;
@@ -26,8 +29,6 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::TruncationPolicy;
 use codex_protocol::protocol::TurnStartedEvent;
 use codex_protocol::protocol::WarningEvent;
-use codex_rollout_trace::CompactionCheckpointTracePayload;
-use codex_rollout_trace::InferenceTraceContext;
 use codex_utils_output_truncation::approx_token_count;
 use codex_utils_output_truncation::truncate_text;
 use futures::StreamExt;
@@ -120,12 +121,6 @@ async fn run_remote_compact_task_inner_impl(
     initial_context_injection: InitialContextInjection,
 ) -> CodexResult<()> {
     let context_compaction_item = ContextCompactionItem::new();
-    let compaction_trace = sess.services.rollout_thread_trace.compaction_trace_context(
-        turn_context.sub_id.as_str(),
-        context_compaction_item.id.as_str(),
-        turn_context.model_info.slug.as_str(),
-        turn_context.provider.info().name.as_str(),
-    );
     let compaction_item = TurnItem::ContextCompaction(context_compaction_item);
     sess.emit_turn_item_started(turn_context, &compaction_item)
         .await;
@@ -145,7 +140,6 @@ async fn run_remote_compact_task_inner_impl(
         );
     }
 
-    let trace_input_history = history.raw_items().to_vec();
     let prompt_input = history.for_prompt(&turn_context.model_info.input_modalities);
     let tool_router = built_tools(
         sess.as_ref(),
@@ -166,13 +160,6 @@ async fn run_remote_compact_task_inner_impl(
     };
 
     let turn_metadata_header = turn_context.turn_metadata_state.current_header_value();
-    let trace_attempt = compaction_trace.start_attempt(&serde_json::json!({
-        "model": turn_context.model_info.slug.as_str(),
-        "instructions": prompt.base_instructions.text.as_str(),
-        "input": &prompt.input,
-        "parallel_tool_calls": prompt.parallel_tool_calls,
-    }));
-
     let mut owned_client_session;
     let client_session = match client_session {
         Some(client_session) => client_session,
@@ -190,11 +177,6 @@ async fn run_remote_compact_task_inner_impl(
     )
     .await;
 
-    trace_attempt.record_result(
-        compaction_output_result
-            .as_ref()
-            .map(|(item, _)| std::slice::from_ref(item)),
-    );
     let (compaction_output, response_id) = compaction_output_result?;
     let compacted_history = build_v2_compacted_history(&prompt_input, compaction_output);
     let new_history = process_compacted_history(
@@ -213,10 +195,6 @@ async fn run_remote_compact_task_inner_impl(
         message: String::new(),
         replacement_history: Some(new_history.clone()),
     };
-    compaction_trace.record_installed(&CompactionCheckpointTracePayload {
-        input_history: &trace_input_history,
-        replacement_history: &new_history,
-    });
     sess.replace_compacted_history(new_history, reference_context_item, compacted_item)
         .await;
     sess.recompute_token_usage(turn_context).await;
@@ -255,7 +233,6 @@ async fn run_remote_compaction_request_v2(
                 turn_context.reasoning_summary,
                 turn_context.config.service_tier.clone(),
                 turn_metadata_header,
-                &InferenceTraceContext::disabled(),
             )
             .await
         {
