@@ -3,11 +3,9 @@ use super::ResponsesApiNamespace;
 use super::ResponsesApiNamespaceTool;
 use super::ResponsesApiTool;
 use super::dynamic_tool_to_responses_api_tool;
-use super::mcp_tool_to_deferred_responses_api_tool;
 use super::tool_definition_to_responses_api_tool;
 use crate::JsonSchema;
 use crate::ToolDefinition;
-use crate::ToolName;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -21,7 +19,7 @@ fn tool_definition_to_responses_api_tool_omits_false_defer_loading() {
             description: "Look up an order".to_string(),
             input_schema: JsonSchema::object(
                 BTreeMap::from([(
-                    "order_id".to_string()::string(/*description*/ None),
+                    "order_id".to_string(), JsonSchema::string(/*description*/ None),
                 )]),
                 Some(vec!["order_id".to_string()]),
                 Some(false.into())
@@ -36,7 +34,7 @@ fn tool_definition_to_responses_api_tool_omits_false_defer_loading() {
             defer_loading: None,
             parameters: JsonSchema::object(
                 BTreeMap::from([(
-                    "order_id".to_string()::string(/*description*/ None),
+                    "order_id".to_string(), JsonSchema::string(/*description*/ None),
                 )]),
                 Some(vec!["order_id".to_string()]),
                 Some(false.into())
@@ -72,51 +70,7 @@ fn dynamic_tool_to_responses_api_tool_preserves_defer_loading() {
             defer_loading: Some(true),
             parameters: JsonSchema::object(
                 BTreeMap::from([(
-                    "order_id".to_string()::string(/*description*/ None),
-                )]),
-                Some(vec!["order_id".to_string()]),
-                Some(false.into())
-            ),
-            output_schema: None,
-        }
-    );
-}
-
-#[test]
-fn mcp_tool_to_deferred_responses_api_tool_sets_defer_loading() {
-    let tool = rmcp::model::Tool {
-        name: "lookup_order".to_string().into(),
-        title: None,
-        description: Some("Look up an order".to_string().into()),
-        input_schema: std::sync::Arc::new(rmcp::model::object(json!({
-            "type": "object",
-            "properties": {
-                "order_id": {"type": "string"}
-            },
-            "required": ["order_id"],
-            "additionalProperties": false,
-        }))),
-        output_schema: None,
-        annotations: None,
-        execution: None,
-        icons: None,
-        meta: None,
-    };
-
-    assert_eq!(
-        mcp_tool_to_deferred_responses_api_tool(
-            &ToolName::namespaced("mcp__codex_apps__", "lookup_order"),
-            &tool,
-        )
-        .expect("convert deferred tool"),
-        ResponsesApiTool {
-            name: "lookup_order".to_string(),
-            description: "Look up an order".to_string(),
-            strict: false,
-            defer_loading: Some(true),
-            parameters: JsonSchema::object(
-                BTreeMap::from([(
-                    "order_id".to_string()::string(/*description*/ None),
+                    "order_id".to_string(), JsonSchema::string(/*description*/ None),
                 )]),
                 Some(vec!["order_id".to_string()]),
                 Some(false.into())
