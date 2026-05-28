@@ -206,6 +206,22 @@ done as blind deletion or line-range cleanup.
   this file in session/runtime and removed
   agent/connectors/realtime/MCP/request-permissions/sandboxing/execpolicy/
   network-proxy/Windows sandbox surfaces.
+- 2026-05-28 accepted narrow session-handler dispatch trim
+  `semantic-root-20260528-core-session-handler-op-trim/core-session-handler-op-trim`
+  as merge commit `Merge session handler removed op trim`. It kept ownership to
+  `core/src/session/handlers.rs` and removed submission-loop dispatch, helper
+  functions, and imports for removed realtime conversation/list-voices,
+  inter-agent communication, request-permissions response, MCP refresh and
+  elicitation resolution, review spawning, guardian denied-action approval, and
+  realtime user-text mirroring. The worker reached terminal `completed`
+  normally with clean branch `semantic/core-session-handler-op-trim` at
+  `b1f20ae84`, and its focused cargo-modal core lib check reported no
+  `session/handlers.rs` diagnostics while still failing from broader existing
+  core cleanup blockers. One normal-turn
+  `refresh_mcp_servers_if_requested(...mcp_elicitation_reviewer...)` call
+  remains intentionally outside this dispatch-only slice; remove or retain that
+  with the broader `session/mod.rs`/MCP runtime cleanup instead of restoring the
+  removed submission ops.
 
 ## Analytics removal follow-through
 
