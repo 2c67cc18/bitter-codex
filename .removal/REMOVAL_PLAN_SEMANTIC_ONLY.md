@@ -1507,3 +1507,20 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   environment selection, exec-policy/network approval/sandboxing,
   MCP/realtime/session state service, deleted exec-server/plugin/rollout-trace
   crates, managed network proxy, and legacy tests.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/core-connectors-selection-trim`
+  as merge commit `Merge connector selection trim`. The slice removed the live
+  `crate::connectors` import from `session/mod.rs` and made stale core
+  connector-selection state inert without restoring connector runtime behavior:
+  `SessionState` no longer stores `active_connector_selection`, merge/get now
+  return an empty set, clear is a no-op, and the focused state tests now assert
+  the inert behavior. The worker reached terminal `completed` normally through
+  `bitter-loop wait`, left a clean branch at `a2e8479fa`, `git diff --check`
+  passed, and a scoped search found no remaining
+  `crate::connectors`/`connectors::`/`active_connector_selection` references in
+  `codex-rs/core/src`. Its focused `cargo-modal --repo codex-rs --dirty check
+  -p codex-core` run still failed at 140 broader errors, with the connector
+  module error removed and remaining blockers concentrated in environment
+  selection, exec-policy/network approval/sandboxing, MCP/realtime/session state
+  service, deleted exec-server/plugin/rollout-trace crates, managed network
+  proxy, and legacy tests.
