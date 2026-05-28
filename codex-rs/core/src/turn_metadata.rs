@@ -11,7 +11,6 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::task::JoinHandle;
 
-use crate::sandbox_tags::permission_profile_sandbox_tag;
 use codex_git_utils::get_git_remote_urls_assume_git_repo;
 use codex_git_utils::get_git_repo_root;
 use codex_git_utils::get_has_changes;
@@ -201,25 +200,17 @@ impl TurnMetadataState {
         thread_source: Option<ThreadSource>,
         turn_id: String,
         cwd: AbsolutePathBuf,
-        permission_profile: &PermissionProfile,
-        windows_sandbox_level: WindowsSandboxLevel,
-        enforce_managed_network: bool,
+        _permission_profile: &PermissionProfile,
+        _windows_sandbox_level: WindowsSandboxLevel,
+        _enforce_managed_network: bool,
     ) -> Self {
         let repo_root = get_git_repo_root(&cwd).map(|root| root.to_string_lossy().into_owned());
-        let sandbox = Some(
-            permission_profile_sandbox_tag(
-                permission_profile,
-                windows_sandbox_level,
-                enforce_managed_network,
-            )
-            .to_string(),
-        );
         let base_metadata = build_turn_metadata_bag(
             Some(session_id),
             Some(thread_id),
             thread_source,
             Some(turn_id),
-            sandbox,
+            /*sandbox*/ None,
             /*repo_root*/ None,
             /*workspace_git_metadata*/ None,
         );
