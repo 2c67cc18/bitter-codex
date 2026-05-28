@@ -1433,3 +1433,13 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   MCP, exec policy, request permissions, realtime/state service, and skill
   metadata plumbing; the owned files had no remaining `crate::goals`,
   `GoalRuntime`, `ExternalGoalSet`, or `goal_runtime` references.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/skill-budget-trim` as merge
+  commit `Merge skill budget trim`. The slice aligned the retained inert
+  `default_skill_metadata_budget` helper with the surviving
+  `turn_context.model_info.context_window` type (`Option<i64>`) while keeping
+  skill metadata rendering at `Characters(0)` and not restoring deleted
+  skill/plugin behavior. The worker reached terminal `completed` normally with
+  a clean branch, and `git diff --check` passed. Its focused
+  `cargo-modal --repo codex-rs --dirty check -p codex-core` run failed at 165
+  broader errors, with the prior skill metadata budget mismatch removed.
