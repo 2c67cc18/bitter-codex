@@ -116,7 +116,6 @@ use codex_rollout::state_db;
 use codex_rollout_trace::AgentResultTracePayload;
 use codex_rollout_trace::ThreadStartedTraceMetadata;
 use codex_rollout_trace::ThreadTraceContext;
-use codex_shell_command::parse_command::parse_command;
 use codex_thread_store::CreateThreadParams;
 use codex_thread_store::LiveThread;
 use codex_thread_store::LiveThreadInitGuard;
@@ -170,6 +169,7 @@ use crate::config::resolve_web_search_mode_for_turn;
 use crate::context_manager::ContextManager;
 use crate::context_manager::TotalTokenUsageBreakdown;
 use crate::thread_rollout_truncation::initial_history_has_prior_user_turns;
+use crate::tools::events::parse_command_for_event;
 use codex_config::CONFIG_TOML_FILE;
 use codex_config::ConfigLayerSource;
 use codex_config::ConfigLayerStackOrdering;
@@ -1976,7 +1976,7 @@ impl Session {
             warn!("Overwriting existing pending approval for call_id: {effective_approval_id}");
         }
 
-        let parsed_cmd = parse_command(&command);
+        let parsed_cmd = parse_command_for_event(&command);
         let proposed_network_policy_amendments = network_approval_context.as_ref().map(|context| {
             vec![
                 NetworkPolicyAmendment {

@@ -19,7 +19,6 @@ use codex_protocol::protocol::ExecCommandStatus;
 use codex_protocol::protocol::FileChange;
 use codex_protocol::protocol::PatchApplyStatus;
 use codex_protocol::protocol::TurnDiffEvent;
-use codex_shell_command::parse_command::parse_command;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -73,6 +72,26 @@ enum TurnDiffTrackerUpdate<'a> {
     Track(&'a AppliedPatchDelta),
     Invalidate,
     None,
+}
+
+pub(crate) fn parse_command_for_event(command: &[String]) -> Vec<ParsedCommand> {
+    vec![ParsedCommand::Unknown {
+        cmd: shell_join(command),
+    }]
+}
+
+fn shell_join(command: &[String]) -> String {
+    command
+        .iter()
+        .map(|arg| {
+            if arg.is_empty() || arg.chars().any(char::is_whitespace) {
+                format!("'{}'", arg.replace('\'', "'\\''"))
+            } else {
+                arg.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn tracker_update_for_known_delta(delta: &AppliedPatchDelta) -> TurnDiffTrackerUpdate<'_> {
@@ -132,7 +151,7 @@ pub(crate) enum ToolEmitter {
 
 impl ToolEmitter {
     pub fn shell(command: Vec<String>, cwd: AbsolutePathBuf, source: ExecCommandSource) -> Self {
-        let parsed_cmd = parse_command(&command);
+        let parsed_cmd = parse_command_for_event(&command);
         Self::Shell {
             command,
             cwd,
@@ -154,7 +173,7 @@ impl ToolEmitter {
         source: ExecCommandSource,
         process_id: Option<String>,
     ) -> Self {
-        let parsed_cmd = parse_command(command);
+        let parsed_cmd = parse_command_for_event(command);
         Self::UnifiedExec {
             command: command.to_vec(),
             cwd,

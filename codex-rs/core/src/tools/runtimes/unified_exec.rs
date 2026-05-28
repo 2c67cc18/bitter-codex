@@ -44,7 +44,6 @@ use codex_protocol::error::SandboxErr;
 use codex_protocol::models::AdditionalPermissionProfile;
 use codex_protocol::protocol::ReviewDecision;
 use codex_sandboxing::SandboxablePreference;
-use codex_shell_command::powershell::prefix_powershell_script_with_utf8;
 use codex_tools::UnifiedExecShellMode;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use futures::future::BoxFuture;
@@ -105,6 +104,31 @@ fn unified_exec_options(
         expiration,
         capture_policy: ExecCapturePolicy::ShellTool,
     }
+}
+
+fn prefix_powershell_script_with_utf8(command: &[String]) -> Vec<String> {
+    let Some(command_index) = command
+        .iter()
+        .position(|arg| arg.eq_ignore_ascii_case("-Command") || arg.eq_ignore_ascii_case("-c"))
+    else {
+        return command.to_vec();
+    };
+    let script_index = command_index + 1;
+    let Some(script) = command.get(script_index) else {
+        return command.to_vec();
+    };
+
+    let utf8_prefix = "$OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false); ";
+    if script.contains("[Console]::OutputEncoding")
+        || script.contains("[Console]::InputEncoding")
+        || script.contains("$OutputEncoding")
+    {
+        return command.to_vec();
+    }
+
+    let mut command = command.to_vec();
+    command[script_index] = format!("{utf8_prefix}{script}");
+    command
 }
 
 impl<'a> UnifiedExecRuntime<'a> {
