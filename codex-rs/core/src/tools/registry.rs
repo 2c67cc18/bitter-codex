@@ -5,12 +5,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::function_tool::FunctionCallError;
-use crate::goals::GoalRuntimeEvent;
-use crate::memory_usage::emit_metric_for_tool_read;
-use crate::sandbox_tags::permission_profile_policy_tag;
-use crate::sandbox_tags::permission_profile_sandbox_tag;
 use crate::session::turn_context::TurnContext;
-use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
@@ -23,8 +18,6 @@ use codex_protocol::protocol::EventMsg;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 use futures::future::BoxFuture;
-use serde_json::Value;
-use tracing::warn;
 
 pub(crate) type ToolTelemetryTags = Vec<(&'static str, String)>;
 
@@ -247,24 +240,7 @@ impl ToolRegistry {
         let tool_name_flat = flat_tool_name(&tool_name);
         let call_id_owned = invocation.call_id.clone();
         let otel = invocation.turn.session_telemetry.clone();
-        let base_tool_result_tags = [
-            (
-                "sandbox",
-                permission_profile_sandbox_tag(
-                    &invocation.turn.permission_profile,
-                    invocation.turn.windows_sandbox_level,
-                    invocation.turn.network.is_some(),
-                ),
-            ),
-            (
-                "sandbox_policy",
-                permission_profile_policy_tag(
-                    &invocation.turn.permission_profile,
-                    #[allow(deprecated)]
-                    invocation.turn.cwd.as_path(),
-                ),
-            ),
-        ];
+        let base_tool_result_tags: Vec<(&'static str, &str)> = Vec::new();
 
         {
             let mut active = invocation.session.active_turn.lock().await;
@@ -355,24 +331,12 @@ impl ToolRegistry {
                 },
             )
             .await;
-        let success = match &result {
+        let _success = match &result {
             Ok((_, success)) => *success,
             Err(_) => false,
         };
-        emit_metric_for_tool_read(&invocation, success).await;
         if let Some(terminal_outcome_reached) = &terminal_outcome_reached {
             terminal_outcome_reached.store(true, Ordering::Release);
-        }
-
-        if let Err(err) = invocation
-            .session
-            .goal_runtime_apply(GoalRuntimeEvent::ToolCompleted {
-                turn_context: invocation.turn.as_ref(),
-                tool_name: tool_name.name.as_str(),
-            })
-            .await
-        {
-            warn!("failed to account thread goal progress after tool call: {err}");
         }
 
         match result {

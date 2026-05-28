@@ -1,6 +1,5 @@
 use codex_tools::LoadableToolSpec;
 use codex_tools::ResponsesApiNamespaceTool;
-use codex_tools::ToolSearchSourceInfo;
 use codex_tools::ToolSpec;
 use codex_tools::default_namespace_description;
 
@@ -13,15 +12,10 @@ pub(crate) struct ToolSearchEntry {
 #[derive(Clone)]
 pub(crate) struct ToolSearchInfo {
     pub(crate) entry: ToolSearchEntry,
-    pub(crate) source_info: Option<ToolSearchSourceInfo>,
 }
 
 impl ToolSearchInfo {
-    pub(crate) fn from_spec(
-        search_text: String,
-        spec: ToolSpec,
-        source_info: Option<ToolSearchSourceInfo>,
-    ) -> Option<Self> {
+    pub(crate) fn from_spec(search_text: String, spec: ToolSpec) -> Option<Self> {
         let output = match spec {
             ToolSpec::Function(mut tool) => {
                 tool.defer_loading = Some(true);
@@ -50,7 +44,6 @@ impl ToolSearchInfo {
                 search_text,
                 output,
             },
-            source_info,
         })
     }
 }

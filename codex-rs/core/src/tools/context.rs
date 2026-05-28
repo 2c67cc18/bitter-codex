@@ -5,8 +5,8 @@ use crate::session::turn_context::TurnContext;
 use crate::tools::TELEMETRY_PREVIEW_MAX_BYTES;
 use crate::tools::TELEMETRY_PREVIEW_MAX_LINES;
 use crate::tools::TELEMETRY_PREVIEW_TRUNCATION_NOTICE;
-use crate::turn_diff_tracker::TurnDiffTracker;
 use crate::unified_exec::resolve_max_tokens;
+use codex_apply_patch::AppliedPatchDelta;
 use codex_protocol::mcp::CallToolResult;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
@@ -36,6 +36,26 @@ where
 }
 
 pub type SharedTurnDiffTracker = Arc<Mutex<TurnDiffTracker>>;
+
+pub struct TurnDiffTracker;
+
+impl TurnDiffTracker {
+    pub(crate) fn new() -> Self {
+        Self
+    }
+
+    pub(crate) fn with_display_root(_display_root: std::path::PathBuf) -> Self {
+        Self
+    }
+
+    pub(crate) fn get_unified_diff(&self) -> Option<String> {
+        None
+    }
+
+    pub(crate) fn track_delta(&mut self, _delta: &AppliedPatchDelta) {}
+
+    pub(crate) fn invalidate(&mut self) {}
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ToolCallSource {

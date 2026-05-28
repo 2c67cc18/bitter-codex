@@ -7,7 +7,6 @@ use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::handlers::parse_arguments_with_base_path;
-use crate::tools::handlers::resolve_tool_environment;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
 use crate::unified_exec::ExecCommandRequest;
@@ -97,9 +96,16 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
         let manager: &UnifiedExecProcessManager = &session.services.unified_exec_manager;
         let context = UnifiedExecContext::new(session.clone(), turn.clone(), call_id.clone());
         let environment_args: ExecCommandEnvironmentArgs = parse_arguments(&arguments)?;
-        let Some(turn_environment) =
-            resolve_tool_environment(turn.as_ref(), environment_args.environment_id.as_deref())?
-        else {
+        if let Some(environment_id) = environment_args
+            .environment_id
+            .as_deref()
+            .filter(|environment_id| !environment_id.is_empty())
+        {
+            return Err(FunctionCallError::RespondToModel(format!(
+                "exec_command environment_id is no longer supported; requested `{environment_id}`"
+            )));
+        }
+        let Some(turn_environment) = turn.environments.primary() else {
             return Err(FunctionCallError::RespondToModel(
                 "unified exec is unavailable in this session".to_string(),
             ));

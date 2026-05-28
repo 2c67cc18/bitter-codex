@@ -7,12 +7,9 @@ pub(crate) mod view_image_spec;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::AbsolutePathBufGuard;
 use serde::Deserialize;
-use serde_json::Map;
 use serde_json::Value;
-use std::path::Path;
 
 use crate::function_tool::FunctionCallError;
-use crate::session::turn_context::TurnContext;
 pub use dynamic::DynamicToolHandler;
 pub use unified_exec::ExecCommandHandler;
 pub(crate) use unified_exec::ExecCommandHandlerOptions;
