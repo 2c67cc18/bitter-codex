@@ -268,10 +268,24 @@ done as blind deletion or line-range cleanup.
   `environment_selection`, `guardian`, `codex_execpolicy`,
   `codex_network_proxy`, `codex_windows_sandbox`, MCP/request-permissions,
   and related deleted modules), not from this owned file. The remaining
-  `policy_transforms` references are now in broader session request-permissions
-  intersection, app-server bespoke event handling, and core state grant merging;
-  handle those with separate ownership because they cross protocol/app-server
-  or persistent permission-state behavior.
+  `policy_transforms` references at this point were broader session
+  request-permissions intersection, app-server bespoke event handling, and core
+  state grant merging; handle those with separate ownership because they cross
+  protocol/app-server or persistent permission-state behavior.
+- 2026-05-28 accepted narrow core state grant-merge trim
+  `semantic-root-20260528-core-state-permission-merge-trim/core-state-permission-merge-trim`
+  as merge commit `Merge state permission grant merge trim`. It kept ownership
+  to `core/src/state/{mod.rs,session.rs,turn.rs}` and removed
+  `codex_sandboxing::policy_transforms::merge_permission_profiles` from the
+  retained session/turn granted-permission accumulation path. The new
+  state-local helper preserves omitted fields, unions filesystem grant entries,
+  keeps the latest explicit network grant, and leaves empty merged grants as
+  `None`. The worker reached terminal `completed` normally with clean branch
+  `semantic/core-state-permission-merge-trim` at `a0ce7c73c`. Its
+  `cargo-modal --repo codex-rs --dirty check -p codex-core` run reached Cargo
+  and failed from the same broader unresolved core surfaces (`agent`,
+  `guardian`, `codex_execpolicy`, `codex_windows_sandbox`, and related deleted
+  modules), with no reported diagnostics in the edited state files.
 
 ## Analytics removal follow-through
 
