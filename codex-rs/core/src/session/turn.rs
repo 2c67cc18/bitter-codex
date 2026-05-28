@@ -446,7 +446,13 @@ async fn build_skills_and_plugins(
 
     let skill_items: Vec<ResponseItem> = skill_injections
         .iter()
-        .map(|skill| ContextualUserFragment::into(crate::context::SkillInstructions::from(skill)))
+        .map(|skill| {
+            ContextualUserFragment::into(crate::context::SkillInstructions::new(
+                skill.name.clone(),
+                skill.path.clone(),
+                skill.contents.clone(),
+            ))
+        })
         .collect();
     let skill_connector_ids = collect_explicit_app_ids_from_skill_items(
         &skill_items,
