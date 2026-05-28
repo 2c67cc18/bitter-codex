@@ -390,6 +390,22 @@ done as blind deletion or line-range cleanup.
   `environment_selection`, `exec_policy`, `sandboxing`, MCP/RMCP, connectors,
   and related deleted modules), with no visible owned managed-network startup
   diagnostics remaining.
+- 2026-05-28 accepted tools runtime `ToolError` trim
+  `semantic-root-20260528-tools-runtime-error-trim/tools-runtime-error-trim`
+  as merge commit `Merge tools runtime ToolError trim`. It kept ownership to
+  `core/src/tools/events.rs` and
+  `core/src/tools/runtimes/{mod.rs,unified_exec.rs}`, added a small retained
+  `tools::runtimes::ToolError` enum, and removed the direct dependency on the
+  deleted `tools::sandboxing::ToolError` surface while preserving existing event
+  handling for `CodexErr::Sandbox` timeout/denied outputs and explicit
+  rejection messages. The worker reached terminal `completed` normally with
+  clean branch `semantic/tools-runtime-error-trim` at `68736aad1`. `git diff
+  --check` passed. Its focused cargo-modal core lib check reached Cargo and
+  failed from broader unresolved core surfaces still present in and around the
+  owned files (`crate::sandboxing`, `tools::sandboxing` runtime traits,
+  `tools::network_approval`, `codex_network_proxy`, `codex_sandboxing`,
+  `codex_exec_server`, and related removed modules), but the specific
+  `tools::sandboxing::ToolError` dependency is gone.
 
 ## Analytics removal follow-through
 
