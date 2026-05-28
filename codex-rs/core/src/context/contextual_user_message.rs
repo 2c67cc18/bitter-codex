@@ -3,32 +3,19 @@ use codex_protocol::models::ContentItem;
 use super::EnvironmentContext;
 use super::FragmentRegistration;
 use super::FragmentRegistrationProxy;
-use super::GoalContext;
-use super::LegacyApplyPatchExecCommandWarning;
 use super::LegacyModelMismatchWarning;
 use super::LegacyUnifiedExecProcessLimitWarning;
-use super::SkillInstructions;
-use super::SubagentNotification;
 use super::TurnAborted;
 use super::UserShellCommand;
 
 static ENVIRONMENT_CONTEXT_REGISTRATION: FragmentRegistrationProxy<EnvironmentContext> =
     FragmentRegistrationProxy::new();
-static SKILL_INSTRUCTIONS_REGISTRATION: FragmentRegistrationProxy<SkillInstructions> =
-    FragmentRegistrationProxy::new();
 static USER_SHELL_COMMAND_REGISTRATION: FragmentRegistrationProxy<UserShellCommand> =
     FragmentRegistrationProxy::new();
 static TURN_ABORTED_REGISTRATION: FragmentRegistrationProxy<TurnAborted> =
     FragmentRegistrationProxy::new();
-static SUBAGENT_NOTIFICATION_REGISTRATION: FragmentRegistrationProxy<SubagentNotification> =
-    FragmentRegistrationProxy::new();
-static GOAL_CONTEXT_REGISTRATION: FragmentRegistrationProxy<GoalContext> =
-    FragmentRegistrationProxy::new();
 static LEGACY_UNIFIED_EXEC_PROCESS_LIMIT_WARNING_REGISTRATION: FragmentRegistrationProxy<
     LegacyUnifiedExecProcessLimitWarning,
-> = FragmentRegistrationProxy::new();
-static LEGACY_APPLY_PATCH_EXEC_COMMAND_WARNING_REGISTRATION: FragmentRegistrationProxy<
-    LegacyApplyPatchExecCommandWarning,
 > = FragmentRegistrationProxy::new();
 static LEGACY_MODEL_MISMATCH_WARNING_REGISTRATION: FragmentRegistrationProxy<
     LegacyModelMismatchWarning,
@@ -36,13 +23,9 @@ static LEGACY_MODEL_MISMATCH_WARNING_REGISTRATION: FragmentRegistrationProxy<
 
 static CONTEXTUAL_USER_FRAGMENTS: &[&dyn FragmentRegistration] = &[
     &ENVIRONMENT_CONTEXT_REGISTRATION,
-    &SKILL_INSTRUCTIONS_REGISTRATION,
     &USER_SHELL_COMMAND_REGISTRATION,
     &TURN_ABORTED_REGISTRATION,
-    &SUBAGENT_NOTIFICATION_REGISTRATION,
-    &GOAL_CONTEXT_REGISTRATION,
     &LEGACY_UNIFIED_EXEC_PROCESS_LIMIT_WARNING_REGISTRATION,
-    &LEGACY_APPLY_PATCH_EXEC_COMMAND_WARNING_REGISTRATION,
     &LEGACY_MODEL_MISMATCH_WARNING_REGISTRATION,
 ];
 

@@ -1,6 +1,5 @@
 use crate::SkillsManager;
 use crate::agent::AgentControl;
-use crate::attestation::AttestationProvider;
 use crate::codex_thread::CodexThread;
 use crate::config::Config;
 use crate::config::ThreadStoreConfig;
@@ -203,7 +202,6 @@ pub(crate) struct ThreadManagerState {
     plugins_manager: Arc<PluginsManager>,
     mcp_manager: Arc<McpManager>,
     thread_store: Arc<dyn ThreadStore>,
-    attestation_provider: Option<Arc<dyn AttestationProvider>>,
     session_source: SessionSource,
     installation_id: String,
     state_db: Option<StateDbHandle>,
@@ -245,7 +243,6 @@ impl ThreadManager {
         thread_store: Arc<dyn ThreadStore>,
         state_db: Option<StateDbHandle>,
         installation_id: String,
-        attestation_provider: Option<Arc<dyn AttestationProvider>>,
     ) -> Self {
         let codex_home = config.codex_home.clone();
         let restriction_product = session_source.restriction_product();
@@ -270,7 +267,6 @@ impl ThreadManager {
                 plugins_manager,
                 mcp_manager,
                 thread_store,
-                attestation_provider,
                 auth_manager,
                 session_source,
                 installation_id,
@@ -369,7 +365,6 @@ impl ThreadManager {
                 plugins_manager,
                 mcp_manager,
                 thread_store,
-                attestation_provider: None,
                 auth_manager,
                 session_source: SessionSource::Exec,
                 installation_id,
@@ -1229,7 +1224,6 @@ impl ThreadManagerState {
             parent_trace,
             environment_selections,
             thread_store: Arc::clone(&self.thread_store),
-            attestation_provider: self.attestation_provider.clone(),
         })
         .await?;
         let new_thread = self

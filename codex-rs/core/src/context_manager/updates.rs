@@ -1,17 +1,9 @@
-use crate::context::CollaborationModeInstructions;
 use crate::context::ContextualUserFragment;
 use crate::context::EnvironmentContext;
 use crate::context::ModelSwitchInstructions;
-use crate::context::PermissionsInstructions;
-use crate::context::PersonalitySpecInstructions;
-use crate::context::RealtimeEndInstructions;
-use crate::context::RealtimeStartInstructions;
-use crate::context::RealtimeStartWithInstructions;
 use crate::session::PreviousTurnSettings;
 use crate::session::turn_context::TurnContext;
 use crate::shell::Shell;
-use codex_execpolicy::Policy;
-use codex_features::Feature;
 use codex_protocol::config_types::Personality;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
@@ -39,85 +31,13 @@ fn build_environment_update_item(
     ))
 }
 
-fn build_permissions_update_item(
-    previous: Option<&TurnContextItem>,
-    next: &TurnContext,
-    exec_policy: &Policy,
-) -> Option<String> {
-    if !next.config.include_permissions_instructions {
-        return None;
-    }
-
-    let prev = previous?;
-    if prev.permission_profile() == next.permission_profile()
-        && prev.approval_policy == next.approval_policy.value()
-    {
-        return None;
-    }
-
-    Some(
-        PermissionsInstructions::from_permission_profile(
-            &next.permission_profile,
-            next.approval_policy.value(),
-            next.config.approvals_reviewer,
-            exec_policy,
-            #[allow(deprecated)]
-            &next.cwd,
-            next.features.enabled(Feature::ExecPermissionApprovals),
-            next.features.enabled(Feature::RequestPermissionsTool),
-        )
-        .render(),
-    )
-}
-
-fn build_collaboration_mode_update_item(
-    previous: Option<&TurnContextItem>,
-    next: &TurnContext,
-) -> Option<String> {
-    if !next.config.include_collaboration_mode_instructions {
-        return None;
-    }
-
-    let prev = previous?;
-    if prev.collaboration_mode.as_ref() != Some(&next.collaboration_mode) {
-        // If the next mode has empty developer instructions, this returns None and we emit no
-        // update, so prior collaboration instructions remain in the prompt history.
-        Some(
-            CollaborationModeInstructions::from_collaboration_mode(&next.collaboration_mode)?
-                .render(),
-        )
-    } else {
-        None
-    }
-}
-
 pub(crate) fn build_realtime_update_item(
     previous: Option<&TurnContextItem>,
     previous_turn_settings: Option<&PreviousTurnSettings>,
     next: &TurnContext,
 ) -> Option<String> {
-    match (
-        previous.and_then(|item| item.realtime_active),
-        next.realtime_active,
-    ) {
-        (Some(true), false) => Some(RealtimeEndInstructions::new("inactive").render()),
-        (Some(false), true) | (None, true) => Some(
-            if let Some(instructions) = next
-                .config
-                .experimental_realtime_start_instructions
-                .as_deref()
-            {
-                RealtimeStartWithInstructions::new(instructions).render()
-            } else {
-                RealtimeStartInstructions.render()
-            },
-        ),
-        (Some(true), true) | (Some(false), false) => None,
-        (None, false) => previous_turn_settings
-            .and_then(|settings| settings.realtime_active)
-            .filter(|realtime_active| *realtime_active)
-            .map(|_| RealtimeEndInstructions::new("inactive").render()),
-    }
+    let _ = (previous, previous_turn_settings, next);
+    None
 }
 
 pub(crate) fn build_initial_realtime_item(
@@ -146,7 +66,7 @@ fn build_personality_update_item(
     {
         let model_info = &next.model_info;
         let personality_message = personality_message_for(model_info, personality);
-        personality_message.map(|message| PersonalitySpecInstructions::new(message).render())
+        personality_message
     } else {
         None
     }
@@ -211,7 +131,7 @@ pub(crate) fn build_settings_update_items(
     previous_turn_settings: Option<&PreviousTurnSettings>,
     next: &TurnContext,
     shell: &Shell,
-    exec_policy: &Policy,
+    _exec_policy: &(),
     personality_feature_enabled: bool,
 ) -> Vec<ResponseItem> {
     // TODO(ccunningham): build_settings_update_items still does not cover every
@@ -223,8 +143,6 @@ pub(crate) fn build_settings_update_items(
         // Keep model-switch instructions first so model-specific guidance is read before
         // any other context diffs on this turn.
         build_model_instructions_update_item(previous_turn_settings, next),
-        build_permissions_update_item(previous, next, exec_policy),
-        build_collaboration_mode_update_item(previous, next),
         build_realtime_update_item(previous, previous_turn_settings, next),
         build_personality_update_item(previous, next, personality_feature_enabled),
     ]

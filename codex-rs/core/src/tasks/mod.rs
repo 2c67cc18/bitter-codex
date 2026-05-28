@@ -1,6 +1,5 @@
 mod compact;
 mod regular;
-mod review;
 mod user_shell;
 
 use std::sync::Arc;

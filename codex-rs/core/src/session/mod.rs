@@ -12,7 +12,6 @@ use crate::config::ManagedFeatures;
 use crate::config::resolve_tool_suggest_config_from_layer_stack;
 use crate::context::ApprovedCommandPrefixSaved;
 use crate::context::ContextualUserFragment;
-use crate::context::PersonalitySpecInstructions;
 use crate::default_skill_metadata_budget;
 use crate::parse_turn_item;
 use crate::path_utils::normalize_for_native_workdir;
@@ -377,7 +376,6 @@ pub(crate) struct CodexSpawnArgs {
     pub(crate) parent_trace: Option<W3cTraceContext>,
     pub(crate) environment_selections: ResolvedTurnEnvironments,
     pub(crate) thread_store: Arc<dyn ThreadStore>,
-    pub(crate) attestation_provider: Option<Arc<dyn AttestationProvider>>,
 }
 
 pub(crate) const INITIAL_SUBMIT_ID: &str = "";
@@ -435,7 +433,6 @@ impl Codex {
             parent_trace: _,
             environment_selections,
             thread_store,
-            attestation_provider,
         } = args;
         let (tx_sub, rx_sub) = async_channel::bounded(SUBMISSION_CHANNEL_CAPACITY);
         let (tx_event, rx_event) = async_channel::unbounded();
@@ -595,7 +592,6 @@ impl Codex {
             environment_manager,
             thread_store,
             parent_rollout_thread_trace,
-            attestation_provider,
         )
         .await
         .map_err(|e| {
@@ -1477,13 +1473,12 @@ impl Session {
             state.previous_turn_settings()
         };
         let shell = self.user_shell();
-        let exec_policy = self.services.exec_policy.current();
         crate::context_manager::updates::build_settings_update_items(
             reference_context_item,
             previous_turn_settings.as_ref(),
             current_context,
             shell.as_ref(),
-            exec_policy.as_ref(),
+            &(),
             self.features.enabled(Feature::Personality),
         )
     }
@@ -1832,30 +1827,9 @@ impl Session {
 
     pub(crate) async fn record_network_policy_amendment_message(
         &self,
-        sub_id: &str,
-        amendment: &NetworkPolicyAmendment,
+        _sub_id: &str,
+        _amendment: &NetworkPolicyAmendment,
     ) {
-        let fragment = NetworkRuleSaved::new(amendment);
-        let text = fragment.render();
-        let message: ResponseItem = ContextualUserFragment::into(fragment);
-
-        if let Some(turn_context) = self.turn_context_for_sub_id(sub_id).await {
-            self.record_conversation_items(&turn_context, std::slice::from_ref(&message))
-                .await;
-            return;
-        }
-
-        if self
-            .inject_response_items(vec![ResponseInputItem::Message {
-                role: "developer".to_string(),
-                content: vec![ContentItem::InputText { text }],
-                phase: None,
-            }])
-            .await
-            .is_err()
-        {
-            warn!("no active turn found to record network policy amendment message for {sub_id}");
-        }
     }
 
     /// Emit an exec approval request event and await the user's decision.
@@ -2575,25 +2549,7 @@ impl Session {
         {
             developer_sections.push(model_switch_message);
         }
-        if turn_context.config.include_permissions_instructions {
-            developer_sections.push(
-                PermissionsInstructions::from_permission_profile(
-                    &turn_context.permission_profile,
-                    turn_context.approval_policy.value(),
-                    turn_context.config.approvals_reviewer,
-                    self.services.exec_policy.current().as_ref(),
-                    #[allow(deprecated)]
-                    &turn_context.cwd,
-                    turn_context
-                        .features
-                        .enabled(Feature::ExecPermissionApprovals),
-                    turn_context
-                        .features
-                        .enabled(Feature::RequestPermissionsTool),
-                )
-                .render(),
-            );
-        }
+        if turn_context.config.include_permissions_instructions {}
         let separate_guardian_developer_message =
             crate::guardian::is_guardian_reviewer_source(&session_source);
         // Keep the guardian policy prompt out of the aggregated developer bundle so it
@@ -2605,12 +2561,7 @@ impl Session {
             developer_sections.push(developer_instructions.to_string());
         }
         // Add developer instructions from collaboration_mode if they exist and are non-empty
-        if turn_context.config.include_collaboration_mode_instructions
-            && let Some(collab_instructions) =
-                CollaborationModeInstructions::from_collaboration_mode(&collaboration_mode)
-        {
-            developer_sections.push(collab_instructions.render());
-        }
+        if turn_context.config.include_collaboration_mode_instructions {}
         if let Some(realtime_update) = crate::context_manager::updates::build_initial_realtime_item(
             reference_context_item.as_ref(),
             previous_turn_settings.as_ref(),
@@ -2631,24 +2582,10 @@ impl Session {
                         personality,
                     )
             {
-                developer_sections
-                    .push(PersonalitySpecInstructions::new(personality_message).render());
+                developer_sections.push(personality_message);
             }
         }
-        if turn_context.config.include_apps_instructions && turn_context.apps_enabled() {
-            let mcp_connection_manager = self.services.mcp_connection_manager.read().await;
-            let accessible_and_enabled_connectors =
-                connectors::list_accessible_and_enabled_connectors_from_manager(
-                    &mcp_connection_manager,
-                    &turn_context.config,
-                )
-                .await;
-            if let Some(apps_instructions) =
-                AppsInstructions::from_connectors(&accessible_and_enabled_connectors)
-            {
-                developer_sections.push(apps_instructions.render());
-            }
-        }
+        if turn_context.config.include_apps_instructions && turn_context.apps_enabled() {}
         if turn_context.config.include_skill_instructions {
             let available_skills = build_available_skills(
                 &turn_context.turn_skills.outcome,
@@ -2659,7 +2596,6 @@ impl Session {
             );
             if let Some(available_skills) = available_skills {
                 let warning_message = available_skills.warning_message.clone();
-                let skills_instructions = AvailableSkillsInstructions::from(available_skills);
                 if let Some(warning_message) = warning_message {
                     self.send_event_raw(Event {
                         id: String::new(),
@@ -2669,18 +2605,8 @@ impl Session {
                     })
                     .await;
                 }
-                developer_sections.push(skills_instructions.render());
+                developer_sections.push(available_skills.rendered);
             }
-        }
-        let loaded_plugins = self
-            .services
-            .plugins_manager
-            .plugins_for_config(&turn_context.config.plugins_config_input())
-            .await;
-        if let Some(plugin_instructions) =
-            AvailablePluginsInstructions::from_plugins(loaded_plugins.capability_summaries())
-        {
-            developer_sections.push(plugin_instructions.render());
         }
         if turn_context.config.include_environment_context {
             let shell = self.user_shell();

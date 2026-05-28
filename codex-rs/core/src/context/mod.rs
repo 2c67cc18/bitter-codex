@@ -8,9 +8,6 @@ mod image_generation_instructions;
 mod legacy_model_mismatch_warning;
 mod legacy_unified_exec_process_limit_warning;
 mod model_switch_instructions;
-mod personality_spec_instructions;
-mod skill_instructions;
-mod subagent_notification;
 mod turn_aborted;
 mod user_shell_command;
 
@@ -24,8 +21,5 @@ pub(crate) use image_generation_instructions::ImageGenerationInstructions;
 pub(crate) use legacy_model_mismatch_warning::LegacyModelMismatchWarning;
 pub(crate) use legacy_unified_exec_process_limit_warning::LegacyUnifiedExecProcessLimitWarning;
 pub(crate) use model_switch_instructions::ModelSwitchInstructions;
-pub(crate) use personality_spec_instructions::PersonalitySpecInstructions;
-pub(crate) use skill_instructions::SkillInstructions;
-pub(crate) use subagent_notification::SubagentNotification;
 pub(crate) use turn_aborted::TurnAborted;
 pub(crate) use user_shell_command::UserShellCommand;

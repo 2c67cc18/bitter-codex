@@ -875,7 +875,6 @@ async fn prefers_apikey_when_config_prefers_apikey_even_with_chatgpt_tokens() {
         thread_store_from_config(&config, /*state_db*/ None),
         /*state_db*/ None,
         installation_id,
-        /*attestation_provider*/ None,
     );
     let NewThread { thread: codex, .. } = thread_manager
         .start_thread(config.clone())
@@ -1978,7 +1977,6 @@ async fn azure_responses_request_includes_store_and_reasoning_ids() {
         /*enable_request_compression*/ false,
         /*include_timing_metrics*/ false,
         /*beta_features_header*/ None,
-        /*attestation_provider*/ None,
     );
     let mut client_session = client.new_session();
 
