@@ -110,7 +110,6 @@ use codex_protocol::request_permissions::RequestPermissionProfile as CoreRequest
 use codex_protocol::request_permissions::RequestPermissionsResponse as CoreRequestPermissionsResponse;
 use codex_protocol::request_user_input::RequestUserInputAnswer as CoreRequestUserInputAnswer;
 use codex_protocol::request_user_input::RequestUserInputResponse as CoreRequestUserInputResponse;
-use codex_shell_command::parse_command::shlex_join;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -130,6 +129,20 @@ struct CommandExecutionCompletionItem {
     command: String,
     cwd: AbsolutePathBuf,
     command_actions: Vec<V2ParsedCommand>,
+}
+
+fn shlex_join(command: &[String]) -> String {
+    command
+        .iter()
+        .map(|arg| {
+            if arg.is_empty() || arg.chars().any(char::is_whitespace) {
+                format!("'{}'", arg.replace('\'', "'\\''"))
+            } else {
+                arg.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[allow(clippy::too_many_arguments)]
