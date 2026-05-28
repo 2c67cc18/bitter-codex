@@ -19,7 +19,6 @@ use crate::tools::context::AbortedToolOutput;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::context::ToolPayload;
 use crate::tools::registry::AnyToolResult;
-use crate::tools::registry::ToolArgumentDiffConsumer;
 use crate::tools::router::ToolCall;
 use crate::tools::router::ToolCallSource;
 use crate::tools::router::ToolRouter;
@@ -51,12 +50,6 @@ impl ToolCallRuntime {
         }
     }
 
-    pub(crate) fn create_diff_consumer(
-        &self,
-        tool_name: &codex_tools::ToolName,
-    ) -> Option<Box<dyn ToolArgumentDiffConsumer>> {
-        self.router.create_diff_consumer(tool_name)
-    }
 
     #[instrument(level = "trace", skip_all)]
     pub(crate) fn handle_tool_call(
@@ -81,16 +74,14 @@ impl ToolCallRuntime {
     pub(crate) fn handle_tool_call_with_source(
         self,
         call: ToolCall,
-        source: ToolCallSource,
+        _source: ToolCallSource,
         cancellation_token: CancellationToken,
     ) -> impl std::future::Future<Output = Result<AnyToolResult, FunctionCallError>> {
         let supports_parallel = self.router.tool_supports_parallel(&call);
         let router = Arc::clone(&self.router);
         let session = Arc::clone(&self.session);
         let turn = Arc::clone(&self.turn_context);
-        let tracker = Arc::clone(&self.tracker);
         let lock = Arc::clone(&self.parallel_execution);
-        let invocation_cancellation_token = cancellation_token.clone();
         let started = Instant::now();
         let terminal_outcome_reached = Arc::new(AtomicBool::new(false));
         let dispatch_terminal_outcome_reached = Arc::clone(&terminal_outcome_reached);
@@ -117,10 +108,7 @@ impl ToolCallRuntime {
                     .dispatch_tool_call_with_terminal_outcome(
                         session,
                         turn,
-                        invocation_cancellation_token,
-                        tracker,
                         dispatch_call,
-                        source,
                         dispatch_terminal_outcome_reached,
                     )
                     .instrument(dispatch_span.clone())

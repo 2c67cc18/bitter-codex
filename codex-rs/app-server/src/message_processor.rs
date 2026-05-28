@@ -227,7 +227,6 @@ impl MessageProcessor {
             auth_manager.clone(),
             session_source,
             Arc::clone(&thread_store),
-            state_db.clone(),
             installation_id,
         ));
 

@@ -39,7 +39,6 @@ use codex_protocol::protocol::TurnCompleteEvent;
 use codex_protocol::protocol::WarningEvent;
 use codex_protocol::user_input::UserInput;
 
-use codex_protocol::models::ContentItem;
 pub(crate) use compact::CompactTask;
 pub(crate) use regular::RegularTask;
 
@@ -47,9 +46,7 @@ const GRACEFULL_INTERRUPTION_TIMEOUT_MS: u64 = 100;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InterruptedTurnHistoryMarker {
-    Disabled,
     ContextualUser,
-    Developer,
 }
 
 impl InterruptedTurnHistoryMarker {
@@ -62,23 +59,9 @@ pub(crate) fn interrupted_turn_history_marker(
     marker: InterruptedTurnHistoryMarker,
 ) -> Option<ResponseItem> {
     match marker {
-        InterruptedTurnHistoryMarker::Disabled => None,
         InterruptedTurnHistoryMarker::ContextualUser => Some(ContextualUserFragment::into(
             crate::context::TurnAborted::new(crate::context::TurnAborted::INTERRUPTED_GUIDANCE),
         )),
-        InterruptedTurnHistoryMarker::Developer => {
-            let marker = crate::context::TurnAborted::new(
-                crate::context::TurnAborted::INTERRUPTED_DEVELOPER_GUIDANCE,
-            );
-            Some(ResponseItem::Message {
-                id: None,
-                role: "developer".to_string(),
-                content: vec![ContentItem::InputText {
-                    text: marker.render(),
-                }],
-                phase: None,
-            })
-        }
     }
 }
 

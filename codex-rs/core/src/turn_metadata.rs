@@ -3,8 +3,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
 
 use codex_utils_string::to_ascii_json_string;
 use serde::Serialize;
@@ -155,7 +153,6 @@ pub(crate) struct TurnMetadataState {
     enriched_header: Arc<RwLock<Option<String>>>,
     turn_started_at_unix_ms: Arc<RwLock<Option<i64>>>,
     responsesapi_client_metadata: Arc<RwLock<Option<HashMap<String, String>>>>,
-    user_input_requested_during_turn: Arc<AtomicBool>,
     enrichment_task: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
@@ -182,7 +179,6 @@ impl TurnMetadataState {
             enriched_header: Arc::new(RwLock::new(None)),
             turn_started_at_unix_ms: Arc::new(RwLock::new(None)),
             responsesapi_client_metadata: Arc::new(RwLock::new(None)),
-            user_input_requested_during_turn: Arc::new(AtomicBool::new(false)),
             enrichment_task: Arc::new(Mutex::new(None)),
         }
     }
@@ -216,10 +212,6 @@ impl TurnMetadataState {
         .or(Some(header))
     }
 
-    pub(crate) fn mark_user_input_requested_during_turn(&self) {
-        self.user_input_requested_during_turn
-            .store(true, Ordering::Relaxed);
-    }
 
     pub(crate) fn set_responsesapi_client_metadata(
         &self,

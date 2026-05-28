@@ -340,8 +340,6 @@ struct ProjectTrustContext {
     project_root: AbsolutePathBuf,
     project_root_key: String,
     project_root_lookup_keys: Vec<String>,
-    checkout_root: Option<AbsolutePathBuf>,
-    repo_root: Option<AbsolutePathBuf>,
     repo_root_key: Option<String>,
     repo_root_lookup_keys: Option<Vec<String>>,
     projects_trust: std::collections::HashMap<String, TrustLevel>,
@@ -501,7 +499,6 @@ async fn project_trust_context(
         .first()
         .cloned()
         .unwrap_or_else(|| project_trust_key(project_root.as_path()));
-    let checkout_root = find_git_checkout_root(cwd).await;
     let repo_root = resolve_root_git_project_for_trust(cwd);
     let repo_root_lookup_keys = repo_root
         .as_ref()
@@ -519,8 +516,6 @@ async fn project_trust_context(
         project_root,
         project_root_key,
         project_root_lookup_keys,
-        checkout_root,
-        repo_root,
         repo_root_key,
         repo_root_lookup_keys,
         projects_trust,

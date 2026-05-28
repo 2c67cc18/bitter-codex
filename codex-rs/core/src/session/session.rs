@@ -10,7 +10,6 @@ use tokio::sync::watch;
 
 pub(crate) struct Session {
     pub(crate) conversation_id: ThreadId,
-    pub(crate) installation_id: String,
     pub(super) tx_event: Sender<Event>,
     pub(super) state: Mutex<SessionState>,
 
@@ -73,7 +72,6 @@ impl SessionConfiguration {
             ephemeral: self.original_config_do_not_use.ephemeral,
             reasoning_effort: self.model_reasoning_effort,
             reasoning_summary: self.model_reasoning_summary,
-            session_source: self.session_source.clone(),
         }
     }
 
@@ -432,15 +430,12 @@ impl Session {
                 main_execve_wrapper_exe: config.main_execve_wrapper_exe.clone(),
                 user_shell: Arc::new(default_shell),
                 shell_snapshot_tx,
-                show_raw_agent_reasoning: config.show_raw_agent_reasoning,
                 auth_manager: Arc::clone(&auth_manager),
                 session_telemetry,
                 models_manager: Arc::clone(&models_manager),
-                runtime_handle: tokio::runtime::Handle::current(),
                 session_id,
                 state_db: state_db_ctx.clone(),
                 live_thread: live_thread_init.as_ref().cloned(),
-                thread_store: Arc::clone(&thread_store),
                 model_client: ModelClient::new(
                     Some(Arc::clone(&auth_manager)),
                     session_id,
@@ -458,7 +453,6 @@ impl Session {
                 .set_window_generation(window_generation);
             let sess = Arc::new(Session {
                 conversation_id: thread_id,
-                installation_id,
                 tx_event: tx_event.clone(),
                 state: Mutex::new(state),
                 features: config.features.clone(),

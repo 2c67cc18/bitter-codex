@@ -33,9 +33,6 @@ pub(crate) trait CoreToolRuntime: ToolExecutor<ToolInvocation> {
         Box::pin(async { Vec::new() })
     }
 
-    fn create_diff_consumer(&self) -> Option<Box<dyn ToolArgumentDiffConsumer>> {
-        None
-    }
 }
 
 pub(crate) trait ToolArgumentDiffConsumer: Send {
@@ -119,12 +116,6 @@ impl ToolRegistry {
         self.tools.get(name).map(|tool| tool.exposure())
     }
 
-    pub(crate) fn create_diff_consumer(
-        &self,
-        name: &ToolName,
-    ) -> Option<Box<dyn ToolArgumentDiffConsumer>> {
-        self.tool(name)?.create_diff_consumer()
-    }
 
     pub(crate) fn supports_parallel_tool_calls(&self, name: &ToolName) -> Option<bool> {
         let tool = self.tool(name)?;

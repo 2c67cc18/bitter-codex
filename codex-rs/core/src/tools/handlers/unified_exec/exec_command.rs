@@ -103,7 +103,6 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
             get_command(&args, session.user_shell(), turn.config.allow_login_shell)
                 .map_err(FunctionCallError::RespondToModel)?;
         let command = resolved_command.command;
-        let shell_type = resolved_command.shell_type;
         let command_for_display = command.join(" ");
 
         let ExecCommandArgs {
@@ -118,7 +117,6 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
             .exec_command(
                 ExecCommandRequest {
                     command,
-                    shell_type,
                     process_id,
                     yield_time_ms,
                     max_output_tokens,

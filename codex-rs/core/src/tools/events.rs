@@ -1,8 +1,5 @@
-use crate::function_tool::FunctionCallError;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
-use crate::tools::context::SharedTurnDiffTracker;
-use crate::tools::runtimes::ToolError;
 use crate::turn_timing::now_unix_timestamp_ms;
 use codex_protocol::exec_output::ExecToolCallOutput;
 use codex_protocol::parse_command::ParsedCommand;
@@ -21,7 +18,6 @@ pub(crate) struct ToolEventCtx<'a> {
     pub session: &'a Session,
     pub turn: &'a TurnContext,
     pub call_id: &'a str,
-    pub turn_diff_tracker: Option<&'a SharedTurnDiffTracker>,
 }
 
 impl<'a> ToolEventCtx<'a> {
@@ -29,13 +25,11 @@ impl<'a> ToolEventCtx<'a> {
         session: &'a Session,
         turn: &'a TurnContext,
         call_id: &'a str,
-        turn_diff_tracker: Option<&'a SharedTurnDiffTracker>,
     ) -> Self {
         Self {
             session,
             turn,
             call_id,
-            turn_diff_tracker,
         }
     }
 }
@@ -48,8 +42,6 @@ pub(crate) enum ToolEventStage {
 
 pub(crate) enum ToolEventFailure {
     Output(ExecToolCallOutput),
-    Message(String),
-    Rejected { message: String },
 }
 
 pub(crate) async fn emit_exec_command_begin(
@@ -80,12 +72,6 @@ pub(crate) async fn emit_exec_command_begin(
 }
 
 pub(crate) enum ToolEmitter {
-    Shell {
-        command: Vec<String>,
-        cwd: AbsolutePathBuf,
-        source: ExecCommandSource,
-        parsed_cmd: Vec<ParsedCommand>,
-    },
     UnifiedExec {
         command: Vec<String>,
         cwd: AbsolutePathBuf,
@@ -96,16 +82,6 @@ pub(crate) enum ToolEmitter {
 }
 
 impl ToolEmitter {
-    pub fn shell(command: Vec<String>, cwd: AbsolutePathBuf, source: ExecCommandSource) -> Self {
-        Self::Shell {
-            parsed_cmd: vec![ParsedCommand::Unknown {
-                cmd: command.join(" "),
-            }],
-            command,
-            cwd,
-            source,
-        }
-    }
 
     pub fn unified_exec(
         command: &[String],
@@ -126,24 +102,6 @@ impl ToolEmitter {
 
     pub async fn emit(&self, ctx: ToolEventCtx<'_>, stage: ToolEventStage) {
         match (self, stage) {
-            (
-                Self::Shell {
-                    command,
-                    cwd,
-                    source,
-                    parsed_cmd,
-                    ..
-                },
-                stage,
-            ) => {
-                emit_exec_stage(
-                    ctx,
-                    ExecCommandInput::new(command, cwd, parsed_cmd, *source, None, None),
-                    stage,
-                )
-                .await;
-            }
-
             (
                 Self::UnifiedExec {
                     command,
@@ -175,57 +133,7 @@ impl ToolEmitter {
         self.emit(ctx, ToolEventStage::Begin).await;
     }
 
-    fn format_exec_output_for_model(
-        &self,
-        output: &ExecToolCallOutput,
-        ctx: ToolEventCtx<'_>,
-    ) -> String {
-        super::format_exec_output_for_model(output, ctx.turn.truncation_policy)
-    }
 
-    pub async fn finish(
-        &self,
-        ctx: ToolEventCtx<'_>,
-        out: Result<ExecToolCallOutput, ToolError>,
-    ) -> Result<String, FunctionCallError> {
-        let (event, result) = match out {
-            Ok(output) => {
-                let content = self.format_exec_output_for_model(&output, ctx);
-                let exit_code = output.exit_code;
-                let event = ToolEventStage::Success { output };
-                let result = if exit_code == 0 {
-                    Ok(content)
-                } else {
-                    Err(FunctionCallError::RespondToModel(content))
-                };
-                (event, result)
-            }
-            Err(ToolError::Codex(err)) => {
-                let message = format!("execution error: {err:?}");
-                let event = ToolEventStage::Failure(ToolEventFailure::Message(message.clone()));
-                let result = Err(FunctionCallError::RespondToModel(message));
-                (event, result)
-            }
-            Err(ToolError::Rejected(msg)) => {
-                let normalized = if msg == "rejected by user" {
-                    match self {
-                        Self::Shell { .. } | Self::UnifiedExec { .. } => {
-                            "exec command rejected by user".to_string()
-                        }
-                    }
-                } else {
-                    msg
-                };
-                let event = ToolEventStage::Failure(ToolEventFailure::Rejected {
-                    message: normalized.clone(),
-                });
-                let result = Err(FunctionCallError::RespondToModel(normalized));
-                (event, result)
-            }
-        };
-        self.emit(ctx, event).await;
-        result
-    }
 }
 
 struct ExecCommandInput<'a> {
@@ -299,32 +207,6 @@ async fn emit_exec_stage(
                 } else {
                     ExecCommandStatus::Failed
                 },
-            };
-            emit_exec_end(ctx, exec_input, exec_result).await;
-        }
-        ToolEventStage::Failure(ToolEventFailure::Message(message)) => {
-            let text = message.to_string();
-            let exec_result = ExecCommandResult {
-                stdout: String::new(),
-                stderr: text.clone(),
-                aggregated_output: text.clone(),
-                exit_code: -1,
-                duration: Duration::ZERO,
-                formatted_output: text,
-                status: ExecCommandStatus::Failed,
-            };
-            emit_exec_end(ctx, exec_input, exec_result).await;
-        }
-        ToolEventStage::Failure(ToolEventFailure::Rejected { message, .. }) => {
-            let text = message.to_string();
-            let exec_result = ExecCommandResult {
-                stdout: String::new(),
-                stderr: text.clone(),
-                aggregated_output: text.clone(),
-                exit_code: -1,
-                duration: Duration::ZERO,
-                formatted_output: text,
-                status: ExecCommandStatus::Declined,
             };
             emit_exec_end(ctx, exec_input, exec_result).await;
         }

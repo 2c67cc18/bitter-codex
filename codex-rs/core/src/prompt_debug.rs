@@ -34,7 +34,6 @@ pub async fn build_prompt_input(
         Arc::clone(&auth_manager),
         SessionSource::Exec,
         thread_store,
-        state_db.clone(),
         installation_id,
     );
     let thread = thread_manager.start_thread(config).await?;

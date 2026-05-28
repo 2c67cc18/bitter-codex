@@ -1,6 +1,4 @@
 use crate::context_manager::normalize;
-use crate::event_mapping::has_non_contextual_dev_message_content;
-use crate::event_mapping::is_contextual_dev_message_content;
 use crate::event_mapping::is_contextual_user_message_content;
 use crate::session::turn_context::TurnContext;
 use base64::Engine;
@@ -191,30 +189,6 @@ impl ContextManager {
         }
     }
 
-    pub(crate) fn drop_last_n_user_turns(&mut self, num_turns: u32) {
-        if num_turns == 0 {
-            return;
-        }
-
-        let snapshot = self.items.clone();
-        let user_positions = user_message_positions(&snapshot);
-        let Some(&first_instruction_turn_idx) = user_positions.first() else {
-            self.replace(snapshot);
-            return;
-        };
-
-        let n_from_end = usize::try_from(num_turns).unwrap_or(usize::MAX);
-        let mut cut_idx = if n_from_end >= user_positions.len() {
-            first_instruction_turn_idx
-        } else {
-            user_positions[user_positions.len() - n_from_end]
-        };
-
-        cut_idx =
-            self.trim_pre_turn_context_updates(&snapshot, first_instruction_turn_idx, cut_idx);
-
-        self.replace(snapshot[..cut_idx].to_vec());
-    }
 
     pub(crate) fn update_token_info(
         &mut self,
@@ -357,14 +331,6 @@ impl ContextManager {
     ) -> usize {
         while cut_idx > first_instruction_turn_idx {
             match &snapshot[cut_idx - 1] {
-                ResponseItem::Message { role, content, .. }
-                    if role == "developer" && is_contextual_dev_message_content(content) =>
-                {
-                    if has_non_contextual_dev_message_content(content) {
-                        self.reference_context_item = None;
-                    }
-                    cut_idx -= 1;
-                }
                 ResponseItem::Message { role, content, .. }
                     if role == "user" && is_contextual_user_message_content(content) =>
                 {
@@ -638,12 +604,3 @@ pub(crate) fn is_user_turn_boundary(item: &ResponseItem) -> bool {
     role == "user" && !is_contextual_user_message_content(content)
 }
 
-fn user_message_positions(items: &[ResponseItem]) -> Vec<usize> {
-    let mut positions = Vec::new();
-    for (idx, item) in items.iter().enumerate() {
-        if is_user_turn_boundary(item) {
-            positions.push(idx);
-        }
-    }
-    positions
-}

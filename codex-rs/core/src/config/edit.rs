@@ -9,7 +9,6 @@ use codex_protocol::openai_models::ReasoningEffort;
 use std::path::Path;
 use std::path::PathBuf;
 use tokio::task;
-use toml_edit::Array as TomlArray;
 use toml_edit::DocumentMut;
 use toml_edit::InlineTable;
 use toml_edit::Item as TomlItem;
@@ -95,19 +94,6 @@ mod document_helpers {
         }
     }
 
-    pub(super) fn merge_inline_table(existing: &mut InlineTable, replacement: InlineTable) {
-        existing.retain(|key, _| replacement.get(key).is_some());
-
-        for (key, value) in replacement.iter() {
-            if let Some(existing_value) = existing.get_mut(key) {
-                let mut updated_value = value.clone();
-                *updated_value.decor_mut() = existing_value.decor().clone();
-                *existing_value = updated_value;
-            } else {
-                existing.insert(key.to_string(), value.clone());
-            }
-        }
-    }
 
     fn table_from_inline(inline: &InlineTable) -> TomlTable {
         let mut table = new_implicit_table();
@@ -126,30 +112,7 @@ mod document_helpers {
         table
     }
 
-    fn array_from_iter<I>(iter: I) -> TomlItem
-    where
-        I: Iterator<Item = String>,
-    {
-        let mut array = TomlArray::new();
-        for value in iter {
-            array.push(value);
-        }
-        TomlItem::Value(array.into())
-    }
 
-    fn table_from_pairs<'a, I>(pairs: I) -> TomlItem
-    where
-        I: IntoIterator<Item = (&'a String, &'a String)>,
-    {
-        let mut entries: Vec<_> = pairs.into_iter().collect();
-        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
-        let mut table = TomlTable::new();
-        table.set_implicit(false);
-        for (key, val) in entries {
-            table.insert(key, value(val.clone()));
-        }
-        TomlItem::Table(table)
-    }
 }
 
 struct ConfigDocument {

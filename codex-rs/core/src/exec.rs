@@ -142,45 +142,8 @@ impl ExecExpiration {
         }
     }
 
-    pub(crate) fn with_cancellation(self, cancellation: CancellationToken) -> Self {
-        match self {
-            ExecExpiration::Timeout(timeout) => ExecExpiration::TimeoutOrCancellation {
-                timeout,
-                cancellation,
-            },
-            ExecExpiration::DefaultTimeout => ExecExpiration::TimeoutOrCancellation {
-                timeout: Duration::from_millis(DEFAULT_EXEC_COMMAND_TIMEOUT_MS),
-                cancellation,
-            },
-            ExecExpiration::Cancellation(existing) => {
-                ExecExpiration::Cancellation(cancel_when_either(existing, cancellation))
-            }
-            ExecExpiration::TimeoutOrCancellation {
-                timeout,
-                cancellation: existing,
-            } => ExecExpiration::TimeoutOrCancellation {
-                timeout,
-                cancellation: cancel_when_either(existing, cancellation),
-            },
-        }
-    }
 }
 
-pub(crate) fn cancel_when_either(
-    first: CancellationToken,
-    second: CancellationToken,
-) -> CancellationToken {
-    let combined = CancellationToken::new();
-    let cancel = combined.clone();
-    tokio::spawn(async move {
-        tokio::select! {
-            _ = first.cancelled() => {}
-            _ = second.cancelled() => {}
-        }
-        cancel.cancel();
-    });
-    combined
-}
 
 impl ExecCapturePolicy {
     fn retained_bytes_cap(self) -> Option<usize> {

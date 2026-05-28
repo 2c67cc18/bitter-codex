@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::Weak;
 
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_output_truncation::TruncationPolicy;
@@ -11,7 +10,6 @@ use tokio::sync::Mutex;
 
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
-use crate::shell::ShellType;
 
 mod async_watcher;
 mod errors;
@@ -56,7 +54,6 @@ impl UnifiedExecContext {
 #[derive(Debug)]
 pub(crate) struct ExecCommandRequest {
     pub command: Vec<String>,
-    pub shell_type: ShellType,
     pub process_id: i32,
     pub yield_time_ms: u64,
     pub max_output_tokens: Option<usize>,
@@ -112,7 +109,6 @@ struct ProcessEntry {
     call_id: String,
     process_id: i32,
     tty: bool,
-    session: Weak<Session>,
     last_used: tokio::time::Instant,
 }
 

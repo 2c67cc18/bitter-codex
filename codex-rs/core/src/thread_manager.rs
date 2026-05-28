@@ -149,9 +149,7 @@ pub(crate) struct ThreadManagerState {
     thread_store: Arc<dyn ThreadStore>,
     session_source: SessionSource,
     installation_id: String,
-    state_db: Option<StateDbHandle>,
 
-    ops_log: Option<SharedCapturedOps>,
 }
 
 pub fn build_models_manager(
@@ -182,7 +180,6 @@ impl ThreadManager {
         auth_manager: Arc<AuthManager>,
         session_source: SessionSource,
         thread_store: Arc<dyn ThreadStore>,
-        state_db: Option<StateDbHandle>,
         installation_id: String,
     ) -> Self {
         let (thread_created_tx, _) = broadcast::channel(THREAD_CREATED_CHANNEL_CAPACITY);
@@ -195,9 +192,6 @@ impl ThreadManager {
                 auth_manager,
                 session_source,
                 installation_id,
-                state_db,
-                ops_log: should_use_test_thread_manager_behavior()
-                    .then(|| Arc::new(std::sync::Mutex::new(Vec::new()))),
             }),
             _test_codex_home_guard: None,
         }
@@ -256,9 +250,6 @@ impl ThreadManager {
                 auth_manager,
                 session_source: SessionSource::Exec,
                 installation_id,
-                state_db,
-                ops_log: should_use_test_thread_manager_behavior()
-                    .then(|| Arc::new(std::sync::Mutex::new(Vec::new()))),
             }),
             _test_codex_home_guard: None,
         }
@@ -615,20 +606,9 @@ impl ThreadManager {
         .await
     }
 
-    #[cfg(test)]
-    pub(crate) fn captured_ops(&self) -> Vec<(ThreadId, Op)> {
-        self.state
-            .ops_log
-            .as_ref()
-            .and_then(|ops_log| ops_log.lock().ok().map(|log| log.clone()))
-            .unwrap_or_default()
-    }
 }
 
 impl ThreadManagerState {
-    pub(crate) fn state_db(&self) -> Option<StateDbHandle> {
-        self.state_db.clone()
-    }
 
     pub(crate) async fn list_thread_ids(&self) -> Vec<ThreadId> {
         self.threads
@@ -674,11 +654,6 @@ impl ThreadManagerState {
 
     pub(crate) async fn send_op(&self, thread_id: ThreadId, op: Op) -> CodexResult<String> {
         let thread = self.get_thread(thread_id).await?;
-        if let Some(ops_log) = &self.ops_log
-            && let Ok(mut log) = ops_log.lock()
-        {
-            log.push((thread_id, op.clone()));
-        }
         thread.submit(op).await
     }
 
@@ -883,7 +858,6 @@ impl ThreadManagerState {
             auth_manager,
             models_manager: Arc::clone(&self.models_manager),
             conversation_history: initial_history,
-            session_source,
             dynamic_tools,
             parent_session_id,
             persist_extended_history,
@@ -891,12 +865,13 @@ impl ThreadManagerState {
             inherited_shell_snapshot,
             user_shell_override,
             parent_trace,
+            session_source: tracked_session_source.clone(),
             environment_selections,
             thread_store: Arc::clone(&self.thread_store),
         })
         .await?;
         let new_thread = self
-            .finalize_thread_spawn(codex, thread_id, tracked_session_source)
+            .finalize_thread_spawn(codex, thread_id)
             .await?;
         Ok(new_thread)
     }
@@ -905,7 +880,6 @@ impl ThreadManagerState {
         &self,
         codex: Codex,
         thread_id: ThreadId,
-        session_source: SessionSource,
     ) -> CodexResult<NewThread> {
         let event = codex.next_event().await?;
         let session_configured = match event {
@@ -925,7 +899,6 @@ impl ThreadManagerState {
                     codex,
                     session_configured.clone(),
                     session_configured.rollout_path.clone(),
-                    session_source,
                 ));
                 e.insert(thread.clone());
                 return Ok(NewThread {

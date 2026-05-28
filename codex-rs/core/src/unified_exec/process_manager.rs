@@ -174,7 +174,6 @@ impl UnifiedExecProcessManager {
             context.session.as_ref(),
             context.turn.as_ref(),
             &context.call_id,
-            None,
         );
         let emitter = ToolEmitter::unified_exec(
             &request.command,
@@ -479,7 +478,6 @@ impl UnifiedExecProcessManager {
             call_id: context.call_id.clone(),
             process_id,
             tty,
-            session: Arc::downgrade(&context.session),
             last_used: started_at,
         };
         let pruned_entry = {

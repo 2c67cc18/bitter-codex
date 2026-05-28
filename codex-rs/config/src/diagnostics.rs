@@ -85,16 +85,12 @@ impl std::error::Error for ConfigLoadError {
 #[derive(Clone, Copy)]
 pub(crate) enum ConfigDiagnosticSource<'a> {
     Path(&'a Path),
-    #[cfg(any(target_os = "macos", test))]
-    DisplayName(&'a str),
 }
 
 impl ConfigDiagnosticSource<'_> {
     pub(crate) fn to_path_buf(self) -> PathBuf {
         match self {
             ConfigDiagnosticSource::Path(path) => path.to_path_buf(),
-            #[cfg(any(target_os = "macos", test))]
-            ConfigDiagnosticSource::DisplayName(name) => PathBuf::from(name),
         }
     }
 }

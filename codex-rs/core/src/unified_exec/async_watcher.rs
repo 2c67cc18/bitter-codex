@@ -199,7 +199,7 @@ pub(crate) async fn emit_exec_end_for_unified_exec(
         duration,
         timed_out: false,
     };
-    let event_ctx = ToolEventCtx::new(session_ref.as_ref(), turn_ref.as_ref(), &call_id, None);
+    let event_ctx = ToolEventCtx::new(session_ref.as_ref(), turn_ref.as_ref(), &call_id);
     let emitter = ToolEmitter::unified_exec(
         &command,
         cwd,
@@ -242,7 +242,7 @@ pub(crate) async fn emit_failed_exec_end_for_unified_exec(
         duration,
         timed_out: false,
     };
-    let event_ctx = ToolEventCtx::new(session_ref.as_ref(), turn_ref.as_ref(), &call_id, None);
+    let event_ctx = ToolEventCtx::new(session_ref.as_ref(), turn_ref.as_ref(), &call_id);
     let emitter = ToolEmitter::unified_exec(
         &command,
         cwd,

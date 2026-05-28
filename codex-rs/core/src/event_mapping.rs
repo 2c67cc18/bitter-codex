@@ -21,34 +21,13 @@ use uuid::Uuid;
 use crate::context::is_contextual_user_fragment;
 use crate::web_search::web_search_action_detail;
 
-const CONTEXTUAL_DEVELOPER_PREFIXES: &[&str] = &["<model_switch>"];
 
 pub(crate) fn is_contextual_user_message_content(message: &[ContentItem]) -> bool {
     message.iter().any(is_contextual_user_fragment)
 }
 
-pub(crate) fn is_contextual_dev_message_content(message: &[ContentItem]) -> bool {
-    message.iter().any(is_contextual_dev_fragment)
-}
 
-pub(crate) fn has_non_contextual_dev_message_content(message: &[ContentItem]) -> bool {
-    message
-        .iter()
-        .any(|content_item| !is_contextual_dev_fragment(content_item))
-}
 
-fn is_contextual_dev_fragment(content_item: &ContentItem) -> bool {
-    let ContentItem::InputText { text } = content_item else {
-        return false;
-    };
-
-    let trimmed = text.trim_start();
-    CONTEXTUAL_DEVELOPER_PREFIXES.iter().any(|prefix| {
-        trimmed
-            .get(..prefix.len())
-            .is_some_and(|candidate| candidate.eq_ignore_ascii_case(prefix))
-    })
-}
 
 fn parse_user_message(message: &[ContentItem]) -> Option<UserMessageItem> {
     if is_contextual_user_message_content(message) {

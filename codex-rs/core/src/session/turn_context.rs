@@ -80,7 +80,6 @@ pub struct TurnContext {
     pub(crate) developer_instructions: Option<String>,
     pub(crate) compact_prompt: Option<String>,
     pub(crate) shell_environment_policy: ShellEnvironmentPolicy,
-    pub(crate) available_models: Vec<ModelPreset>,
     pub features: ManagedFeatures,
     pub(crate) ghost_snapshot: GhostSnapshotConfig,
     pub(crate) final_output_json_schema: Option<Value>,
@@ -151,9 +150,6 @@ impl TurnContext {
         config.model_reasoning_effort = reasoning_effort;
 
         let features = self.features.clone();
-        let available_models = models_manager
-            .list_models(RefreshStrategy::OnlineIfUncached)
-            .await;
 
         Self {
             sub_id: self.sub_id.clone(),
@@ -178,7 +174,6 @@ impl TurnContext {
             developer_instructions: self.developer_instructions.clone(),
             compact_prompt: self.compact_prompt.clone(),
             shell_environment_policy: self.shell_environment_policy.clone(),
-            available_models,
             features,
             ghost_snapshot: self.ghost_snapshot.clone(),
             final_output_json_schema: self.final_output_json_schema.clone(),
@@ -262,7 +257,6 @@ impl Session {
         _main_execve_wrapper_exe: Option<&PathBuf>,
         per_turn_config: Config,
         model_info: ModelInfo,
-        models_manager: &SharedModelsManager,
         environments: ResolvedTurnEnvironments,
         cwd: AbsolutePathBuf,
         sub_id: String,
@@ -279,7 +273,6 @@ impl Session {
         let auth_manager_for_context = auth_manager.clone();
         let provider_for_context = create_model_provider(provider, auth_manager);
         let session_telemetry_for_context = session_telemetry;
-        let available_models = models_manager.try_list_models().unwrap_or_default();
         let mut per_turn_config = per_turn_config;
         per_turn_config.service_tier = get_service_tier(
             per_turn_config.service_tier,
@@ -314,7 +307,6 @@ impl Session {
             developer_instructions: session_configuration.developer_instructions.clone(),
             compact_prompt: session_configuration.compact_prompt.clone(),
             shell_environment_policy: per_turn_config.shell_environment_policy.clone(),
-            available_models,
             features: per_turn_config.features.clone(),
             ghost_snapshot: per_turn_config.ghost_snapshot.clone(),
             final_output_json_schema: None,
@@ -439,7 +431,6 @@ impl Session {
             self.services.main_execve_wrapper_exe.as_ref(),
             per_turn_config,
             model_info,
-            &self.services.models_manager,
             turn_environments,
             cwd,
             sub_id,
@@ -464,7 +455,7 @@ impl Session {
                     ),
                 }),
             )
-            .await;
+            .await
         }
     }
 

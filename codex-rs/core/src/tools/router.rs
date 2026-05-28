@@ -1,11 +1,9 @@
 use crate::function_tool::FunctionCallError;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
-use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
 use crate::tools::registry::AnyToolResult;
-use crate::tools::registry::ToolArgumentDiffConsumer;
 use crate::tools::registry::ToolRegistry;
 use crate::tools::spec_plan::build_tool_router;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
@@ -14,7 +12,6 @@ use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use tokio_util::sync::CancellationToken;
 use tracing::instrument;
 
 pub use crate::tools::context::ToolCallSource;
@@ -64,12 +61,6 @@ impl ToolRouter {
         self.registry.tool_exposure(name)
     }
 
-    pub(crate) fn create_diff_consumer(
-        &self,
-        tool_name: &ToolName,
-    ) -> Option<Box<dyn ToolArgumentDiffConsumer>> {
-        self.registry.create_diff_consumer(tool_name)
-    }
 
     pub fn tool_supports_parallel(&self, call: &ToolCall) -> bool {
         self.registry
@@ -117,19 +108,13 @@ impl ToolRouter {
         &self,
         session: Arc<Session>,
         turn: Arc<TurnContext>,
-        cancellation_token: CancellationToken,
-        tracker: SharedTurnDiffTracker,
         call: ToolCall,
-        source: ToolCallSource,
         terminal_outcome_reached: Arc<AtomicBool>,
     ) -> Result<AnyToolResult, FunctionCallError> {
         self.dispatch_tool_call_inner(
             session,
             turn,
-            cancellation_token,
-            tracker,
             call,
-            source,
             Some(terminal_outcome_reached),
         )
         .await
@@ -140,10 +125,7 @@ impl ToolRouter {
         &self,
         session: Arc<Session>,
         turn: Arc<TurnContext>,
-        cancellation_token: CancellationToken,
-        tracker: SharedTurnDiffTracker,
         call: ToolCall,
-        source: ToolCallSource,
         terminal_outcome_reached: Option<Arc<AtomicBool>>,
     ) -> Result<AnyToolResult, FunctionCallError> {
         let ToolCall {
@@ -155,11 +137,8 @@ impl ToolRouter {
         let invocation = ToolInvocation {
             session,
             turn,
-            cancellation_token,
-            tracker,
             call_id,
             tool_name,
-            source,
             payload,
         };
 

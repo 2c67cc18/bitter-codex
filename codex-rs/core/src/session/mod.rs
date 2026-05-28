@@ -19,7 +19,6 @@ use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_login::auth_env_telemetry::collect_auth_env_telemetry;
 use codex_login::default_client::originator;
-use codex_models_manager::manager::RefreshStrategy;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_otel::current_span_trace_id;
 use codex_otel::current_span_w3c_trace_context;
@@ -31,7 +30,6 @@ use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::openai_models::ModelInfo;
-use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::protocol::ItemCompletedEvent;
 use codex_protocol::protocol::ItemStartedEvent;
 use codex_protocol::protocol::RawResponseItemEvent;
@@ -1429,7 +1427,4 @@ impl Session {
         live_thread.local_rollout_path().await.map_err(Into::into)
     }
 
-    fn show_raw_agent_reasoning(&self) -> bool {
-        self.services.show_raw_agent_reasoning
-    }
 }

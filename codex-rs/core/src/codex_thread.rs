@@ -8,14 +8,11 @@ use codex_otel::SessionTelemetry;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
-use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::SessionConfiguredEvent;
-use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::TokenUsageInfo;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::protocol::W3cTraceContext;
@@ -42,7 +39,6 @@ pub struct ThreadConfigSnapshot {
     pub ephemeral: bool,
     pub reasoning_effort: Option<ReasoningEffort>,
     pub reasoning_summary: Option<ReasoningSummary>,
-    pub session_source: SessionSource,
 }
 
 #[derive(Clone, Default)]
@@ -57,7 +53,6 @@ pub struct CodexThreadSettingsOverrides {
 
 pub struct CodexThread {
     pub(crate) codex: Codex,
-    pub(crate) session_source: SessionSource,
     session_configured: SessionConfiguredEvent,
     rollout_path: Option<PathBuf>,
 }
@@ -67,11 +62,9 @@ impl CodexThread {
         codex: Codex,
         session_configured: SessionConfiguredEvent,
         rollout_path: Option<PathBuf>,
-        session_source: SessionSource,
     ) -> Self {
         Self {
             codex,
-            session_source,
             session_configured,
             rollout_path,
         }
@@ -173,34 +166,6 @@ impl CodexThread {
         self.codex.session.token_usage_info().await
     }
 
-    pub(crate) async fn inject_user_message_without_turn(&self, message: String) {
-        let message = ResponseItem::Message {
-            id: None,
-            role: "user".to_string(),
-            content: vec![ContentItem::InputText { text: message }],
-            phase: None,
-        };
-        let pending_item = match pending_message_input_item(&message) {
-            Ok(pending_item) => pending_item,
-            Err(err) => {
-                debug_assert!(false, "session-prefix message append should succeed: {err}");
-                return;
-            }
-        };
-        if self
-            .codex
-            .session
-            .inject_response_items(vec![pending_item])
-            .await
-            .is_err()
-        {
-            let turn_context = self.codex.session.new_default_turn().await;
-            self.codex
-                .session
-                .record_conversation_items(turn_context.as_ref(), &[message])
-                .await;
-        }
-    }
 
     #[cfg(test)]
     pub(crate) async fn append_message(&self, message: ResponseItem) -> CodexResult<String> {
@@ -328,20 +293,3 @@ impl CodexThread {
     }
 }
 
-fn pending_message_input_item(message: &ResponseItem) -> CodexResult<ResponseInputItem> {
-    match message {
-        ResponseItem::Message {
-            role,
-            content,
-            phase,
-            ..
-        } => Ok(ResponseInputItem::Message {
-            role: role.clone(),
-            content: content.clone(),
-            phase: phase.clone(),
-        }),
-        _ => Err(CodexErr::InvalidRequest(
-            "append_message only supports ResponseItem::Message".to_string(),
-        )),
-    }
-}

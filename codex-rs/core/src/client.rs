@@ -30,7 +30,6 @@ use codex_api::auth_header_telemetry;
 use codex_api::build_session_headers;
 use codex_api::create_text_param_for_request;
 use codex_api::response_create_client_metadata;
-use codex_app_server_protocol::AuthMode;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_login::RefreshTokenError;
@@ -73,8 +72,6 @@ use crate::client_common::Prompt;
 use crate::client_common::ResponseEvent;
 use crate::client_common::ResponseStream;
 use codex_api::map_api_error;
-use codex_login::auth_env_telemetry::AuthEnvTelemetry;
-use codex_login::auth_env_telemetry::collect_auth_env_telemetry;
 use codex_model_provider::SharedModelProvider;
 use codex_model_provider::create_model_provider;
 #[cfg(test)]
@@ -150,7 +147,6 @@ struct ModelClientState {
     window_generation: AtomicU64,
     installation_id: String,
     provider: SharedModelProvider,
-    auth_env_telemetry: AuthEnvTelemetry,
     session_source: SessionSource,
     model_verbosity: Option<VerbosityConfig>,
     enable_request_compression: bool,
@@ -239,12 +235,6 @@ impl ModelClient {
         include_timing_metrics: bool,
     ) -> Self {
         let model_provider = create_model_provider(provider_info, auth_manager);
-        let codex_api_key_env_enabled = model_provider
-            .auth_manager()
-            .as_ref()
-            .is_some_and(|manager| manager.codex_api_key_env_enabled());
-        let auth_env_telemetry =
-            collect_auth_env_telemetry(model_provider.info(), codex_api_key_env_enabled);
         Self {
             state: Arc::new(ModelClientState {
                 session_id,
@@ -252,7 +242,6 @@ impl ModelClient {
                 window_generation: AtomicU64::new(0),
                 installation_id,
                 provider: model_provider,
-                auth_env_telemetry,
                 session_source,
                 model_verbosity,
                 enable_request_compression,
@@ -347,12 +336,10 @@ impl ModelClient {
         let request_telemetry = Self::build_request_telemetry(
             session_telemetry,
             AuthRequestTelemetryContext::new(
-                client_setup.auth.as_ref().map(CodexAuth::auth_mode),
                 client_setup.api_auth.as_ref(),
                 PendingUnauthorizedRetry::default(),
             ),
             RequestRouteTelemetry::for_endpoint(RESPONSES_COMPACT_ENDPOINT),
-            self.state.auth_env_telemetry.clone(),
         );
         let request = self.build_responses_request(
             &client_setup.api_provider,
@@ -445,13 +432,11 @@ impl ModelClient {
         session_telemetry: &SessionTelemetry,
         auth_context: AuthRequestTelemetryContext,
         request_route_telemetry: RequestRouteTelemetry,
-        auth_env_telemetry: AuthEnvTelemetry,
     ) -> Arc<dyn RequestTelemetry> {
         let telemetry = Arc::new(ApiTelemetry::new(
             session_telemetry.clone(),
             auth_context,
             request_route_telemetry,
-            auth_env_telemetry,
         ));
         let request_telemetry: Arc<dyn RequestTelemetry> = telemetry;
         request_telemetry
@@ -573,7 +558,6 @@ impl ModelClient {
             session_telemetry,
             auth_context,
             request_route_telemetry,
-            self.state.auth_env_telemetry.clone(),
         );
         let websocket_connect_timeout = self.state.provider.info().websocket_connect_timeout();
         let start = Instant::now();
@@ -783,7 +767,6 @@ impl ModelClientSession {
             ))
         })?;
         let auth_context = AuthRequestTelemetryContext::new(
-            client_setup.auth.as_ref().map(CodexAuth::auth_mode),
             client_setup.api_auth.as_ref(),
             PendingUnauthorizedRetry::default(),
         );
@@ -921,7 +904,6 @@ impl ModelClientSession {
             let client_setup = self.client.current_client_setup().await?;
             let transport = ReqwestTransport::new(build_reqwest_client());
             let request_auth_context = AuthRequestTelemetryContext::new(
-                client_setup.auth.as_ref().map(CodexAuth::auth_mode),
                 client_setup.api_auth.as_ref(),
                 pending_retry,
             );
@@ -929,7 +911,6 @@ impl ModelClientSession {
                 session_telemetry,
                 request_auth_context,
                 RequestRouteTelemetry::for_endpoint(RESPONSES_ENDPOINT),
-                self.client.state.auth_env_telemetry.clone(),
             );
             let compression = self.responses_request_compression(client_setup.auth.as_ref());
             let mut options = self
@@ -1022,7 +1003,6 @@ impl ModelClientSession {
         loop {
             let client_setup = self.client.current_client_setup().await?;
             let request_auth_context = AuthRequestTelemetryContext::new(
-                client_setup.auth.as_ref().map(CodexAuth::auth_mode),
                 client_setup.api_auth.as_ref(),
                 pending_retry,
             );
@@ -1129,13 +1109,11 @@ impl ModelClientSession {
         session_telemetry: &SessionTelemetry,
         auth_context: AuthRequestTelemetryContext,
         request_route_telemetry: RequestRouteTelemetry,
-        auth_env_telemetry: AuthEnvTelemetry,
     ) -> (Arc<dyn RequestTelemetry>, Arc<dyn SseTelemetry>) {
         let telemetry = Arc::new(ApiTelemetry::new(
             session_telemetry.clone(),
             auth_context,
             request_route_telemetry,
-            auth_env_telemetry,
         ));
         let request_telemetry: Arc<dyn RequestTelemetry> = telemetry.clone();
         let sse_telemetry: Arc<dyn SseTelemetry> = telemetry;
@@ -1146,13 +1124,11 @@ impl ModelClientSession {
         session_telemetry: &SessionTelemetry,
         auth_context: AuthRequestTelemetryContext,
         request_route_telemetry: RequestRouteTelemetry,
-        auth_env_telemetry: AuthEnvTelemetry,
     ) -> Arc<dyn WebsocketTelemetry> {
         let telemetry = Arc::new(ApiTelemetry::new(
             session_telemetry.clone(),
             auth_context,
             request_route_telemetry,
-            auth_env_telemetry,
         ));
         let websocket_telemetry: Arc<dyn WebsocketTelemetry> = telemetry;
         websocket_telemetry
@@ -1487,7 +1463,6 @@ impl PendingUnauthorizedRetry {
 
 #[derive(Clone, Copy, Debug, Default)]
 struct AuthRequestTelemetryContext {
-    auth_mode: Option<&'static str>,
     auth_header_attached: bool,
     auth_header_name: Option<&'static str>,
     retry_after_unauthorized: bool,
@@ -1497,16 +1472,11 @@ struct AuthRequestTelemetryContext {
 
 impl AuthRequestTelemetryContext {
     fn new(
-        auth_mode: Option<AuthMode>,
         api_auth: &dyn AuthProvider,
         retry: PendingUnauthorizedRetry,
     ) -> Self {
         let auth_telemetry = auth_header_telemetry(api_auth);
         Self {
-            auth_mode: auth_mode.map(|mode| match mode {
-                AuthMode::ApiKey => "ApiKey",
-                AuthMode::Chatgpt | AuthMode::ChatgptAuthTokens => "Chatgpt",
-            }),
             auth_header_attached: auth_telemetry.attached,
             auth_header_name: auth_telemetry.name,
             retry_after_unauthorized: retry.retry_after_unauthorized,
@@ -1602,7 +1572,6 @@ struct ApiTelemetry {
     session_telemetry: SessionTelemetry,
     auth_context: AuthRequestTelemetryContext,
     request_route_telemetry: RequestRouteTelemetry,
-    auth_env_telemetry: AuthEnvTelemetry,
 }
 
 impl ApiTelemetry {
@@ -1610,13 +1579,11 @@ impl ApiTelemetry {
         session_telemetry: SessionTelemetry,
         auth_context: AuthRequestTelemetryContext,
         request_route_telemetry: RequestRouteTelemetry,
-        auth_env_telemetry: AuthEnvTelemetry,
     ) -> Self {
         Self {
             session_telemetry,
             auth_context,
             request_route_telemetry,
-            auth_env_telemetry,
         }
     }
 }
