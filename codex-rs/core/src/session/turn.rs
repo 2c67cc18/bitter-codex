@@ -18,7 +18,6 @@ use crate::compact_remote::run_inline_remote_auto_compact_task;
 use crate::compact_remote_v2::run_inline_remote_auto_compact_task as run_inline_remote_auto_compact_task_v2;
 use crate::context::ContextualUserFragment;
 use crate::feedback_tags;
-use crate::goals::GoalRuntimeEvent;
 use crate::session::PreviousTurnSettings;
 use crate::session::TurnInput;
 use crate::session::session::Session;
@@ -112,15 +111,6 @@ pub(crate) async fn run_turn(
     // diffs/full reinjection + user input) and trigger compaction preemptively
     // when they would push the thread over the compaction threshold.
     if let Err(err) = run_pre_sampling_compact(&sess, &turn_context, &mut client_session).await {
-        if err.to_codex_protocol_error() == CodexErrorInfo::UsageLimitExceeded
-            && let Err(err) = sess
-                .goal_runtime_apply(GoalRuntimeEvent::UsageLimitReached {
-                    turn_context: turn_context.as_ref(),
-                })
-                .await
-        {
-            warn!("failed to usage-limit active goal after usage-limit error: {err}");
-        }
         error!("Failed to run pre-sampling compact");
         return None;
     }
@@ -241,17 +231,6 @@ pub(crate) async fn run_turn(
                     )
                     .await
                     {
-                        if err.to_codex_protocol_error() == CodexErrorInfo::UsageLimitExceeded
-                            && let Err(err) = sess
-                                .goal_runtime_apply(GoalRuntimeEvent::UsageLimitReached {
-                                    turn_context: turn_context.as_ref(),
-                                })
-                                .await
-                        {
-                            warn!(
-                                "failed to usage-limit active goal after usage-limit error: {err}"
-                            );
-                        }
                         return None;
                     }
                     can_drain_pending_input = !model_needs_follow_up;
@@ -289,15 +268,6 @@ pub(crate) async fn run_turn(
             }
             Err(e) => {
                 info!("Turn error: {e:#}");
-                if e.to_codex_protocol_error() == CodexErrorInfo::UsageLimitExceeded
-                    && let Err(err) = sess
-                        .goal_runtime_apply(GoalRuntimeEvent::UsageLimitReached {
-                            turn_context: turn_context.as_ref(),
-                        })
-                        .await
-                {
-                    warn!("failed to usage-limit active goal after usage-limit error: {err}");
-                }
                 let event = EventMsg::Error(e.to_error_event(/*message_prefix*/ None));
                 sess.send_event(&turn_context, event).await;
                 // let the user continue the conversation
