@@ -2,7 +2,7 @@ use crate::function_tool::FunctionCallError;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
 use crate::tools::context::SharedTurnDiffTracker;
-use crate::tools::sandboxing::ToolError;
+use crate::tools::runtimes::ToolError;
 use crate::turn_timing::now_unix_timestamp_ms;
 use codex_apply_patch::AppliedPatchDelta;
 use codex_protocol::error::CodexErr;

@@ -1,15 +1,14 @@
 /*
 Module: runtimes
 
-Concrete ToolRuntime implementations for specific tools. Each runtime stays
-small and focused and reuses the orchestrator for approvals + sandbox + retry.
+Concrete runtime helpers for retained tools. Each runtime stays small and
+focused while deleted sandbox orchestration surfaces are trimmed away.
 */
 use crate::exec_env::CODEX_THREAD_ID_ENV_VAR;
 use crate::path_utils;
 use crate::sandboxing::SandboxPermissions;
 use crate::shell::Shell;
 use crate::shell::ShellType;
-use crate::tools::sandboxing::ToolError;
 #[cfg(target_os = "macos")]
 use codex_network_proxy::CODEX_PROXY_GIT_SSH_COMMAND_MARKER;
 use codex_network_proxy::PROXY_ACTIVE_ENV_KEY;
@@ -17,6 +16,7 @@ use codex_network_proxy::PROXY_ENV_KEYS;
 #[cfg(target_os = "macos")]
 use codex_network_proxy::PROXY_GIT_SSH_COMMAND_ENV_KEY;
 use codex_protocol::config_types::WindowsSandboxLevel;
+use codex_protocol::error::CodexErr;
 use codex_protocol::models::AdditionalPermissionProfile;
 use codex_sandboxing::SandboxCommand;
 use codex_sandboxing::SandboxType;
@@ -24,6 +24,12 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use std::collections::HashMap;
 
 pub(crate) mod unified_exec;
+
+#[derive(Debug)]
+pub(crate) enum ToolError {
+    Codex(CodexErr),
+    Rejected(String),
+}
 
 /// Shared helper to construct sandbox transform inputs from a tokenized command line.
 /// Validates that at least a program is present.
