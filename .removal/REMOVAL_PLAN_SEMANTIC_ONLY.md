@@ -33,6 +33,18 @@ done as blind deletion or line-range cleanup.
   sandboxing, execpolicy, network-proxy, plugin, windows-sandbox, and rollout
   trace crates. Treat this as the next independent semantic slice with a tight
   core-only contract; do not mix it with app-server protocol work.
+- 2026-05-28 stopped worker
+  `semantic-root-20260528-core-compile/core-compile` was rejected as a merge
+  candidate. Evidence: started `2026-05-28T00:19:26Z`, stopped
+  `2026-05-28T00:54:01Z` after repeated auto-continuation with goal status still
+  active; final branch `semantic/core-compile` contained 9 commits touching 30
+  core files with 1,362 deletions, including session, tools, tasks, client,
+  config, context, and tests; the worker-reported focused check still failed at
+  373 `codex-core` lib errors. State left in clean worktree
+  `.worktrees/semantic-core-compile`; do not merge wholesale. Salvage only after
+  manual review or rerun narrower slices with file ownership such as
+  `core/src/config/**`, `core/src/session/{turn,handlers}.rs`, or
+  `core/src/tools/**`.
 
 ## Analytics removal follow-through
 
