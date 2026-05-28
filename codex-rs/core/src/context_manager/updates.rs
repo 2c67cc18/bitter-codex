@@ -2,7 +2,6 @@ use crate::context::CollaborationModeInstructions;
 use crate::context::ContextualUserFragment;
 use crate::context::EnvironmentContext;
 use crate::context::ModelSwitchInstructions;
-use crate::context::PermissionsInstructions;
 use crate::context::PersonalitySpecInstructions;
 use crate::context::RealtimeEndInstructions;
 use crate::context::RealtimeStartInstructions;
@@ -10,8 +9,6 @@ use crate::context::RealtimeStartWithInstructions;
 use crate::session::PreviousTurnSettings;
 use crate::session::turn_context::TurnContext;
 use crate::shell::Shell;
-use codex_execpolicy::Policy;
-use codex_features::Feature;
 use codex_protocol::config_types::Personality;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
@@ -42,7 +39,7 @@ fn build_environment_update_item(
 fn build_permissions_update_item(
     previous: Option<&TurnContextItem>,
     next: &TurnContext,
-    exec_policy: &Policy,
+    next_permissions_instructions: Option<&str>,
 ) -> Option<String> {
     if !next.config.include_permissions_instructions {
         return None;
@@ -55,19 +52,7 @@ fn build_permissions_update_item(
         return None;
     }
 
-    Some(
-        PermissionsInstructions::from_permission_profile(
-            &next.permission_profile,
-            next.approval_policy.value(),
-            next.config.approvals_reviewer,
-            exec_policy,
-            #[allow(deprecated)]
-            &next.cwd,
-            next.features.enabled(Feature::ExecPermissionApprovals),
-            next.features.enabled(Feature::RequestPermissionsTool),
-        )
-        .render(),
-    )
+    next_permissions_instructions.map(ToOwned::to_owned)
 }
 
 fn build_collaboration_mode_update_item(
@@ -211,7 +196,7 @@ pub(crate) fn build_settings_update_items(
     previous_turn_settings: Option<&PreviousTurnSettings>,
     next: &TurnContext,
     shell: &Shell,
-    exec_policy: &Policy,
+    next_permissions_instructions: Option<&str>,
     personality_feature_enabled: bool,
 ) -> Vec<ResponseItem> {
     // TODO(ccunningham): build_settings_update_items still does not cover every
@@ -223,7 +208,7 @@ pub(crate) fn build_settings_update_items(
         // Keep model-switch instructions first so model-specific guidance is read before
         // any other context diffs on this turn.
         build_model_instructions_update_item(previous_turn_settings, next),
-        build_permissions_update_item(previous, next, exec_policy),
+        build_permissions_update_item(previous, next, next_permissions_instructions),
         build_collaboration_mode_update_item(previous, next),
         build_realtime_update_item(previous, previous_turn_settings, next),
         build_personality_update_item(previous, next, personality_feature_enabled),
