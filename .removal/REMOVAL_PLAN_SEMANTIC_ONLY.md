@@ -353,6 +353,22 @@ done as blind deletion or line-range cleanup.
   unresolved core surfaces, including pre-existing missing context exports,
   `guardian`, `sandboxing`, `exec_policy`, `codex_execpolicy`,
   `codex_network_proxy`, MCP, connectors, and related deleted modules.
+- 2026-05-28 rejected session managed-network proxy trim
+  `semantic-root-20260528-session-managed-network-trim/session-managed-network-trim`
+  as incomplete. Evidence: branch `semantic/session-managed-network-trim` commit
+  `65dff88a1` touched only `core/src/session/mod.rs` and removed direct
+  `codex_execpolicy`/`codex_network_proxy` references from that parent file,
+  but left `core/src/session/session.rs` call sites using the old
+  `start_managed_network_proxy` signature and relying on parent-imported
+  `build_blocked_request_observer`/`build_network_policy_decider` helpers. The
+  worker's focused `cargo-modal --repo codex-rs --dirty check -p codex-core
+  --no-default-features --lib` therefore reported new owned-surface errors for
+  missing `build_blocked_request_observer` and `build_network_policy_decider`
+  in `session/session.rs`, in addition to broader pre-existing core failures.
+  Do not merge this branch as-is. Retry as a complete session-owned
+  managed-network removal slice that owns both `core/src/session/mod.rs` and
+  `core/src/session/session.rs`, or keep the parent imports until the child
+  startup path is removed in the same reviewed patch.
 
 ## Analytics removal follow-through
 
