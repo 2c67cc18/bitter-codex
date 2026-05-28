@@ -2,14 +2,13 @@ use crate::SkillsManager;
 use crate::codex_thread::CodexThread;
 use crate::config::Config;
 use crate::config::ThreadStoreConfig;
-use crate::environment_selection::default_thread_environment_selections;
-use crate::environment_selection::resolve_environment_selections;
 use crate::mcp::McpManager;
 use crate::rollout::truncation;
 use crate::session::Codex;
 use crate::session::CodexSpawnArgs;
 use crate::session::CodexSpawnOk;
 use crate::session::INITIAL_SUBMIT_ID;
+use crate::session::turn_context::ResolvedTurnEnvironments;
 use crate::shell_snapshot::ShellSnapshot;
 use crate::tasks::InterruptedTurnHistoryMarker;
 use crate::tasks::interrupted_turn_history_marker;
@@ -400,17 +399,16 @@ impl ThreadManager {
 
     pub fn default_environment_selections(
         &self,
-        cwd: &AbsolutePathBuf,
+        _cwd: &AbsolutePathBuf,
     ) -> Vec<TurnEnvironmentSelection> {
-        default_thread_environment_selections(self.state.environment_manager.as_ref(), cwd)
+        Vec::new()
     }
 
     pub fn validate_environment_selections(
         &self,
-        environments: &[TurnEnvironmentSelection],
+        _environments: &[TurnEnvironmentSelection],
     ) -> CodexResult<()> {
-        resolve_environment_selections(self.state.environment_manager.as_ref(), environments)
-            .map(|_| ())
+        Ok(())
     }
 
     pub fn get_models_manager(&self) -> SharedModelsManager {
@@ -529,10 +527,7 @@ impl ThreadManager {
         dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
         persist_extended_history: bool,
     ) -> CodexResult<NewThread> {
-        let environments = default_thread_environment_selections(
-            self.state.environment_manager.as_ref(),
-            &config.cwd,
-        );
+        let environments = Vec::new();
         Box::pin(self.start_thread_with_options(StartThreadOptions {
             config,
             initial_history: InitialHistory::New,
@@ -632,10 +627,7 @@ impl ThreadManager {
         persist_extended_history: bool,
         parent_trace: Option<W3cTraceContext>,
     ) -> CodexResult<NewThread> {
-        let environments = default_thread_environment_selections(
-            self.state.environment_manager.as_ref(),
-            &config.cwd,
-        );
+        let environments = Vec::new();
         let thread_source = initial_history.get_resumed_thread_source();
         Box::pin(self.state.spawn_thread(
             config,
@@ -658,10 +650,7 @@ impl ThreadManager {
         config: Config,
         user_shell_override: crate::shell::Shell,
     ) -> CodexResult<NewThread> {
-        let environments = default_thread_environment_selections(
-            self.state.environment_manager.as_ref(),
-            &config.cwd,
-        );
+        let environments = Vec::new();
         Box::pin(self.state.spawn_thread(
             config,
             InitialHistory::New,
@@ -686,10 +675,7 @@ impl ThreadManager {
         user_shell_override: crate::shell::Shell,
     ) -> CodexResult<NewThread> {
         let initial_history = self.initial_history_from_rollout_path(rollout_path).await?;
-        let environments = default_thread_environment_selections(
-            self.state.environment_manager.as_ref(),
-            &config.cwd,
-        );
+        let environments = Vec::new();
         let thread_source = initial_history.get_resumed_thread_source();
         Box::pin(self.state.spawn_thread(
             config,
@@ -847,10 +833,7 @@ impl ThreadManager {
     ) -> CodexResult<NewThread> {
         let interrupted_marker = InterruptedTurnHistoryMarker::from_config(&config);
         let history = fork_history_from_snapshot(snapshot, history, interrupted_marker);
-        let environments = default_thread_environment_selections(
-            self.state.environment_manager.as_ref(),
-            &config.cwd,
-        );
+        let environments = Vec::new();
         Box::pin(self.state.spawn_thread(
             config,
             history,
@@ -1008,9 +991,7 @@ impl ThreadManagerState {
         inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
         environments: Option<Vec<TurnEnvironmentSelection>>,
     ) -> CodexResult<NewThread> {
-        let environments = environments.unwrap_or_else(|| {
-            default_thread_environment_selections(self.environment_manager.as_ref(), &config.cwd)
-        });
+        let environments = environments.unwrap_or_default();
         Box::pin(self.spawn_thread_with_source(
             config,
             InitialHistory::New,
@@ -1042,8 +1023,7 @@ impl ThreadManagerState {
             inherited_shell_snapshot,
             inherited_exec_policy,
         } = options;
-        let environments =
-            default_thread_environment_selections(self.environment_manager.as_ref(), &config.cwd);
+        let environments = Vec::new();
         let thread_source = initial_history.get_resumed_thread_source();
         Box::pin(self.spawn_thread_with_source(
             config,
@@ -1077,9 +1057,7 @@ impl ThreadManagerState {
         inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
         environments: Option<Vec<TurnEnvironmentSelection>>,
     ) -> CodexResult<NewThread> {
-        let environments = environments.unwrap_or_else(|| {
-            default_thread_environment_selections(self.environment_manager.as_ref(), &config.cwd)
-        });
+        let environments = environments.unwrap_or_default();
         Box::pin(self.spawn_thread_with_source(
             config,
             initial_history,
@@ -1174,8 +1152,7 @@ impl ThreadManagerState {
                 threads.remove(&resumed.conversation_id);
             }
         }
-        let environment_selections =
-            resolve_environment_selections(self.environment_manager.as_ref(), &environments)?;
+        let environment_selections = ResolvedTurnEnvironments::from_selections(environments);
         // Fresh thread-spawn children inherit their parent's rollout trace
         // context. Other starts use the disabled/default context so this file
         // does not depend on the removed rollout-trace crate directly.
