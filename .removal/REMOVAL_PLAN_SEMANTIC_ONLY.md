@@ -1562,3 +1562,29 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   exec-policy/network approval/sandboxing, MCP/session state service, deleted
   exec-server/plugin/rollout-trace crates, managed network proxy, and legacy
   tests.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/core-skill-reexports-trim` as
+  merge commit `Merge skill reexports trim`. The slice corrected stale
+  `codex-core` root re-exports to point at the retained inert
+  `skills::injection` module and adapted turn handling to collect explicit
+  skill mentions per `UserInput` item without restoring removed skill/plugin
+  runtime behavior. The worker reached terminal `completed` normally through
+  `bitter-loop wait`, left a clean branch at `ebb375a45`, `git diff --check`
+  passed, and its focused `cargo-modal --dirty --repo codex-rs check -p
+  codex-core` run removed the in-scope skill re-export/type errors while still
+  failing on broader exec-policy, guardian, MCP, exec-server, plugin, network
+  proxy, and session-runtime cleanup.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/memory-citations-trim` as
+  merge commit `Merge memory citations trim`. The slice removed direct
+  `codex_memories_read` dependencies from retained `codex-core` config and
+  stream-event code: config now keeps only the local `codex_home/memories`
+  writable-directory boundary, and stream processing strips hidden citation
+  markup without parsing deleted memory-citation formats or recording stage-1
+  memory usage through removed helpers. The worker reached terminal
+  `completed` normally through `bitter-loop wait`, left a clean branch at
+  `656aa194`, `git diff --check` passed, and its focused `cargo-modal --dirty
+  --repo codex-rs check -p codex-core` run no longer reported
+  `codex_memories_read` errors. Remaining failures stayed in broader
+  exec-policy, guardian, MCP, app-server protocol MCP elicitation,
+  exec-server/plugin, network proxy, and session-runtime cleanup.
