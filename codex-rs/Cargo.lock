@@ -1317,18 +1317,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "codex-debug-client"
-version = "0.134.0"
-dependencies = [
- "anyhow",
- "clap",
- "codex-app-server-protocol",
- "pretty_assertions",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "codex-exec"
 version = "0.134.0"
 dependencies = [
@@ -1730,7 +1718,6 @@ name = "codex-tools"
 version = "0.134.0"
 dependencies = [
  "async-trait",
- "codex-app-server-protocol",
  "codex-features",
  "codex-protocol",
  "codex-utils-absolute-path",
@@ -9270,8 +9257,3 @@ dependencies = [
  "quote",
  "syn",
 ]
-
-[[patch.unused]]
-name = "crossterm"
-version = "0.28.1"
-source = "git+https://github.com/nornagon/crossterm?rev=87db8bfa6dc99427fd3b071681b07fc31c6ce995#87db8bfa6dc99427fd3b071681b07fc31c6ce995"
