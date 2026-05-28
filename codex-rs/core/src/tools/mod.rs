@@ -33,6 +33,7 @@ pub(crate) fn flat_tool_name(tool_name: &ToolName) -> Cow<'_, str> {
         None => Cow::Borrowed(tool_name.name.as_str()),
     }
 }
+
 pub fn format_exec_output_for_model(
     exec_output: &ExecToolCallOutput,
     truncation_policy: TruncationPolicy,

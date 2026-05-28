@@ -242,8 +242,6 @@ pub(crate) struct CodexSpawnArgs {
 
 pub(crate) const INITIAL_SUBMIT_ID: &str = "";
 pub(crate) const SUBMISSION_CHANNEL_CAPACITY: usize = 512;
-const CYBER_VERIFY_URL: &str = "https://chatgpt.com/cyber";
-const CYBER_SAFETY_URL: &str = "https://developers.openai.com/codex/concepts/cyber-safety";
 
 impl Codex {
     pub(crate) async fn spawn(args: CodexSpawnArgs) -> CodexResult<CodexSpawnOk> {
@@ -485,10 +483,6 @@ fn get_service_tier(
         service_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE
             || model_info.supports_service_tier(service_tier)
     })
-}
-#[cfg(test)]
-pub(crate) fn completed_session_loop_termination() -> SessionLoopTermination {
-    futures::future::ready(()).boxed().shared()
 }
 
 pub(crate) fn session_loop_termination_from_handle(
@@ -1438,8 +1432,4 @@ impl Session {
     fn show_raw_agent_reasoning(&self) -> bool {
         self.services.show_raw_agent_reasoning
     }
-}
-
-fn normalize_host(host: &str) -> String {
-    host.trim().trim_end_matches('.').to_ascii_lowercase()
 }

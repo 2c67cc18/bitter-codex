@@ -298,18 +298,6 @@ pub enum TrustLevel {
     Untrusted,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, Display)]
-#[serde(rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
-pub enum AltScreenMode {
-    #[default]
-    Auto,
-
-    Always,
-
-    Never,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

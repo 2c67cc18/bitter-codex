@@ -99,9 +99,6 @@ const RESPONSES_ENDPOINT: &str = "/responses";
 const RESPONSES_COMPACT_ENDPOINT: &str = "/responses/compact";
 
 const COMPACT_REQUEST_TIMEOUT_IDLE_MULTIPLIER: u32 = 4;
-#[cfg(test)]
-pub(crate) const WEBSOCKET_CONNECT_TIMEOUT: Duration =
-    Duration::from_millis(DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS);
 
 #[derive(Clone, Copy, Debug, Default)]
 struct InferenceTraceAttempt;

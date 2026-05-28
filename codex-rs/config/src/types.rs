@@ -1,4 +1,3 @@
-pub use codex_protocol::config_types::AltScreenMode;
 use codex_protocol::config_types::EnvironmentVariablePattern;
 pub use codex_protocol::config_types::ServiceTier;
 use codex_protocol::config_types::ShellEnvironmentPolicy;
@@ -13,33 +12,6 @@ use serde::Deserialize;
 use serde::Serialize;
 
 pub const DEFAULT_OTEL_ENVIRONMENT: &str = "dev";
-
-const fn default_enabled() -> bool {
-    true
-}
-
-#[derive(Serialize, Deserialize, Debug, Default, Copy, Clone, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum SessionPickerViewMode {
-    Comfortable,
-    #[default]
-    Dense,
-}
-
-impl SessionPickerViewMode {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Comfortable => "comfortable",
-            Self::Dense => "dense",
-        }
-    }
-}
-
-impl fmt::Display for SessionPickerViewMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
 
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -190,19 +162,6 @@ impl Default for OtelConfig {
     }
 }
 
-#[derive(Serialize, Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(untagged)]
-pub enum Notifications {
-    Enabled(bool),
-    Custom(Vec<String>),
-}
-
-impl Default for Notifications {
-    fn default() -> Self {
-        Self::Enabled(true)
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum NotificationMethod {
@@ -220,99 +179,6 @@ impl fmt::Display for NotificationMethod {
             NotificationMethod::Bel => write!(f, "bel"),
         }
     }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum NotificationCondition {
-    #[default]
-    Unfocused,
-
-    Always,
-}
-
-impl fmt::Display for NotificationCondition {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            NotificationCondition::Unfocused => write!(f, "unfocused"),
-            NotificationCondition::Always => write!(f, "always"),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[serde(rename_all = "kebab-case")]
-pub enum TuiPetAnchor {
-    #[default]
-    Composer,
-    ScreenBottom,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
-pub struct TuiNotificationSettings {
-    #[serde(default, rename = "notifications")]
-    pub notifications: Notifications,
-
-    #[serde(default, rename = "notification_condition")]
-    pub condition: NotificationCondition,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
-pub struct ModelAvailabilityNuxConfig {
-    #[serde(default, flatten)]
-    pub shown_count: HashMap<String, u32>,
-}
-
-pub const DEFAULT_TERMINAL_RESIZE_REFLOW_FALLBACK_MAX_ROWS: usize = 1_000;
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
-pub struct Tui {
-    #[serde(default, flatten)]
-    pub notification_settings: TuiNotificationSettings,
-
-    #[serde(default = "default_true")]
-    pub animations: bool,
-
-    #[serde(default = "default_true")]
-    pub show_tooltips: bool,
-
-    #[serde(default)]
-    pub vim_mode_default: bool,
-
-    #[serde(default)]
-    pub raw_output_mode: bool,
-
-    #[serde(default)]
-    pub alternate_screen: AltScreenMode,
-
-    #[serde(default)]
-    pub status_line: Option<Vec<String>>,
-
-    #[serde(default = "default_true")]
-    pub status_line_use_colors: bool,
-
-    #[serde(default)]
-    pub terminal_title: Option<Vec<String>>,
-
-    #[serde(default)]
-    pub theme: Option<String>,
-
-    #[serde(default)]
-    pub pet: Option<String>,
-
-    #[serde(default)]
-    pub pet_anchor: TuiPetAnchor,
-
-    #[serde(default)]
-    pub session_picker_view: Option<SessionPickerViewMode>,
-
-    #[serde(default)]
-    pub model_availability_nux: ModelAvailabilityNuxConfig,
-
-}
-
-const fn default_true() -> bool {
-    true
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]

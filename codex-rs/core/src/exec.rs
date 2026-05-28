@@ -32,7 +32,6 @@ use codex_utils_pty::process_group::kill_child_process_group;
 
 pub const DEFAULT_EXEC_COMMAND_TIMEOUT_MS: u64 = 10_000;
 
-const SIGKILL_CODE: i32 = 9;
 const TIMEOUT_CODE: i32 = 64;
 const EXIT_CODE_SIGNAL_BASE: i32 = 128;
 const EXEC_TIMEOUT_EXIT_CODE: i32 = 124;
@@ -249,35 +248,6 @@ pub fn build_exec_request(params: ExecParams) -> Result<ExecRequest> {
     })
 }
 
-pub(crate) async fn execute_exec_request(
-    exec_request: ExecRequest,
-    stdout_stream: Option<StdoutStream>,
-    after_spawn: Option<Box<dyn FnOnce() + Send>>,
-) -> Result<ExecToolCallOutput> {
-    let ExecRequest {
-        command,
-        cwd,
-        env,
-        expiration,
-        capture_policy,
-        arg0,
-    } = exec_request;
-
-    let params = ExecParams {
-        command,
-        cwd,
-        expiration,
-        capture_policy,
-        env,
-        justification: None,
-        arg0,
-    };
-
-    let start = Instant::now();
-    let raw_output_result = exec(params, stdout_stream, after_spawn).await;
-    let duration = start.elapsed();
-    finalize_exec_result(raw_output_result, duration)
-}
 
 async fn exec(
     params: ExecParams,

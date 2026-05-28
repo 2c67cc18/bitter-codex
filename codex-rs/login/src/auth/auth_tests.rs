@@ -14,11 +14,6 @@ use serde::Serialize;
 use serde_json::json;
 use std::sync::Arc;
 use tempfile::tempdir;
-use wiremock::Mock;
-use wiremock::MockServer;
-use wiremock::ResponseTemplate;
-use wiremock::matchers::method;
-use wiremock::matchers::path;
 
 const WORKSPACE_ID_ALLOWED: &str = "123e4567-e89b-42d3-a456-426614174000";
 const WORKSPACE_ID_SECOND_ALLOWED: &str = "123e4567-e89b-42d3-a456-426614174001";
@@ -373,13 +368,6 @@ impl EnvVarGuard {
         Self { key, original }
     }
 
-    fn remove(key: &'static str) -> Self {
-        let original = env::var_os(key);
-        unsafe {
-            env::remove_var(key);
-        }
-        Self { key, original }
-    }
 }
 
 #[cfg(test)]

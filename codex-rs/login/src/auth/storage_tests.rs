@@ -184,13 +184,6 @@ fn auth_with_prefix(prefix: &str) -> AuthDotJson {
     }
 }
 
-fn jwt_with_payload(payload: serde_json::Value) -> String {
-    let encode = |bytes: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
-    let header_b64 = encode(br#"{"alg":"EdDSA","typ":"JWT"}"#);
-    let payload_b64 = encode(&serde_json::to_vec(&payload).expect("payload should serialize"));
-    let signature_b64 = encode(b"sig");
-    format!("{header_b64}.{payload_b64}.{signature_b64}")
-}
 
 #[test]
 fn keyring_auth_storage_load_returns_deserialized_auth() -> anyhow::Result<()> {

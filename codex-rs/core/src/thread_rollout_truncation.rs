@@ -34,17 +34,6 @@ pub(crate) fn user_message_positions_in_rollout(items: &[RolloutItem]) -> Vec<us
     user_positions
 }
 
-pub(crate) fn fork_turn_positions_in_rollout(items: &[RolloutItem]) -> Vec<usize> {
-    let mut fork_turn_positions = Vec::new();
-    for (idx, item) in items.iter().enumerate() {
-        if let RolloutItem::ResponseItem(item) = item
-            && is_real_user_message_boundary(item)
-        {
-            fork_turn_positions.push(idx);
-        }
-    }
-    fork_turn_positions
-}
 
 pub(crate) fn truncate_rollout_before_nth_user_message_from_start(
     items: &[RolloutItem],
@@ -62,28 +51,4 @@ pub(crate) fn truncate_rollout_before_nth_user_message_from_start(
 
     let cut_idx = user_positions[n_from_start];
     items[..cut_idx].to_vec()
-}
-
-pub(crate) fn truncate_rollout_to_last_n_fork_turns(
-    items: &[RolloutItem],
-    n_from_end: usize,
-) -> Vec<RolloutItem> {
-    if n_from_end == 0 {
-        return Vec::new();
-    }
-
-    let fork_turn_positions = fork_turn_positions_in_rollout(items);
-    if fork_turn_positions.len() <= n_from_end {
-        return items.to_vec();
-    }
-
-    let keep_idx = fork_turn_positions[fork_turn_positions.len() - n_from_end];
-    items[keep_idx..].to_vec()
-}
-
-fn is_real_user_message_boundary(item: &ResponseItem) -> bool {
-    matches!(
-        event_mapping::parse_turn_item(item),
-        Some(TurnItem::UserMessage(_))
-    )
 }

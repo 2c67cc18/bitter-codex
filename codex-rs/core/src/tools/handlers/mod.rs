@@ -7,7 +7,6 @@ pub(crate) mod view_image_spec;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::AbsolutePathBufGuard;
 use serde::Deserialize;
-use serde_json::Value;
 
 use crate::function_tool::FunctionCallError;
 pub use dynamic::DynamicToolHandler;
@@ -34,16 +33,4 @@ where
 {
     let _guard = AbsolutePathBufGuard::new(base_path);
     parse_arguments(arguments)
-}
-
-fn resolve_workdir_base_path(
-    arguments: &str,
-    default_cwd: &AbsolutePathBuf,
-) -> Result<AbsolutePathBuf, FunctionCallError> {
-    let arguments: Value = parse_arguments(arguments)?;
-    Ok(arguments
-        .get("workdir")
-        .and_then(Value::as_str)
-        .filter(|workdir| !workdir.is_empty())
-        .map_or_else(|| default_cwd.clone(), |workdir| default_cwd.join(workdir)))
 }

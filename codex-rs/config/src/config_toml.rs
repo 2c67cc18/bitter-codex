@@ -6,7 +6,6 @@ use crate::types::History;
 use crate::types::Notice;
 use crate::types::OtelConfigToml;
 use crate::types::ShellEnvironmentPolicyToml;
-use crate::types::Tui;
 use crate::types::UriBasedFileOpener;
 use codex_features::FeaturesToml;
 use codex_model_provider_info::ModelProviderInfo;
@@ -146,8 +145,6 @@ pub struct ConfigToml {
     pub debug: Option<DebugToml>,
 
     pub file_opener: Option<UriBasedFileOpener>,
-
-    pub tui: Option<Tui>,
 
     #[serde(default = "default_hide_agent_reasoning")]
     pub hide_agent_reasoning: Option<bool>,

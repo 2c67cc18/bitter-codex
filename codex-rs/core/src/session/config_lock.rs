@@ -8,7 +8,6 @@ use crate::config::Config;
 use crate::config_lock::ConfigLockReplayOptions;
 use crate::config_lock::clear_config_lock_debug_controls;
 use crate::config_lock::config_lockfile;
-use crate::config_lock::toml_round_trip;
 use crate::config_lock::validate_config_lock_replay;
 
 use super::SessionConfiguration;
@@ -121,14 +120,4 @@ fn drop_lockfile_inputs(lock_config: &mut ConfigToml) {
     clear_config_lock_debug_controls(lock_config);
     lock_config.model_instructions_file = None;
     lock_config.model_catalog_json = None;
-}
-
-fn resolved_config_to_toml<Toml>(
-    value: &impl serde::Serialize,
-    label: &'static str,
-) -> anyhow::Result<Toml>
-where
-    Toml: serde::de::DeserializeOwned + serde::Serialize,
-{
-    toml_round_trip(value, label).map_err(anyhow::Error::from)
 }

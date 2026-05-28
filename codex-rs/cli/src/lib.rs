@@ -1,4 +1,3 @@
-mod exit_status;
 pub(crate) mod login;
 
 pub use login::read_api_key_from_stdin;

@@ -17,10 +17,7 @@ use codex_git_utils::get_has_changes;
 use codex_git_utils::get_head_commit_hash;
 use codex_utils_absolute_path::AbsolutePathBuf;
 
-const MODEL_KEY: &str = "model";
-const REASONING_EFFORT_KEY: &str = "reasoning_effort";
 const TURN_STARTED_AT_UNIX_MS_KEY: &str = "turn_started_at_unix_ms";
-const USER_INPUT_REQUESTED_DURING_TURN_KEY: &str = "user_input_requested_during_turn";
 
 #[derive(Clone, Debug, Default)]
 struct WorkspaceGitMetadata {

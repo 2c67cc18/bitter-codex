@@ -11,7 +11,6 @@ use crate::compact::InitialContextInjection;
 use crate::compact::run_inline_auto_compact_task;
 use crate::compact::should_use_remote_compact_task;
 use crate::compact_remote::run_inline_remote_auto_compact_task;
-use crate::context::ContextualUserFragment;
 use crate::session::PreviousTurnSettings;
 use crate::session::TurnInput;
 use crate::session::session::Session;
@@ -628,14 +627,6 @@ impl AssistantMessageStreamParsers {
     }
 }
 
-fn agent_message_text(item: &codex_protocol::items::AgentMessageItem) -> String {
-    item.content
-        .iter()
-        .map(|entry| match entry {
-            codex_protocol::items::AgentMessageContent::Text { text } => text.as_str(),
-        })
-        .collect()
-}
 
 async fn emit_streamed_assistant_text_delta(
     sess: &Session,

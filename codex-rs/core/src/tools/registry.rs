@@ -14,7 +14,6 @@ use crate::util::error_or_panic;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::protocol::EventMsg;
 use codex_tools::ToolName;
-use codex_tools::ToolSpec;
 use futures::future::BoxFuture;
 
 pub(crate) type ToolTelemetryTags = Vec<(&'static str, String)>;
@@ -66,64 +65,7 @@ impl AnyToolResult {
     }
 }
 
-pub(crate) fn override_tool_exposure(
-    handler: Arc<dyn CoreToolRuntime>,
-    exposure: ToolExposure,
-) -> Arc<dyn CoreToolRuntime> {
-    if handler.exposure() == exposure {
-        return handler;
-    }
 
-    Arc::new(ExposureOverride { handler, exposure })
-}
-
-struct ExposureOverride {
-    handler: Arc<dyn CoreToolRuntime>,
-    exposure: ToolExposure,
-}
-
-#[async_trait::async_trait]
-impl ToolExecutor<ToolInvocation> for ExposureOverride {
-    fn tool_name(&self) -> ToolName {
-        self.handler.tool_name()
-    }
-
-    fn spec(&self) -> ToolSpec {
-        self.handler.spec()
-    }
-
-    fn exposure(&self) -> ToolExposure {
-        self.exposure
-    }
-
-    fn supports_parallel_tool_calls(&self) -> bool {
-        self.exposure != ToolExposure::Hidden && self.handler.supports_parallel_tool_calls()
-    }
-
-    async fn handle(
-        &self,
-        invocation: ToolInvocation,
-    ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
-        self.handler.handle(invocation).await
-    }
-}
-
-impl CoreToolRuntime for ExposureOverride {
-    fn matches_kind(&self, payload: &ToolPayload) -> bool {
-        self.handler.matches_kind(payload)
-    }
-
-    fn telemetry_tags<'a>(
-        &'a self,
-        invocation: &'a ToolInvocation,
-    ) -> BoxFuture<'a, ToolTelemetryTags> {
-        self.handler.telemetry_tags(invocation)
-    }
-
-    fn create_diff_consumer(&self) -> Option<Box<dyn ToolArgumentDiffConsumer>> {
-        self.handler.create_diff_consumer()
-    }
-}
 
 pub struct ToolRegistry {
     tools: HashMap<ToolName, Arc<dyn CoreToolRuntime>>,

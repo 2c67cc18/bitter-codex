@@ -608,20 +608,6 @@ ON CONFLICT(thread_id, position) DO NOTHING
     }
 }
 
-fn one_thread_id_from_rows(rows: Vec<sqlx::sqlite::SqliteRow>) -> anyhow::Result<Option<ThreadId>> {
-    let mut ids = rows
-        .into_iter()
-        .map(|row| {
-            let id: String = row.try_get("id")?;
-            ThreadId::try_from(id).map_err(anyhow::Error::from)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    match ids.len() {
-        0 => Ok(None),
-        1 => Ok(ids.pop()),
-        _ => Err(anyhow::anyhow!("multiple threads found")),
-    }
-}
 
 pub(super) fn push_thread_select_columns(builder: &mut QueryBuilder<'_, Sqlite>) {
     builder.push(

@@ -13,11 +13,7 @@ use codex_config::loader::load_config_layers_state;
 use codex_config::loader::project_trust_key;
 use codex_config::types::AuthCredentialsStoreMode;
 use codex_config::types::History;
-use codex_config::types::ModelAvailabilityNuxConfig;
 use codex_config::types::Notice;
-use codex_config::types::SessionPickerViewMode;
-use codex_config::types::TuiNotificationSettings;
-use codex_config::types::TuiPetAnchor;
 use codex_config::types::UriBasedFileOpener;
 use codex_features::Feature;
 use codex_features::FeatureConfigSource;
@@ -29,7 +25,6 @@ use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::built_in_model_providers;
 use codex_model_provider_info::merge_configured_model_providers;
 use codex_models_manager::ModelsManagerConfig;
-use codex_protocol::config_types::AltScreenMode;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
 use codex_protocol::config_types::ForcedLoginMethod;
 use codex_protocol::config_types::ReasoningSummary;
@@ -151,34 +146,6 @@ pub struct Config {
     pub compact_prompt: Option<String>,
 
     pub notify: Option<Vec<String>>,
-
-    pub tui_notifications: TuiNotificationSettings,
-
-    pub animations: bool,
-
-    pub show_tooltips: bool,
-
-    pub model_availability_nux: ModelAvailabilityNuxConfig,
-
-    pub tui_vim_mode_default: bool,
-
-    pub tui_raw_output_mode: bool,
-
-    pub tui_alternate_screen: AltScreenMode,
-
-    pub tui_status_line: Option<Vec<String>>,
-
-    pub tui_status_line_use_colors: bool,
-
-    pub tui_terminal_title: Option<Vec<String>>,
-
-    pub tui_theme: Option<String>,
-
-    pub tui_pet: Option<String>,
-
-    pub tui_pet_anchor: TuiPetAnchor,
-
-    pub tui_session_picker_view: SessionPickerViewMode,
 
     pub cwd: AbsolutePathBuf,
 
@@ -428,10 +395,6 @@ impl ConfigBuilder {
         .await
     }
 
-    #[cfg(test)]
-    pub(crate) fn for_tests() -> Self {
-        Self::default().loader_overrides(LoaderOverrides::for_tests())
-    }
 }
 
 impl Config {
@@ -749,37 +712,8 @@ fn resolve_web_search_config(config_toml: &ConfigToml) -> Option<WebSearchConfig
         .map(Into::into)
 }
 
-pub(crate) fn resolve_web_search_mode_for_turn(
-    web_search_mode: &Constrained<WebSearchMode>,
-) -> WebSearchMode {
-    let preferred = web_search_mode.value();
-
-    if web_search_mode.can_set(&preferred).is_ok() {
-        return preferred;
-    }
-    for mode in [
-        WebSearchMode::Cached,
-        WebSearchMode::Live,
-        WebSearchMode::Disabled,
-    ] {
-        if web_search_mode.can_set(&mode).is_ok() {
-            return mode;
-        }
-    }
-
-    WebSearchMode::Disabled
-}
 
 impl Config {
-    #[cfg(test)]
-    async fn load_from_base_config_with_overrides(
-        cfg: ConfigToml,
-        overrides: ConfigOverrides,
-        codex_home: AbsolutePathBuf,
-    ) -> std::io::Result<Self> {
-        let config_layer_stack = ConfigLayerStack::default();
-        Self::load_config_with_layer_stack(cfg, overrides, codex_home, config_layer_stack).await
-    }
 
     pub(crate) async fn load_config_with_layer_stack(
         cfg: ConfigToml,
@@ -1021,44 +955,6 @@ impl Config {
             include_environment_context,
             compact_prompt,
             notify: cfg.notify,
-            tui_notifications: cfg
-                .tui
-                .as_ref()
-                .map(|t| t.notification_settings.clone())
-                .unwrap_or_default(),
-            animations: cfg.tui.as_ref().map(|t| t.animations).unwrap_or(true),
-            show_tooltips: cfg.tui.as_ref().map(|t| t.show_tooltips).unwrap_or(true),
-            model_availability_nux: cfg
-                .tui
-                .as_ref()
-                .map(|t| t.model_availability_nux.clone())
-                .unwrap_or_default(),
-            tui_vim_mode_default: cfg
-                .tui
-                .as_ref()
-                .map(|t| t.vim_mode_default)
-                .unwrap_or(false),
-            tui_raw_output_mode: cfg.tui.as_ref().map(|t| t.raw_output_mode).unwrap_or(false),
-            tui_alternate_screen: cfg
-                .tui
-                .as_ref()
-                .map(|t| t.alternate_screen)
-                .unwrap_or_default(),
-            tui_status_line: cfg.tui.as_ref().and_then(|t| t.status_line.clone()),
-            tui_status_line_use_colors: cfg
-                .tui
-                .as_ref()
-                .map(|t| t.status_line_use_colors)
-                .unwrap_or(true),
-            tui_terminal_title: cfg.tui.as_ref().and_then(|t| t.terminal_title.clone()),
-            tui_theme: cfg.tui.as_ref().and_then(|t| t.theme.clone()),
-            tui_pet: cfg.tui.as_ref().and_then(|t| t.pet.clone()),
-            tui_pet_anchor: cfg.tui.as_ref().map(|t| t.pet_anchor).unwrap_or_default(),
-            tui_session_picker_view: cfg
-                .tui
-                .as_ref()
-                .and_then(|t| t.session_picker_view)
-                .unwrap_or_default(),
             cwd: resolved_cwd,
             workspace_roots,
             workspace_roots_explicit,

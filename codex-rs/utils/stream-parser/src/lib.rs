@@ -1,7 +1,6 @@
 mod assistant_text;
 mod inline_hidden_tag;
 mod stream_text;
-mod tagged_line_parser;
 mod utf8_stream;
 
 pub use assistant_text::AssistantTextChunk;
