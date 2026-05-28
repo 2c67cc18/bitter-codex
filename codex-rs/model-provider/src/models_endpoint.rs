@@ -8,8 +8,6 @@ use codex_api::ReqwestTransport;
 use codex_api::TransportError;
 use codex_api::auth_header_telemetry;
 use codex_api::map_api_error;
-use codex_feedback::FeedbackRequestTags;
-use codex_feedback::emit_feedback_request_tags_with_auth_env;
 use codex_login::AuthEnvTelemetry;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
@@ -21,8 +19,6 @@ use codex_otel::TelemetryAuthMode;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CoreResult;
 use codex_protocol::openai_models::ModelInfo;
-use codex_response_debug_context::extract_response_debug_context;
-use codex_response_debug_context::telemetry_transport_error_message;
 use http::HeaderMap;
 use tokio::time::timeout;
 
@@ -30,6 +26,10 @@ use crate::auth::resolve_provider_auth;
 
 const MODELS_REFRESH_TIMEOUT: Duration = Duration::from_secs(5);
 const MODELS_ENDPOINT: &str = "/models";
+
+fn telemetry_transport_error_message(error: &TransportError) -> String {
+    error.to_string()
+}
 
 /// Provider-owned OpenAI-compatible `/models` endpoint.
 #[derive(Debug)]
@@ -123,9 +123,6 @@ impl RequestTelemetry for ModelsRequestTelemetry {
     ) {
         let success = status.is_some_and(|code| code.is_success()) && error.is_none();
         let error_message = error.map(telemetry_transport_error_message);
-        let response_debug = error
-            .map(extract_response_debug_context)
-            .unwrap_or_default();
         let status = status.map(|status| status.as_u16());
         tracing::event!(
             target: "codex_otel.log_only",
@@ -145,10 +142,10 @@ impl RequestTelemetry for ModelsRequestTelemetry {
             auth.env_provider_key_name = self.auth_env.provider_env_key_name.as_deref(),
             auth.env_provider_key_present = self.auth_env.provider_env_key_present,
             auth.env_refresh_token_url_override_present = self.auth_env.refresh_token_url_override_present,
-            auth.request_id = response_debug.request_id.as_deref(),
-            auth.cf_ray = response_debug.cf_ray.as_deref(),
-            auth.error = response_debug.auth_error.as_deref(),
-            auth.error_code = response_debug.auth_error_code.as_deref(),
+            auth.request_id = tracing::field::Empty,
+            auth.cf_ray = tracing::field::Empty,
+            auth.error = tracing::field::Empty,
+            auth.error_code = tracing::field::Empty,
             auth.mode = self.auth_mode.as_deref(),
         );
         tracing::event!(
@@ -169,30 +166,11 @@ impl RequestTelemetry for ModelsRequestTelemetry {
             auth.env_provider_key_name = self.auth_env.provider_env_key_name.as_deref(),
             auth.env_provider_key_present = self.auth_env.provider_env_key_present,
             auth.env_refresh_token_url_override_present = self.auth_env.refresh_token_url_override_present,
-            auth.request_id = response_debug.request_id.as_deref(),
-            auth.cf_ray = response_debug.cf_ray.as_deref(),
-            auth.error = response_debug.auth_error.as_deref(),
-            auth.error_code = response_debug.auth_error_code.as_deref(),
+            auth.request_id = tracing::field::Empty,
+            auth.cf_ray = tracing::field::Empty,
+            auth.error = tracing::field::Empty,
+            auth.error_code = tracing::field::Empty,
             auth.mode = self.auth_mode.as_deref(),
-        );
-        emit_feedback_request_tags_with_auth_env(
-            &FeedbackRequestTags {
-                endpoint: MODELS_ENDPOINT,
-                auth_header_attached: self.auth_header_attached,
-                auth_header_name: self.auth_header_name,
-                auth_mode: self.auth_mode.as_deref(),
-                auth_retry_after_unauthorized: None,
-                auth_recovery_mode: None,
-                auth_recovery_phase: None,
-                auth_connection_reused: None,
-                auth_request_id: response_debug.request_id.as_deref(),
-                auth_cf_ray: response_debug.cf_ray.as_deref(),
-                auth_error: response_debug.auth_error.as_deref(),
-                auth_error_code: response_debug.auth_error_code.as_deref(),
-                auth_recovery_followup_success: None,
-                auth_recovery_followup_status: None,
-            },
-            &self.auth_env,
         );
     }
 }
