@@ -192,6 +192,20 @@ done as blind deletion or line-range cleanup.
   surfaces. Remaining `spec_plan.rs` errors in that output are unrelated stale
   utility/MCP/goal/shell/plugin imports and should be handled by the
   corresponding tool-planner cleanup, not by restoring agent tools.
+- 2026-05-28 accepted retained tool-planner trim
+  `semantic-root-20260528-core-spec-plan-retained-tools/core-spec-plan-retained-tools`
+  as merge commit `Merge core spec plan retained tool trim`. It kept ownership
+  to `core/src/tools/spec_plan.rs` and removed planner registrations for handler
+  exports that no longer exist in `tools/handlers/mod.rs`: apply-patch, plan,
+  goal tools, request-user-input, request-permissions, plugin install, MCP
+  resource/runtime tools, legacy shell fallback, and test-sync. The retained
+  planner now registers unified `exec_command`, `write_stdin`, local
+  `view_image`, hosted web/image specs, and dynamic tools only. Focused
+  cargo-modal core lib check dropped to 306 broader errors; a filtered rerun
+  showed no remaining `spec_plan.rs` diagnostics. Remaining failures are outside
+  this file in session/runtime and removed
+  agent/connectors/realtime/MCP/request-permissions/sandboxing/execpolicy/
+  network-proxy/Windows sandbox surfaces.
 
 ## Analytics removal follow-through
 
