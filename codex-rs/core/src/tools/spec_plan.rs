@@ -1,23 +1,7 @@
 use crate::session::turn_context::TurnContext;
-use crate::tools::handlers::ApplyPatchHandler;
-use crate::tools::handlers::CreateGoalHandler;
 use crate::tools::handlers::DynamicToolHandler;
 use crate::tools::handlers::ExecCommandHandler;
 use crate::tools::handlers::ExecCommandHandlerOptions;
-use crate::tools::handlers::GetGoalHandler;
-use crate::tools::handlers::ListAvailablePluginsToInstallHandler;
-use crate::tools::handlers::ListMcpResourceTemplatesHandler;
-use crate::tools::handlers::ListMcpResourcesHandler;
-use crate::tools::handlers::McpHandler;
-use crate::tools::handlers::PlanHandler;
-use crate::tools::handlers::ReadMcpResourceHandler;
-use crate::tools::handlers::RequestPermissionsHandler;
-use crate::tools::handlers::RequestPluginInstallHandler;
-use crate::tools::handlers::RequestUserInputHandler;
-use crate::tools::handlers::ShellCommandHandler;
-use crate::tools::handlers::ShellCommandHandlerOptions;
-use crate::tools::handlers::TestSyncHandler;
-use crate::tools::handlers::UpdateGoalHandler;
 use crate::tools::handlers::ViewImageHandler;
 use crate::tools::handlers::WriteStdinHandler;
 use crate::tools::handlers::view_image_spec::ViewImageToolOptions;
@@ -25,33 +9,23 @@ use crate::tools::hosted_spec::WebSearchToolOptions;
 use crate::tools::hosted_spec::create_image_generation_tool;
 use crate::tools::hosted_spec::create_web_search_tool;
 use crate::tools::registry::CoreToolRuntime;
-use crate::tools::registry::ToolExposure;
 use crate::tools::registry::ToolRegistry;
-use crate::tools::registry::override_tool_exposure;
 use crate::tools::router::ToolRouter;
 use crate::tools::router::ToolRouterParams;
 use codex_features::Feature;
 use codex_login::AuthManager;
-use codex_mcp::ToolInfo;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::openai_models::ConfigShellToolType;
 use codex_protocol::openai_models::InputModality;
-use codex_protocol::protocol::SessionSource;
-use codex_protocol::protocol::SubAgentSource;
-use codex_tools::DiscoverableTool;
 use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::ToolEnvironmentMode;
 use codex_tools::ToolSpec;
 use codex_tools::can_request_original_image_detail;
-use codex_tools::collect_request_plugin_install_entries;
 use codex_tools::default_namespace_description;
-use codex_tools::request_user_input_available_modes;
-use codex_tools::shell_command_backend_for_features;
 use codex_tools::shell_type_for_model_and_features;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::sync::Arc;
-use tracing::warn;
 
 type PlannedRuntime = Arc<dyn CoreToolRuntime>;
 
@@ -69,21 +43,6 @@ impl PlannedTools {
         self.runtimes.push(Arc::new(handler));
     }
 
-    fn add_with_exposure<T>(&mut self, handler: T, exposure: ToolExposure)
-    where
-        T: CoreToolRuntime + 'static,
-    {
-        self.runtimes
-            .push(override_tool_exposure(Arc::new(handler), exposure));
-    }
-
-    fn add_dispatch_only<T>(&mut self, handler: T)
-    where
-        T: CoreToolRuntime + 'static,
-    {
-        self.add_with_exposure(handler, ToolExposure::Hidden);
-    }
-
     fn add_hosted_spec(&mut self, spec: ToolSpec) {
         self.hosted_specs.push(spec);
     }
@@ -92,9 +51,6 @@ impl PlannedTools {
 #[derive(Clone, Copy)]
 struct CoreToolPlanContext<'a> {
     turn_context: &'a TurnContext,
-    mcp_tools: Option<&'a [ToolInfo]>,
-    deferred_mcp_tools: Option<&'a [ToolInfo]>,
-    discoverable_tools: Option<&'a [DiscoverableTool]>,
     dynamic_tools: &'a [DynamicToolSpec],
 }
 
@@ -111,16 +67,13 @@ fn build_tool_specs_and_registry(
     params: ToolRouterParams<'_>,
 ) -> (Vec<ToolSpec>, ToolRegistry) {
     let ToolRouterParams {
-        mcp_tools,
-        deferred_mcp_tools,
-        discoverable_tools,
+        mcp_tools: _,
+        deferred_mcp_tools: _,
+        discoverable_tools: _,
         dynamic_tools,
     } = params;
     let context = CoreToolPlanContext {
         turn_context,
-        mcp_tools: mcp_tools.as_deref(),
-        deferred_mcp_tools: deferred_mcp_tools.as_deref(),
-        discoverable_tools: discoverable_tools.as_deref(),
         dynamic_tools,
     };
     let mut planned_tools = PlannedTools::default();
@@ -187,23 +140,8 @@ pub(crate) fn hosted_model_tool_specs(turn_context: &TurnContext) -> Vec<ToolSpe
     specs
 }
 
-pub(crate) fn tool_suggest_enabled(turn_context: &TurnContext) -> bool {
-    let features = turn_context.features.get();
-    features.enabled(Feature::ToolSuggest)
-        && features.enabled(Feature::Apps)
-        && features.enabled(Feature::Plugins)
-}
-
 fn namespace_tools_enabled(turn_context: &TurnContext) -> bool {
     turn_context.provider.capabilities().namespace_tools
-}
-
-fn goal_tools_enabled(turn_context: &TurnContext) -> bool {
-    turn_context.goal_tools_enabled()
-        && !matches!(
-            turn_context.session_source,
-            SessionSource::SubAgent(SubAgentSource::Review)
-        )
 }
 
 fn image_generation_tool_enabled(turn_context: &TurnContext) -> bool {
@@ -270,9 +208,7 @@ fn merge_into_namespaces(specs: Vec<ToolSpec>) -> Vec<ToolSpec> {
 
 fn add_tool_sources(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {
     add_shell_tools(context, planned_tools);
-    add_mcp_resource_tools(context, planned_tools);
     add_core_utility_tools(context, planned_tools);
-    add_mcp_runtime_tools(context, planned_tools);
     add_dynamic_tools(context, planned_tools);
     for spec in hosted_model_tool_specs(context.turn_context) {
         planned_tools.add_hosted_spec(spec);
@@ -288,87 +224,23 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut Planne
     }
 
     let allow_login_shell = turn_context.config.permissions.allow_login_shell;
-    let exec_permission_approvals_enabled = features.enabled(Feature::ExecPermissionApprovals);
     let include_environment_id = matches!(environment_mode, ToolEnvironmentMode::Multiple);
-    let shell_command_options = ShellCommandHandlerOptions {
-        backend_config: shell_command_backend_for_features(features),
-        allow_login_shell,
-        exec_permission_approvals_enabled,
-    };
 
-    match shell_type_for_model_and_features(&turn_context.model_info, features) {
-        ConfigShellToolType::UnifiedExec => {
-            planned_tools.add(ExecCommandHandler::new(ExecCommandHandlerOptions {
-                allow_login_shell,
-                include_environment_id,
-            }));
-            planned_tools.add(WriteStdinHandler);
-
-            // Keep the legacy shell tool registered while unified exec is
-            // model-visible.
-            planned_tools.add_dispatch_only(ShellCommandHandler::new(shell_command_options));
-        }
-        ConfigShellToolType::Disabled => {}
-        ConfigShellToolType::Default
-        | ConfigShellToolType::Local
-        | ConfigShellToolType::ShellCommand => {
-            planned_tools.add(ShellCommandHandler::new(shell_command_options));
-        }
-    }
-}
-
-fn add_mcp_resource_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {
-    if context.mcp_tools.is_some() {
-        planned_tools.add(ListMcpResourcesHandler);
-        planned_tools.add(ListMcpResourceTemplatesHandler);
-        planned_tools.add(ReadMcpResourceHandler);
+    if matches!(
+        shell_type_for_model_and_features(&turn_context.model_info, features),
+        ConfigShellToolType::UnifiedExec
+    ) {
+        planned_tools.add(ExecCommandHandler::new(ExecCommandHandlerOptions {
+            allow_login_shell,
+            include_environment_id,
+        }));
+        planned_tools.add(WriteStdinHandler);
     }
 }
 
 fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {
     let turn_context = context.turn_context;
-    let features = turn_context.features.get();
     let environment_mode = turn_context.tool_environment_mode();
-
-    planned_tools.add(PlanHandler);
-    if goal_tools_enabled(turn_context) {
-        planned_tools.add(GetGoalHandler);
-        planned_tools.add(CreateGoalHandler);
-        planned_tools.add(UpdateGoalHandler);
-    }
-
-    planned_tools.add(RequestUserInputHandler {
-        available_modes: request_user_input_available_modes(features),
-    });
-
-    if features.enabled(Feature::RequestPermissionsTool) {
-        planned_tools.add(RequestPermissionsHandler);
-    }
-
-    if tool_suggest_enabled(turn_context)
-        && let Some(discoverable_tools) =
-            context.discoverable_tools.filter(|tools| !tools.is_empty())
-    {
-        planned_tools.add(ListAvailablePluginsToInstallHandler::new(
-            collect_request_plugin_install_entries(discoverable_tools),
-        ));
-        planned_tools.add(RequestPluginInstallHandler);
-    }
-
-    if environment_mode.has_environment() && turn_context.model_info.apply_patch_tool_type.is_some()
-    {
-        let include_environment_id = matches!(environment_mode, ToolEnvironmentMode::Multiple);
-        planned_tools.add(ApplyPatchHandler::new(include_environment_id));
-    }
-
-    if turn_context
-        .model_info
-        .experimental_supported_tools
-        .iter()
-        .any(|tool| tool == "test_sync_tool")
-    {
-        planned_tools.add(TestSyncHandler);
-    }
 
     if environment_mode.has_environment() {
         let include_environment_id = matches!(environment_mode, ToolEnvironmentMode::Multiple);
@@ -378,32 +250,6 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut
             ),
             include_environment_id,
         }));
-    }
-}
-
-fn add_mcp_runtime_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {
-    if let Some(mcp_tools) = context.mcp_tools {
-        for tool in mcp_tools {
-            match McpHandler::new(tool.clone()) {
-                Ok(handler) => planned_tools.add(handler),
-                Err(err) => warn!(
-                    "Skipping MCP tool `{}`: failed to build tool spec: {err}",
-                    tool.canonical_tool_name()
-                ),
-            }
-        }
-    }
-
-    if let Some(deferred_mcp_tools) = context.deferred_mcp_tools {
-        for tool in deferred_mcp_tools {
-            match McpHandler::new(tool.clone()) {
-                Ok(handler) => planned_tools.add_with_exposure(handler, ToolExposure::Deferred),
-                Err(err) => warn!(
-                    "Skipping deferred MCP tool `{}`: failed to build tool spec: {err}",
-                    tool.canonical_tool_name()
-                ),
-            }
-        }
     }
 }
 
