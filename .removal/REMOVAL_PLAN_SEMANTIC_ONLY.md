@@ -1378,3 +1378,16 @@ approvals / permissions semantic removal, likely using daemex as the reference.
   check -p codex-core --no-default-features --lib` still failed at 136 broader
   errors with no owned-file diagnostics. Remaining MCP compile blockers are now
   in broader session/MCP/state turn surfaces rather than router params.
+- 2026-05-28 accepted worker
+  `semantic-root-20260528-after-worktree-cleanup/unified-exec-server-trim`
+  as merge commit `Merge unified exec exec-server trim`. The slice removed the
+  unused `ExecCommandRequest.environment` field and the source-dead
+  `codex_exec_server` process transport (`ProcessHandle::ExecServer`,
+  `from_exec_server_started`, and the exec-server read task) from unified exec,
+  while preserving the retained local PTY spawn, write, output, terminate, and
+  async watcher behavior. The worker reached terminal `completed` normally with
+  a clean branch, and `git diff --check` passed. Its focused checks still failed
+  on broader codex-core blockers; owned-file diagnostics were limited to
+  existing unused unified-exec re-export warnings. Tests still reference removed
+  exec-server helpers and must be handled in the later all-target/test rebuild
+  phase rather than restoring the deleted exec-server transport.
