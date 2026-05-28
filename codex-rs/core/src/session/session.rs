@@ -459,19 +459,13 @@ pub(crate) struct AppServerClientMetadata {
 
 async fn warm_plugins_and_skills_for_session_init(
     config: Arc<Config>,
-    environment_manager: Arc<EnvironmentManager>,
+    _environment_manager: Arc<EnvironmentManager>,
     skills_manager: Arc<SkillsManager>,
-    environments: Vec<TurnEnvironmentSelection>,
+    _environments: Vec<TurnEnvironmentSelection>,
 ) -> Vec<SkillError> {
-    let fs = crate::environment_selection::resolve_environment_selections(
-        environment_manager.as_ref(),
-        &environments,
-    )
-    .ok()
-    .and_then(|resolved| resolved.primary_filesystem());
     let skills_input = skills_load_input_from_config(config.as_ref());
     skills_manager
-        .skills_for_config(&skills_input, fs)
+        .skills_for_config(&skills_input, None)
         .await
         .errors
 }
@@ -1040,28 +1034,10 @@ impl Session {
                 cancel_guard.cancel();
                 *cancel_guard = CancellationToken::new();
             }
-            let turn_environment = crate::environment_selection::resolve_environment_selections(
-                sess.services.environment_manager.as_ref(),
-                &session_configuration.environments,
-            )
-            .map_err(|err| {
-                CodexErr::InvalidRequest(err.to_string().replace(
-                    "unknown turn environment id",
-                    "unknown stored MCP environment id",
-                ))
-            })?
-            .primary()
-            .cloned();
-            let mcp_runtime_context = match turn_environment {
-                Some(turn_environment) => McpRuntimeContext::new(
-                    Arc::clone(&sess.services.environment_manager),
-                    turn_environment.cwd.to_path_buf(),
-                ),
-                None => McpRuntimeContext::new(
-                    Arc::clone(&sess.services.environment_manager),
-                    session_configuration.cwd.to_path_buf(),
-                ),
-            };
+            let mcp_runtime_context = McpRuntimeContext::new(
+                Arc::clone(&sess.services.environment_manager),
+                session_configuration.cwd.to_path_buf(),
+            );
             let (mcp_connection_manager, cancel_token) = McpConnectionManager::new(
                 &mcp_servers,
                 config.mcp_oauth_credentials_store_mode,

@@ -3073,14 +3073,15 @@ pub(crate) async fn make_session_configuration_for_tests() -> SessionConfigurati
 fn turn_environments_for_tests(
     environment: &Arc<codex_exec_server::Environment>,
     cwd: &codex_utils_absolute_path::AbsolutePathBuf,
-) -> crate::environment_selection::ResolvedTurnEnvironments {
-    crate::environment_selection::ResolvedTurnEnvironments {
+) -> ResolvedTurnEnvironments {
+    ResolvedTurnEnvironments {
         turn_environments: vec![TurnEnvironment {
             environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
             environment: Arc::clone(environment),
             cwd: cwd.clone(),
             shell: None,
         }],
+        ..Default::default()
     }
 }
 

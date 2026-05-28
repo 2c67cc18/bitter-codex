@@ -1,7 +1,6 @@
 use super::*;
 use crate::SkillLoadOutcome;
 use crate::config::GhostSnapshotConfig;
-use crate::environment_selection::ResolvedTurnEnvironments;
 use codex_model_provider::SharedModelProvider;
 use codex_model_provider::create_model_provider;
 use codex_protocol::SessionId;
@@ -41,6 +40,35 @@ impl TurnEnvironment {
             environment_id: self.environment_id.clone(),
             cwd: self.cwd.clone(),
         }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ResolvedTurnEnvironments {
+    pub(crate) turn_environments: Vec<TurnEnvironment>,
+    pub(crate) selections: Vec<TurnEnvironmentSelection>,
+}
+
+impl ResolvedTurnEnvironments {
+    pub(crate) fn from_selections(selections: Vec<TurnEnvironmentSelection>) -> Self {
+        Self {
+            turn_environments: Vec::new(),
+            selections,
+        }
+    }
+
+    pub(crate) fn primary(&self) -> Option<&TurnEnvironment> {
+        self.turn_environments.first()
+    }
+
+    pub(crate) fn to_selections(&self) -> Vec<TurnEnvironmentSelection> {
+        if self.turn_environments.is_empty() {
+            return self.selections.clone();
+        }
+        self.turn_environments
+            .iter()
+            .map(TurnEnvironment::selection)
+            .collect()
     }
 }
 
@@ -651,10 +679,7 @@ impl Session {
         &self,
         environments: &[TurnEnvironmentSelection],
     ) -> CodexResult<ResolvedTurnEnvironments> {
-        crate::environment_selection::resolve_environment_selections(
-            self.services.environment_manager.as_ref(),
-            environments,
-        )
+        Ok(ResolvedTurnEnvironments::from_selections(environments.to_vec()))
     }
 
     async fn new_turn_from_configuration(
