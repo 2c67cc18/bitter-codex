@@ -1,6 +1,5 @@
 use super::*;
 
-use crate::sandbox_tags::permission_profile_sandbox_tag;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use codex_protocol::protocol::ThreadSource;
@@ -85,7 +84,7 @@ async fn build_turn_metadata_header_includes_has_changes_for_clean_repo() {
 }
 
 #[test]
-fn turn_metadata_state_uses_platform_sandbox_tag() {
+fn turn_metadata_state_omits_session_derived_sandbox_metadata() {
     let temp_dir = TempDir::new().expect("temp dir");
     let cwd = temp_dir.path().abs();
     let permission_profile = PermissionProfile::read_only();
@@ -103,17 +102,11 @@ fn turn_metadata_state_uses_platform_sandbox_tag() {
 
     let header = state.current_header_value().expect("header");
     let json: Value = serde_json::from_str(&header).expect("json");
-    let sandbox_name = json.get("sandbox").and_then(Value::as_str);
     let session_id = json.get("session_id").and_then(Value::as_str);
     let thread_id = json.get("thread_id").and_then(Value::as_str);
     let thread_source = json.get("thread_source").and_then(Value::as_str);
 
-    let expected_sandbox = permission_profile_sandbox_tag(
-        &permission_profile,
-        WindowsSandboxLevel::Disabled,
-        /*enforce_managed_network*/ false,
-    );
-    assert_eq!(sandbox_name, Some(expected_sandbox));
+    assert!(json.get("sandbox").is_none());
     assert_eq!(session_id, Some("session-a"));
     assert_eq!(thread_id, Some("thread-a"));
     assert_eq!(thread_source, Some("user"));
