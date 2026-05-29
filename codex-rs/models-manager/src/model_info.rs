@@ -85,7 +85,6 @@ pub fn model_info_from_slug(slug: &str) -> ModelInfo {
         "max_context_window": 272_000,
         "auto_compact_token_limit": null,
         "effective_context_window_percent": 95,
-        "experimental_supported_tools": [],
         "input_modalities": default_input_modalities(),
         "supports_search_tool": false,
     }))

@@ -37,7 +37,6 @@ pub struct Cli {
 
     #[arg(
         long = "json",
-        alias = "experimental-json",
         default_value_t = false,
         global = true
     )]

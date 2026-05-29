@@ -208,7 +208,6 @@ mod tests {
                     "supports_parallel_tool_calls": false,
                     "supports_image_detail_original": false,
                     "context_window": 272_000,
-                    "experimental_supported_tools": [],
                 }))
                 .unwrap(),
             ],

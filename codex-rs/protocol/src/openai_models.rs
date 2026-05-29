@@ -226,7 +226,6 @@ pub struct ModelInfo {
 
     #[serde(default = "default_effective_context_window_percent")]
     pub effective_context_window_percent: i64,
-    pub experimental_supported_tools: Vec<String>,
 
     #[serde(default = "default_input_modalities")]
     pub input_modalities: Vec<InputModality>,
@@ -461,7 +460,6 @@ mod tests {
             max_context_window: None,
             auto_compact_token_limit: None,
             effective_context_window_percent: 95,
-            experimental_supported_tools: vec![],
             input_modalities: default_input_modalities(),
             used_fallback_model_metadata: false,
             supports_search_tool: false,
@@ -509,7 +507,6 @@ mod tests {
             "context_window": null,
             "auto_compact_token_limit": null,
             "effective_context_window_percent": 95,
-            "experimental_supported_tools": [],
             "input_modalities": ["text", "image"]
         }))
         .expect("deserialize model info");

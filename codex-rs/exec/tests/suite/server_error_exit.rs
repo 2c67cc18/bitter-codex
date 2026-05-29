@@ -20,7 +20,7 @@ async fn exits_non_zero_when_server_reports_error() -> anyhow::Result<()> {
     test.cmd_with_server(&server)
         .arg("--skip-git-repo-check")
         .arg("tell me something")
-        .arg("--experimental-json")
+        .arg("--json")
         .assert()
         .code(1);
 

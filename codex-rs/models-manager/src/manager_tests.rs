@@ -54,7 +54,6 @@ fn remote_model_with_visibility(
             "supports_image_detail_original": false,
             "context_window": 272_000,
             "max_context_window": 272_000,
-            "experimental_supported_tools": [],
         }))
         .expect("valid model")
 }

@@ -33,7 +33,6 @@ fn model_info() -> ModelInfo {
         "context_window": null,
         "auto_compact_token_limit": null,
         "effective_context_window_percent": 95,
-        "experimental_supported_tools": [],
         "input_modalities": ["text", "image"],
         "supports_search_tool": false
     }))

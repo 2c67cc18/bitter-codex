@@ -68,7 +68,6 @@ macro_rules! serialization_scope_expr {
 macro_rules! client_request_definitions {
     (
         $(
-            $(#[experimental($reason:expr)])?
             $(#[doc = $variant_doc:literal])*
             $variant:ident $(=> $wire:literal)? {
                 params: $(#[$params_meta:meta])* $params:ty,
