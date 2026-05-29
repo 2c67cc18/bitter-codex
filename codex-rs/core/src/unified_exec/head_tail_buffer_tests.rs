@@ -25,7 +25,6 @@ fn max_bytes_zero_drops_everything() {
     assert_eq!(buf.retained_bytes(), 0);
     assert_eq!(buf.omitted_bytes(), 3);
     assert_eq!(buf.to_bytes(), b"".to_vec());
-    assert_eq!(buf.snapshot_chunks(), Vec::<Vec<u8>>::new());
 }
 
 #[test]

@@ -2,7 +2,6 @@ use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnStatus;
-use codex_protocol::protocol::SessionConfiguredEvent;
 use owo_colors::Style;
 use pretty_assertions::assert_eq;
 

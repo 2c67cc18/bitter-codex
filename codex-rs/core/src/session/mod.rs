@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
 use crate::context::ContextualUserFragment;
+use crate::config::ManagedFeatures;
 use crate::path_utils::normalize_for_native_workdir;
 use crate::turn_metadata::TurnMetadataState;
 use crate::turn_timing::now_unix_timestamp_ms;
@@ -78,8 +79,6 @@ use codex_model_provider_info::ModelProviderInfo;
 use codex_protocol::config_types::ShellEnvironmentPolicy;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
-#[cfg(test)]
-use codex_protocol::exec_output::StreamOutput;
 
 mod config_lock;
 mod handlers;
@@ -91,16 +90,12 @@ pub(crate) mod turn;
 pub(crate) mod turn_context;
 use self::config_lock::export_config_lock_if_configured;
 use self::config_lock::validate_config_lock_if_configured;
-#[cfg(test)]
-use self::handlers::submission_dispatch_span;
 use self::handlers::submission_loop;
 pub(crate) use self::input_queue::TurnInput;
 pub(crate) use self::input_queue::TurnInputQueue;
 use self::session::Session;
 use self::session::SessionConfiguration;
 pub(crate) use self::session::SessionSettingsUpdate;
-#[cfg(test)]
-use self::turn::AssistantMessageStreamParsers;
 use self::turn_context::ResolvedTurnEnvironments;
 use self::turn_context::TurnContext;
 
@@ -162,12 +157,6 @@ use crate::state::AutoCompactWindowSnapshot;
 use crate::state::SessionServices;
 use crate::state::SessionState;
 use crate::state::TaskKind;
-#[cfg(test)]
-use crate::stream_events_utils::HandleOutputCtx;
-#[cfg(test)]
-use crate::stream_events_utils::handle_output_item_done;
-#[cfg(test)]
-use crate::tools::parallel::ToolCallRuntime;
 use crate::turn_timing::TurnTimingState;
 use crate::turn_timing::record_turn_ttfm_metric;
 use crate::unified_exec::UnifiedExecProcessManager;
@@ -518,7 +507,7 @@ impl Session {
     #[cfg(test)]
     pub(crate) async fn codex_home(&self) -> AbsolutePathBuf {
         let state = self.state.lock().await;
-        state.session_configuration.codex_home().clone()
+        state.session_configuration.codex_home.clone()
     }
 
 

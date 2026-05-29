@@ -13,6 +13,7 @@ use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::SessionConfiguredEvent;
+use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::TokenUsageInfo;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::protocol::W3cTraceContext;
@@ -37,6 +38,7 @@ pub struct ThreadConfigSnapshot {
     pub cwd: AbsolutePathBuf,
     pub workspace_roots: Vec<AbsolutePathBuf>,
     pub ephemeral: bool,
+    pub source: SessionSource,
     pub reasoning_effort: Option<ReasoningEffort>,
     pub reasoning_summary: Option<ReasoningSummary>,
 }
@@ -170,21 +172,7 @@ impl CodexThread {
     #[cfg(test)]
     pub(crate) async fn append_message(&self, message: ResponseItem) -> CodexResult<String> {
         let submission_id = uuid::Uuid::new_v4().to_string();
-        let pending_item = pending_message_input_item(&message)?;
-        if let Err(items) = self
-            .codex
-            .session
-            .inject_response_items(vec![pending_item])
-            .await
-        {
-            self.codex
-                .session
-                .input_queue
-                .queue_response_items_for_next_turn(items)
-                .await;
-            self.codex.session.maybe_start_turn_for_pending_work().await;
-        }
-
+        self.inject_response_items(vec![message]).await?;
         Ok(submission_id)
     }
 
@@ -292,4 +280,3 @@ impl CodexThread {
         self.codex.enabled(feature)
     }
 }
-

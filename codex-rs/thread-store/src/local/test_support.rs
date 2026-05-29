@@ -95,11 +95,16 @@ pub(super) fn write_session_file_with_fork(
     writeln!(file, "{meta}")?;
     let user_event = serde_json::json!({
         "timestamp": ts,
-        "type": "event_msg",
+        "type": "response_item",
         "payload": {
-            "type": "user_message",
-            "message": first_user_message,
-            "kind": "plain",
+            "type": "message",
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": first_user_message,
+                }
+            ],
         },
     });
     writeln!(file, "{user_event}")?;

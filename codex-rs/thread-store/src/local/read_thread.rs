@@ -655,11 +655,16 @@ mod tests {
         writeln!(file, "{meta}").expect("write session meta");
         let user_event = serde_json::json!({
             "timestamp": "2025-01-03T12:00:00Z",
-            "type": "event_msg",
+            "type": "response_item",
             "payload": {
-                "type": "user_message",
-                "message": "Hello from rollout",
-                "kind": "plain",
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "Hello from rollout",
+                    }
+                ],
             },
         });
         writeln!(file, "{user_event}").expect("write user event");

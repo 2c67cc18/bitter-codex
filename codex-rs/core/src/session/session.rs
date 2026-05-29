@@ -67,6 +67,7 @@ impl SessionConfiguration {
             cwd: self.cwd.clone(),
             workspace_roots: self.workspace_roots.clone(),
             ephemeral: self.original_config_do_not_use.ephemeral,
+            source: self.session_source.clone(),
             reasoning_effort: self.model_reasoning_effort,
             reasoning_summary: self.model_reasoning_summary,
         }

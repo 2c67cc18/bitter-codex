@@ -2,7 +2,6 @@ use super::*;
 use codex_protocol::models::DEFAULT_IMAGE_DETAIL;
 use core_test_support::assert_regex_match;
 use pretty_assertions::assert_eq;
-use serde_json::json;
 
 #[test]
 fn custom_tool_calls_should_roundtrip_as_custom_outputs() {

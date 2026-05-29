@@ -2909,7 +2909,7 @@ fn build_thread_from_snapshot(
         path,
         cwd: config_snapshot.cwd.clone(),
         cli_version: env!("CARGO_PKG_VERSION").to_string(),
-        source: codex_app_server_protocol::SessionSource::Unknown,
+        source: config_snapshot.source.clone().into(),
         git_info: None,
         name: None,
         turns: Vec::new(),

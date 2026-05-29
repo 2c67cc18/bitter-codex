@@ -213,23 +213,9 @@ impl ModelProvider for ConfiguredModelProvider {
 #[cfg(test)]
 mod tests {
     use codex_model_provider_info::WireApi;
-    use codex_models_manager::manager::RefreshStrategy;
-    use codex_protocol::openai_models::ModelInfo;
-    use codex_protocol::openai_models::ModelsResponse;
     use pretty_assertions::assert_eq;
-    use serde_json::json;
-    use wiremock::Mock;
-    use wiremock::MockServer;
-    use wiremock::ResponseTemplate;
-    use wiremock::matchers::header_regex;
-    use wiremock::matchers::method;
-    use wiremock::matchers::path;
 
     use super::*;
-
-    fn test_codex_home() -> std::path::PathBuf {
-        std::env::temp_dir().join(format!("codex-model-provider-test-{}", std::process::id()))
-    }
 
     fn provider_for(base_url: String) -> ModelProviderInfo {
         ModelProviderInfo {
@@ -249,32 +235,6 @@ mod tests {
             requires_openai_auth: false,
             supports_websockets: false,
         }
-    }
-
-    fn remote_model(slug: &str) -> ModelInfo {
-        serde_json::from_value(json!({
-            "slug": slug,
-            "display_name": slug,
-            "description": null,
-            "default_reasoning_level": "medium",
-            "supported_reasoning_levels": [],
-            "shell_type": "shell_command",
-            "visibility": "list",
-            "supported_in_api": true,
-            "priority": 0,
-            "upgrade": null,
-            "base_instructions": "base instructions",
-            "supports_reasoning_summaries": false,
-            "support_verbosity": false,
-            "default_verbosity": null,
-            "truncation_policy": {"mode": "bytes", "limit": 10_000},
-            "supports_parallel_tool_calls": false,
-            "supports_image_detail_original": false,
-            "context_window": 272_000,
-            "max_context_window": 272_000,
-            "experimental_supported_tools": [],
-        }))
-        .expect("valid model")
     }
 
     #[test]

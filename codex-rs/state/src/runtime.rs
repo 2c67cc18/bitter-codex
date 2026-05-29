@@ -420,7 +420,6 @@ pub async fn sqlite_integrity_check(path: &Path) -> anyhow::Result<Vec<String>> 
 #[cfg(test)]
 mod tests {
     use super::StateRuntime;
-    use super::open_state_sqlite;
     use super::sqlite_integrity_check;
     use super::state_db_path;
     use super::test_support::unique_temp_dir;
@@ -431,7 +430,6 @@ mod tests {
     use sqlx::sqlite::SqliteConnectOptions;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
-    use std::path::Path;
     use std::sync::Mutex;
 
     #[derive(Default)]
@@ -483,16 +481,6 @@ mod tests {
         tags.iter()
             .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
             .collect()
-    }
-
-    async fn open_db_pool(path: &Path) -> SqlitePool {
-        SqlitePool::connect_with(
-            SqliteConnectOptions::new()
-                .filename(path)
-                .create_if_missing(false),
-        )
-        .await
-        .expect("open sqlite pool")
     }
 
     #[tokio::test]
