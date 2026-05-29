@@ -504,13 +504,6 @@ async fn thread_title_from_thread_store(
 
 impl Session {
 
-    #[cfg(test)]
-    pub(crate) async fn codex_home(&self) -> AbsolutePathBuf {
-        let state = self.state.lock().await;
-        state.session_configuration.codex_home.clone()
-    }
-
-
     pub(crate) fn state_db(&self) -> Option<state_db::StateDbHandle> {
         self.services.state_db.clone()
     }

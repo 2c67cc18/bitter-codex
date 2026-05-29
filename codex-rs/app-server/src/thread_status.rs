@@ -613,24 +613,6 @@ mod tests {
         );
     }
 
-    async fn wait_for_status(
-        manager: &ThreadWatchManager,
-        thread_id: &str,
-        expected_status: ThreadStatus,
-    ) {
-        timeout(Duration::from_secs(1), async {
-            loop {
-                let status = manager.loaded_status_for_thread(thread_id).await;
-                if status == expected_status {
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("timed out waiting for status");
-    }
-
     async fn recv_status_changed_notification(
         outgoing_rx: &mut mpsc::Receiver<OutgoingEnvelope>,
     ) -> ThreadStatusChangedNotification {

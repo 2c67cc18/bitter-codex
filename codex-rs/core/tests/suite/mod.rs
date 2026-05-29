@@ -5,7 +5,7 @@ use ctor::ctor;
 
 #[ctor]
 pub static CODEX_ALIASES_TEMP_DIR: Option<TestBinaryDispatchGuard> = {
-    configure_test_binary_dispatch("codex-core-tests", |exe_name, argv1| {
+    configure_test_binary_dispatch("codex-core-tests", |_exe_name, _argv1| {
         TestBinaryDispatchMode::InstallAliases
     })
 };

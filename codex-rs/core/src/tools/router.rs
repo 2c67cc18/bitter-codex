@@ -48,20 +48,6 @@ impl ToolRouter {
         self.model_visible_specs.clone()
     }
 
-    #[cfg(test)]
-    pub(crate) fn registered_tool_names_for_test(&self) -> Vec<ToolName> {
-        self.registry.tool_names_for_test()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn tool_exposure_for_test(
-        &self,
-        name: &ToolName,
-    ) -> Option<crate::tools::registry::ToolExposure> {
-        self.registry.tool_exposure(name)
-    }
-
-
     pub fn tool_supports_parallel(&self, call: &ToolCall) -> bool {
         self.registry
             .supports_parallel_tool_calls(&call.tool_name)

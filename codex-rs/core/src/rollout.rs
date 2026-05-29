@@ -42,7 +42,6 @@ pub(crate) mod list {
 
 #[cfg(test)]
 pub(crate) mod recorder {
-    pub use codex_rollout::RolloutRecorder;
 }
 
 pub(crate) use crate::session_rollout_init_error::map_session_init_error;

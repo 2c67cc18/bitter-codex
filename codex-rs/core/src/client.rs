@@ -74,8 +74,6 @@ use crate::client_common::ResponseStream;
 use codex_api::map_api_error;
 use codex_model_provider::SharedModelProvider;
 use codex_model_provider::create_model_provider;
-#[cfg(test)]
-use codex_model_provider_info::DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
 use codex_protocol::error::CodexErr;

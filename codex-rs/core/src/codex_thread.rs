@@ -169,13 +169,6 @@ impl CodexThread {
     }
 
 
-    #[cfg(test)]
-    pub(crate) async fn append_message(&self, message: ResponseItem) -> CodexResult<String> {
-        let submission_id = uuid::Uuid::new_v4().to_string();
-        self.inject_response_items(vec![message]).await?;
-        Ok(submission_id)
-    }
-
     pub async fn inject_response_items(&self, items: Vec<ResponseItem>) -> CodexResult<()> {
         if items.is_empty() {
             return Err(CodexErr::InvalidRequest(
