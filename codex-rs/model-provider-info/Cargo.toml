@@ -20,8 +20,6 @@ http = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
-codex-utils-absolute-path = { workspace = true }
 maplit = { workspace = true }
 pretty_assertions = { workspace = true }
-tempfile = { workspace = true }
 toml = { workspace = true }

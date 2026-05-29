@@ -378,9 +378,6 @@ pub fn validate_model_providers(
                 "model_providers.{key}: provider name must not be empty"
             ));
         }
-        provider
-            .validate()
-            .map_err(|message| format!("model_providers.{key}: {message}"))?;
     }
     Ok(())
 }

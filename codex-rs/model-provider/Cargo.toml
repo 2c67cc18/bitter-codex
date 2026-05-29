@@ -26,6 +26,4 @@ tracing = { workspace = true, features = ["log"] }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
-serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
-wiremock = { workspace = true }

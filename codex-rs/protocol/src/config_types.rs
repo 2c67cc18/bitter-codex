@@ -1,9 +1,6 @@
-use codex_utils_absolute_path::AbsolutePathBuf;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::num::NonZeroU64;
-use std::time::Duration;
 use strum_macros::Display;
 use wildmatch::WildMatchPattern;
 
@@ -228,66 +225,6 @@ impl ServiceTier {
 pub enum ForcedLoginMethod {
     Chatgpt,
     Api,
-}
-
-const DEFAULT_PROVIDER_AUTH_TIMEOUT_MS: u64 = 5_000;
-const DEFAULT_PROVIDER_AUTH_REFRESH_INTERVAL_MS: u64 = 300_000;
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-pub struct ModelProviderAuthInfo {
-    pub command: String,
-
-    #[serde(default)]
-    pub args: Vec<String>,
-
-    #[serde(default = "default_provider_auth_timeout_ms")]
-    pub timeout_ms: NonZeroU64,
-
-    #[serde(default = "default_provider_auth_refresh_interval_ms")]
-    pub refresh_interval_ms: u64,
-
-    #[serde(default = "default_provider_auth_cwd")]
-    pub cwd: AbsolutePathBuf,
-}
-
-impl ModelProviderAuthInfo {
-    pub fn timeout(&self) -> Duration {
-        Duration::from_millis(self.timeout_ms.get())
-    }
-
-    pub fn refresh_interval(&self) -> Option<Duration> {
-        NonZeroU64::new(self.refresh_interval_ms).map(|value| Duration::from_millis(value.get()))
-    }
-}
-
-fn default_provider_auth_timeout_ms() -> NonZeroU64 {
-    non_zero_u64(
-        DEFAULT_PROVIDER_AUTH_TIMEOUT_MS,
-        "model_providers.<id>.auth.timeout_ms",
-    )
-}
-
-fn default_provider_auth_refresh_interval_ms() -> u64 {
-    DEFAULT_PROVIDER_AUTH_REFRESH_INTERVAL_MS
-}
-
-fn non_zero_u64(value: u64, field_name: &str) -> NonZeroU64 {
-    match NonZeroU64::new(value) {
-        Some(value) => value,
-        None => panic!("{field_name} must be non-zero"),
-    }
-}
-
-fn default_provider_auth_cwd() -> AbsolutePathBuf {
-    let deserializer = serde::de::value::StrDeserializer::<serde::de::value::Error>::new(".");
-    if let Ok(cwd) = AbsolutePathBuf::deserialize(deserializer) {
-        return cwd;
-    }
-
-    match AbsolutePathBuf::current_dir() {
-        Ok(cwd) => cwd,
-        Err(err) => panic!("provider auth cwd must resolve: {err}"),
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Display)]

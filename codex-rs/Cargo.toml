@@ -153,8 +153,8 @@ predicates = "3"
 pretty_assertions = "1.4.1"
 rand = "0.9"
 rcgen = { version = "0.14.7", default-features = false, features = [
-    "aws_lc_rs",
     "pem",
+    "ring",
 ] }
 regex = "1.12.3"
 regex-lite = "0.1.8"

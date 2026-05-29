@@ -5,7 +5,6 @@ pub(crate) mod hosted_spec;
 pub(crate) mod parallel;
 pub(crate) mod registry;
 pub(crate) mod router;
-pub(crate) mod runtimes;
 pub(crate) mod spec_plan;
 
 use std::borrow::Cow;

@@ -2,7 +2,6 @@ use codex_api::Provider as ApiProvider;
 use codex_api::RetryConfig as ApiRetryConfig;
 use codex_api::is_azure_responses_provider;
 use codex_app_server_protocol::AuthMode;
-use codex_protocol::config_types::ModelProviderAuthInfo;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::EnvVarError;
 use codex_protocol::error::Result as CodexResult;
@@ -60,6 +59,7 @@ impl<'de> Deserialize<'de> for WireApi {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ModelProviderInfo {
     #[serde(default)]
     pub name: String,
@@ -69,8 +69,6 @@ pub struct ModelProviderInfo {
     pub env_key: Option<String>,
 
     pub env_key_instructions: Option<String>,
-
-    pub auth: Option<ModelProviderAuthInfo>,
 
     #[serde(default)]
     pub wire_api: WireApi,
@@ -97,33 +95,6 @@ pub struct ModelProviderInfo {
 }
 
 impl ModelProviderInfo {
-    pub fn validate(&self) -> std::result::Result<(), String> {
-        let Some(auth) = self.auth.as_ref() else {
-            return Ok(());
-        };
-
-        if auth.command.trim().is_empty() {
-            return Err("provider auth.command must not be empty".to_string());
-        }
-
-        let mut conflicts = Vec::new();
-        if self.env_key.is_some() {
-            conflicts.push("env_key");
-        }
-        if self.requires_openai_auth {
-            conflicts.push("requires_openai_auth");
-        }
-
-        if conflicts.is_empty() {
-            Ok(())
-        } else {
-            Err(format!(
-                "provider auth cannot be combined with {}",
-                conflicts.join(", ")
-            ))
-        }
-    }
-
     fn build_header_map(&self) -> CodexResult<HeaderMap> {
         let capacity = self.http_headers.as_ref().map_or(0, HashMap::len)
             + self.env_http_headers.as_ref().map_or(0, HashMap::len);
@@ -232,7 +203,6 @@ impl ModelProviderInfo {
             base_url,
             env_key: None,
             env_key_instructions: None,
-            auth: None,
             wire_api: WireApi::Responses,
             query_params: None,
             http_headers: Some(
@@ -267,10 +237,6 @@ impl ModelProviderInfo {
 
     pub fn supports_remote_compaction(&self) -> bool {
         self.is_openai() || is_azure_responses_provider(&self.name, self.base_url.as_deref())
-    }
-
-    pub fn has_command_auth(&self) -> bool {
-        self.auth.is_some()
     }
 }
 
