@@ -58,7 +58,6 @@ struct CodeSuccessResp {
     code_verifier: String,
 }
 
-/// Request the user code and polling interval.
 async fn request_user_code(
     client: &reqwest::Client,
     auth_base_url: &str,
@@ -95,7 +94,6 @@ async fn request_user_code(
     serde_json::from_str(&body).map_err(std::io::Error::other)
 }
 
-/// Poll token endpoint until a code is issued or timeout occurs.
 async fn poll_for_token(
     client: &reqwest::Client,
     auth_base_url: &str,
@@ -212,7 +210,7 @@ pub async fn complete_device_code_login(
 
     crate::server::persist_tokens_async(
         &opts.codex_home,
-        /*api_key*/ None,
+        None,
         tokens.id_token,
         tokens.access_token,
         tokens.refresh_token,

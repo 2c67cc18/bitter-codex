@@ -29,8 +29,7 @@ mod wsl {
 
     #[test]
     fn wsl_mnt_drive_paths_lowercase() {
-        let normalized =
-            normalize_for_wsl_with_flag(PathBuf::from("/mnt/C/Users/Dev"), /*is_wsl*/ true);
+        let normalized = normalize_for_wsl_with_flag(PathBuf::from("/mnt/C/Users/Dev"), true);
 
         assert_eq!(normalized, PathBuf::from("/mnt/c/users/dev"));
     }
@@ -38,7 +37,7 @@ mod wsl {
     #[test]
     fn wsl_non_drive_paths_unchanged() {
         let path = PathBuf::from("/mnt/cc/Users/Dev");
-        let normalized = normalize_for_wsl_with_flag(path.clone(), /*is_wsl*/ true);
+        let normalized = normalize_for_wsl_with_flag(path.clone(), true);
 
         assert_eq!(normalized, path);
     }
@@ -46,34 +45,21 @@ mod wsl {
     #[test]
     fn wsl_non_mnt_paths_unchanged() {
         let path = PathBuf::from("/home/Dev");
-        let normalized = normalize_for_wsl_with_flag(path.clone(), /*is_wsl*/ true);
+        let normalized = normalize_for_wsl_with_flag(path.clone(), true);
 
         assert_eq!(normalized, path);
     }
 }
 
 mod native_workdir {
-    use super::super::normalize_for_native_workdir_with_flag;
+    use super::super::normalize_for_native_workdir;
     use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 
-    #[cfg(target_os = "windows")]
     #[test]
-    fn windows_verbatim_paths_are_simplified() {
+    fn native_workdir_paths_are_unchanged() {
         let path = PathBuf::from(r"\\?\D:\c\x\worktrees\2508\swift-base");
-        let normalized = normalize_for_native_workdir_with_flag(path, /*is_windows*/ true);
-
-        assert_eq!(
-            normalized,
-            PathBuf::from(r"D:\c\x\worktrees\2508\swift-base")
-        );
-    }
-
-    #[test]
-    fn non_windows_paths_are_unchanged() {
-        let path = PathBuf::from(r"\\?\D:\c\x\worktrees\2508\swift-base");
-        let normalized =
-            normalize_for_native_workdir_with_flag(path.clone(), /*is_windows*/ false);
+        let normalized = normalize_for_native_workdir(path.clone());
 
         assert_eq!(normalized, path);
     }
@@ -101,15 +87,5 @@ mod path_comparison {
             PathBuf::from("missing-a"),
             PathBuf::from("missing-b"),
         ));
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn matches_windows_verbatim_paths() -> std::io::Result<()> {
-        let dir = tempfile::tempdir()?;
-        let verbatim_dir = PathBuf::from(format!(r"\\?\{}", dir.path().display()));
-
-        assert!(paths_match_after_normalization(verbatim_dir, dir.path()));
-        Ok(())
     }
 }

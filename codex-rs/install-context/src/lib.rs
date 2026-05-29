@@ -21,13 +21,12 @@ pub enum StandalonePlatform {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CodexPackageLayout {
-    /// The package root that contains the metadata file and layout directories.
     pub package_dir: AbsolutePathBuf,
-    /// Directory containing the Codex entrypoint executable.
+
     pub bin_dir: AbsolutePathBuf,
-    /// Directory containing managed helper binaries and data files, when present.
+
     pub resources_dir: Option<AbsolutePathBuf>,
-    /// Folder that should be prepended to the PATH, when present.
+
     pub path_dir: Option<AbsolutePathBuf>,
 }
 
@@ -40,27 +39,19 @@ pub struct InstallContext {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InstallMethod {
     Standalone {
-        /// The managed standalone release directory. Legacy installs use paths
-        /// such as
-        /// `~/.codex/packages/standalone/releases/0.111.0-x86_64-unknown-linux-musl`.
-        /// Package-layout installs use the package root that contains `bin/`,
-        /// `codex-resources/`, and `codex-path/`.
         release_dir: AbsolutePathBuf,
-        /// The bundled resource directory for managed dependencies.
+
         resources_dir: Option<AbsolutePathBuf>,
-        /// The platform of the standalone release, either `Unix` or `Windows`.
+
         platform: StandalonePlatform,
     },
-    /// A Codex binary launched through the npm-managed `codex.js` shim.
+
     Npm,
-    /// A Codex binary launched through the bun-managed `codex.js` shim.
+
     Bun,
-    /// A Codex binary that appears to come from a Homebrew install prefix.
+
     Brew,
-    /// Any other execution environment.
-    ///
-    /// This commonly covers `cargo run`, app-bundled Codex binaries, custom
-    /// internal launchers, and tests that execute Codex from an arbitrary path.
+
     Other,
 }
 
@@ -241,11 +232,7 @@ fn canonical_absolute_path(path: &Path) -> Option<AbsolutePathBuf> {
 }
 
 fn standalone_platform() -> StandalonePlatform {
-    if cfg!(windows) {
-        StandalonePlatform::Windows
-    } else {
-        StandalonePlatform::Unix
-    }
+    StandalonePlatform::Unix
 }
 
 fn existing_dir(path: AbsolutePathBuf) -> Option<AbsolutePathBuf> {
@@ -253,11 +240,7 @@ fn existing_dir(path: AbsolutePathBuf) -> Option<AbsolutePathBuf> {
 }
 
 fn default_rg_command() -> PathBuf {
-    if cfg!(windows) {
-        PathBuf::from("rg.exe")
-    } else {
-        PathBuf::from("rg")
-    }
+    PathBuf::from("rg")
 }
 
 #[cfg(test)]
@@ -276,7 +259,7 @@ mod tests {
             .join("packages/standalone/releases/1.2.3-x86_64-unknown-linux-musl");
         let resources_dir = release_dir.join(RESOURCES_DIRNAME);
         fs::create_dir_all(&resources_dir)?;
-        let exe_path = release_dir.join(if cfg!(windows) { "codex.exe" } else { "codex" });
+        let exe_path = release_dir.join("codex");
         fs::write(&exe_path, "")?;
         fs::write(resources_dir.join(default_rg_command()), "")?;
         fs::write(resources_dir.join(TEST_RESOURCE_NAME), "")?;
@@ -286,11 +269,11 @@ mod tests {
             AbsolutePathBuf::from_absolute_path(resources_dir.canonicalize()?)?;
 
         let context = InstallContext::from_exe_with_codex_home(
-            /*is_macos*/ false,
-            /*current_exe*/ Some(&exe_path),
-            /*managed_by_npm*/ false,
-            /*managed_by_bun*/ false,
-            /*codex_home*/ Some(codex_home.path()),
+            false,
+            Some(&exe_path),
+            false,
+            false,
+            Some(codex_home.path()),
         );
         assert_eq!(
             context,
@@ -317,15 +300,15 @@ mod tests {
             .path()
             .join("packages/standalone/releases/1.2.3-x86_64-unknown-linux-musl");
         fs::create_dir_all(&release_dir)?;
-        let exe_path = release_dir.join(if cfg!(windows) { "codex.exe" } else { "codex" });
+        let exe_path = release_dir.join("codex");
         fs::write(&exe_path, "")?;
 
         let context = InstallContext::from_exe_with_codex_home(
-            /*is_macos*/ false,
-            /*current_exe*/ Some(&exe_path),
-            /*managed_by_npm*/ false,
-            /*managed_by_bun*/ false,
-            /*codex_home*/ Some(codex_home.path()),
+            false,
+            Some(&exe_path),
+            false,
+            false,
+            Some(codex_home.path()),
         );
         assert_eq!(context.rg_command(), default_rg_command());
         Ok(())
@@ -341,7 +324,7 @@ mod tests {
         fs::create_dir_all(&resources_dir)?;
         fs::create_dir_all(&path_dir)?;
         fs::write(package_dir.path().join(PACKAGE_METADATA_FILENAME), "{}")?;
-        let exe_path = bin_dir.join(if cfg!(windows) { "codex.exe" } else { "codex" });
+        let exe_path = bin_dir.join("codex");
         fs::write(&exe_path, "")?;
         fs::write(resources_dir.join(TEST_RESOURCE_NAME), "")?;
         fs::write(path_dir.join(default_rg_command()), "")?;
@@ -358,13 +341,8 @@ mod tests {
             path_dir: Some(canonical_path_dir.clone()),
         };
 
-        let context = InstallContext::from_exe_with_codex_home(
-            /*is_macos*/ false,
-            /*current_exe*/ Some(&exe_path),
-            /*managed_by_npm*/ false,
-            /*managed_by_bun*/ false,
-            /*codex_home*/ None,
-        );
+        let context =
+            InstallContext::from_exe_with_codex_home(false, Some(&exe_path), false, false, None);
         assert_eq!(
             context,
             InstallContext {
@@ -398,7 +376,7 @@ mod tests {
         fs::create_dir_all(&resources_dir)?;
         fs::create_dir_all(&path_dir)?;
         fs::write(package_dir.join(PACKAGE_METADATA_FILENAME), "{}")?;
-        let exe_path = bin_dir.join(if cfg!(windows) { "codex.exe" } else { "codex" });
+        let exe_path = bin_dir.join("codex");
         fs::write(&exe_path, "")?;
         fs::write(resources_dir.join(TEST_RESOURCE_NAME), "")?;
         fs::write(path_dir.join(default_rg_command()), "")?;
@@ -410,11 +388,11 @@ mod tests {
         let canonical_path_dir = AbsolutePathBuf::from_absolute_path(path_dir.canonicalize()?)?;
 
         let context = InstallContext::from_exe_with_codex_home(
-            /*is_macos*/ false,
-            /*current_exe*/ Some(&exe_path),
-            /*managed_by_npm*/ false,
-            /*managed_by_bun*/ false,
-            /*codex_home*/ Some(codex_home.path()),
+            false,
+            Some(&exe_path),
+            false,
+            false,
+            Some(codex_home.path()),
         );
         assert_eq!(
             context,
@@ -453,18 +431,13 @@ mod tests {
         fs::create_dir_all(&bin_dir)?;
         fs::create_dir_all(&path_dir)?;
         fs::write(package_dir.path().join(PACKAGE_METADATA_FILENAME), "{}")?;
-        let exe_path = bin_dir.join(if cfg!(windows) { "codex.exe" } else { "codex" });
+        let exe_path = bin_dir.join("codex");
         fs::write(&exe_path, "")?;
         fs::write(path_dir.join(default_rg_command()), "")?;
         let canonical_path_dir = AbsolutePathBuf::from_absolute_path(path_dir.canonicalize()?)?;
 
-        let context = InstallContext::from_exe_with_codex_home(
-            /*is_macos*/ false,
-            /*current_exe*/ Some(&exe_path),
-            /*managed_by_npm*/ true,
-            /*managed_by_bun*/ false,
-            /*codex_home*/ None,
-        );
+        let context =
+            InstallContext::from_exe_with_codex_home(false, Some(&exe_path), true, false, None);
         assert_eq!(context.method, InstallMethod::Npm);
         assert!(context.package_layout.is_some());
         assert_eq!(
@@ -482,16 +455,11 @@ mod tests {
         let bin_dir = package_dir.path().join(BIN_DIRNAME);
         fs::create_dir_all(&bin_dir)?;
         fs::write(package_dir.path().join(PACKAGE_METADATA_FILENAME), "{}")?;
-        let exe_path = bin_dir.join(if cfg!(windows) { "codex.exe" } else { "codex" });
+        let exe_path = bin_dir.join("codex");
         fs::write(&exe_path, "")?;
 
-        let context = InstallContext::from_exe_with_codex_home(
-            /*is_macos*/ false,
-            /*current_exe*/ Some(&exe_path),
-            /*managed_by_npm*/ false,
-            /*managed_by_bun*/ false,
-            /*codex_home*/ None,
-        );
+        let context =
+            InstallContext::from_exe_with_codex_home(false, Some(&exe_path), false, false, None);
         assert_eq!(context.rg_command(), default_rg_command());
         Ok(())
     }
@@ -506,16 +474,11 @@ mod tests {
         fs::create_dir_all(resources_dir.join(TEST_RESOURCE_NAME))?;
         fs::create_dir_all(path_dir.join(default_rg_command()))?;
         fs::write(package_dir.path().join(PACKAGE_METADATA_FILENAME), "{}")?;
-        let exe_path = bin_dir.join(if cfg!(windows) { "codex.exe" } else { "codex" });
+        let exe_path = bin_dir.join("codex");
         fs::write(&exe_path, "")?;
 
-        let context = InstallContext::from_exe_with_codex_home(
-            /*is_macos*/ false,
-            /*current_exe*/ Some(&exe_path),
-            /*managed_by_npm*/ false,
-            /*managed_by_bun*/ false,
-            /*codex_home*/ None,
-        );
+        let context =
+            InstallContext::from_exe_with_codex_home(false, Some(&exe_path), false, false, None);
         assert_eq!(context.rg_command(), default_rg_command());
         assert_eq!(context.bundled_resource(TEST_RESOURCE_NAME), None);
         Ok(())
@@ -524,11 +487,11 @@ mod tests {
     #[test]
     fn npm_and_bun_take_precedence() {
         let npm_context = InstallContext::from_exe_with_codex_home(
-            /*is_macos*/ false,
-            /*current_exe*/ Some(Path::new("/tmp/codex")),
-            /*managed_by_npm*/ true,
-            /*managed_by_bun*/ false,
-            /*codex_home*/ None,
+            false,
+            Some(Path::new("/tmp/codex")),
+            true,
+            false,
+            None,
         );
         assert_eq!(
             npm_context,
@@ -539,11 +502,11 @@ mod tests {
         );
 
         let bun_context = InstallContext::from_exe_with_codex_home(
-            /*is_macos*/ false,
-            /*current_exe*/ Some(Path::new("/tmp/codex")),
-            /*managed_by_npm*/ false,
-            /*managed_by_bun*/ true,
-            /*codex_home*/ None,
+            false,
+            Some(Path::new("/tmp/codex")),
+            false,
+            true,
+            None,
         );
         assert_eq!(
             bun_context,
@@ -557,11 +520,11 @@ mod tests {
     #[test]
     fn brew_is_detected_on_macos_prefixes() {
         let context = InstallContext::from_exe_with_codex_home(
-            /*is_macos*/ true,
-            /*current_exe*/ Some(Path::new("/opt/homebrew/bin/codex")),
-            /*managed_by_npm*/ false,
-            /*managed_by_bun*/ false,
-            /*codex_home*/ None,
+            true,
+            Some(Path::new("/opt/homebrew/bin/codex")),
+            false,
+            false,
+            None,
         );
         assert_eq!(
             context,

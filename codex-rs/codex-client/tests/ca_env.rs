@@ -1,13 +1,3 @@
-//! Subprocess coverage for custom CA behavior that must build a real reqwest client.
-//!
-//! These tests intentionally run through `custom_ca_probe` and
-//! `build_reqwest_client_for_subprocess_tests` instead of calling the helper in-process. The
-//! detailed explanation of what "hermetic" means here lives in `codex_client::custom_ca`; these
-//! tests add the process-level half of that contract by scrubbing inherited CA environment
-//! variables before each subprocess launch. Most assertions here cover CA file selection, PEM
-//! parsing, and user-facing errors. The HTTPS probes go further and perform real POSTs against
-//! locally generated certificates, including through a TLS-intercepting CONNECT proxy.
-
 use codex_utils_cargo_bin::cargo_bin;
 use rcgen::BasicConstraints;
 use rcgen::CertificateParams;
@@ -93,8 +83,7 @@ fn probe_command() -> Command {
         cargo_bin("custom_ca_probe")
             .unwrap_or_else(|error| panic!("failed to locate custom_ca_probe: {error}")),
     );
-    // `Command` inherits the parent environment by default, so scrub CA-related variables first or
-    // these tests can accidentally pass/fail based on the developer shell or CI runner.
+
     cmd.env_remove(CODEX_CA_CERT_ENV);
     cmd.env_remove(PROBE_PROXY_ENV);
     cmd.env_remove(PROBE_TLS13_ENV);

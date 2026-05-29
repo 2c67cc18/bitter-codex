@@ -1,10 +1,3 @@
-//! Best-effort OAuth token revocation for managed auth cleanup.
-//!
-//! Managed ChatGPT auth stores OAuth tokens locally. Cleanup attempts to revoke
-//! the refresh token, falling back to the access token when no refresh token is
-//! available, and callers still complete their primary work if the revoke request
-//! fails.
-
 use serde::Serialize;
 use std::time::Duration;
 
@@ -171,7 +164,6 @@ fn derive_revoke_token_endpoint(refresh_endpoint: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core_test_support::skip_if_no_network;
     use wiremock::Mock;
     use wiremock::MockServer;
     use wiremock::ResponseTemplate;
@@ -188,8 +180,6 @@ mod tests {
 
     #[tokio::test]
     async fn revoke_request_times_out() {
-        skip_if_no_network!();
-
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/oauth/revoke"))

@@ -2,10 +2,6 @@ use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use std::marker::PhantomData;
 
-/// Type-erased registration for a contextual user fragment.
-///
-/// Implementations are used by context filtering code to recognize injected
-/// fragments without constructing the concrete context payload.
 pub(crate) trait FragmentRegistration: Sync {
     fn matches_text(&self, text: &str) -> bool;
 }
@@ -28,15 +24,6 @@ impl<T: ContextualUserFragment> FragmentRegistration for FragmentRegistrationPro
     }
 }
 
-/// Context payload that is injected as a message fragment.
-///
-/// Implementations own the response role and provide the exact fragment body.
-/// Marked fragments also provide start/end markers used to recognize injected
-/// context later. `render()` concatenates markers and body without adding
-/// separators, so implementations should include any whitespace they need
-/// between tags in `body()`. Unmarked fragments should leave both markers empty,
-/// in which case the default helpers render only the body and never match
-/// arbitrary text.
 pub trait ContextualUserFragment {
     fn role() -> &'static str
     where

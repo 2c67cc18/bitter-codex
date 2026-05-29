@@ -227,7 +227,7 @@ async fn schedule_startup_prewarm_inner(
     startup_turn_context.session_telemetry.record_startup_phase(
         "startup_prewarm_create_turn_context",
         prewarm_started_at.elapsed(),
-        /*status*/ None,
+        None,
     );
     let startup_cancellation_token = CancellationToken::new();
     let built_tools_started_at = Instant::now();
@@ -240,7 +240,7 @@ async fn schedule_startup_prewarm_inner(
     startup_turn_context.session_telemetry.record_startup_phase(
         "startup_prewarm_build_tools",
         built_tools_started_at.elapsed(),
-        /*status*/ None,
+        None,
     );
     let build_prompt_started_at = Instant::now();
     let startup_prompt = build_prompt(
@@ -254,7 +254,7 @@ async fn schedule_startup_prewarm_inner(
     startup_turn_context.session_telemetry.record_startup_phase(
         "startup_prewarm_build_prompt",
         build_prompt_started_at.elapsed(),
-        /*status*/ None,
+        None,
     );
     let startup_turn_metadata_header = startup_turn_context
         .turn_metadata_state
@@ -275,7 +275,7 @@ async fn schedule_startup_prewarm_inner(
     startup_turn_context.session_telemetry.record_startup_phase(
         "startup_prewarm_websocket_warmup",
         websocket_warmup_started_at.elapsed(),
-        /*status*/ None,
+        None,
     );
 
     Ok(client_session)

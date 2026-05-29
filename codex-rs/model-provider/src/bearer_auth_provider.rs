@@ -2,7 +2,6 @@ use codex_api::AuthProvider;
 use http::HeaderMap;
 use http::HeaderValue;
 
-/// Bearer-token auth provider for OpenAI-compatible model-provider requests.
 #[derive(Clone, Default)]
 pub struct BearerAuthProvider {
     pub token: Option<String>,

@@ -8,7 +8,6 @@ use crate::sqlite_metrics;
 use chrono::DateTime;
 use chrono::Utc;
 use codex_protocol::ThreadId;
-use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::SessionSource;
 pub use codex_state::LogEntry;
@@ -23,7 +22,6 @@ use std::time::Instant;
 use tracing::info;
 use tracing::warn;
 
-/// Core-facing handle to the SQLite-backed state runtime.
 pub type StateDbHandle = Arc<codex_state::StateRuntime>;
 
 #[cfg(not(test))]
@@ -35,11 +33,6 @@ const STARTUP_BACKFILL_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
 #[cfg(test)]
 const STARTUP_BACKFILL_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// Initialize the state runtime for thread state persistence.
-///
-/// This is the process entry point for local state: it opens the SQLite-backed
-/// runtime, applies rollout metadata backfills as needed, and returns the
-/// initialized handle.
 pub async fn init(config: &impl RolloutConfigView) -> Option<StateDbHandle> {
     let config = RolloutConfig::from_view(config);
     match try_init_with_roots(
@@ -57,10 +50,6 @@ pub async fn init(config: &impl RolloutConfigView) -> Option<StateDbHandle> {
     }
 }
 
-/// Initialize the state runtime and return any initialization error to the caller.
-///
-/// Prefer [`init`] unless the caller needs to surface the exact failure after
-/// tracing or UI setup has completed.
 pub async fn try_init(config: &impl RolloutConfigView) -> anyhow::Result<StateDbHandle> {
     let config = RolloutConfig::from_view(config);
     try_init_with_roots(
@@ -76,13 +65,7 @@ async fn try_init_with_roots(
     sqlite_home: PathBuf,
     default_model_provider_id: String,
 ) -> anyhow::Result<StateDbHandle> {
-    try_init_with_roots_inner(
-        codex_home,
-        sqlite_home,
-        default_model_provider_id,
-        /*backfill_lease_seconds*/ None,
-    )
-    .await
+    try_init_with_roots_inner(codex_home, sqlite_home, default_model_provider_id, None).await
 }
 
 #[cfg(test)]
@@ -124,11 +107,7 @@ async fn try_init_with_roots_inner(
         backfill_lease_seconds,
     )
     .await;
-    codex_state::record_backfill_gate(
-        /*telemetry*/ None,
-        backfill_gate_started.elapsed(),
-        &backfill_gate_result,
-    );
+    codex_state::record_backfill_gate(None, backfill_gate_started.elapsed(), &backfill_gate_result);
     backfill_gate_result?;
     Ok(runtime)
 }
@@ -207,18 +186,10 @@ fn emit_startup_warning(message: &str) {
     }
 }
 
-/// Open the DB if it exists and its startup backfill has already completed.
-///
-/// Unlike [`init`], this helper does not run rollout backfill. It is for
-/// optional local reads from non-owning contexts such as remote app-server mode.
 pub async fn get_state_db(config: &impl RolloutConfigView) -> Option<StateDbHandle> {
     let state_path = codex_state::state_db_path(config.sqlite_home());
     if !tokio::fs::try_exists(&state_path).await.unwrap_or(false) {
-        codex_state::record_fallback(
-            "get_state_db",
-            "db_unavailable",
-            /*telemetry_override*/ None,
-        );
+        codex_state::record_fallback("get_state_db", "db_unavailable", None);
         return None;
     }
     let runtime = match codex_state::StateRuntime::init(
@@ -229,18 +200,13 @@ pub async fn get_state_db(config: &impl RolloutConfigView) -> Option<StateDbHand
     {
         Ok(runtime) => runtime,
         Err(_) => {
-            codex_state::record_fallback(
-                "get_state_db",
-                "db_error",
-                /*telemetry_override*/ None,
-            );
+            codex_state::record_fallback("get_state_db", "db_error", None);
             return None;
         }
     };
     require_backfill_complete(runtime, config.sqlite_home()).await
 }
 
-/// Build a SQLite telemetry recorder backed by an OTEL metrics client.
 pub fn sqlite_telemetry_recorder(
     metrics: codex_otel::MetricsClient,
     originator: &str,
@@ -260,11 +226,7 @@ async fn require_backfill_complete(
                 codex_home.display(),
                 state.status.as_str()
             );
-            codex_state::record_fallback(
-                "get_state_db",
-                "backfill_incomplete",
-                /*telemetry_override*/ None,
-            );
+            codex_state::record_fallback("get_state_db", "backfill_incomplete", None);
             None
         }
         Err(err) => {
@@ -272,11 +234,7 @@ async fn require_backfill_complete(
                 "failed to read backfill state at {}: {err}",
                 codex_home.display()
             );
-            codex_state::record_fallback(
-                "get_state_db",
-                "db_error",
-                /*telemetry_override*/ None,
-            );
+            codex_state::record_fallback("get_state_db", "db_error", None);
             None
         }
     }
@@ -294,7 +252,6 @@ pub fn normalize_cwd_for_state_db(cwd: &Path) -> PathBuf {
     normalize_for_path_comparison(cwd).unwrap_or_else(|_| cwd.to_path_buf())
 }
 
-/// List thread ids from SQLite for parity checks without rollout scanning.
 #[allow(clippy::too_many_arguments)]
 pub async fn list_thread_ids_db(
     context: Option<&codex_state::StateRuntime>,
@@ -348,7 +305,6 @@ pub async fn list_thread_ids_db(
     }
 }
 
-/// List thread metadata from SQLite without rollout directory traversal.
 #[allow(clippy::too_many_arguments)]
 pub async fn list_threads_db(
     context: Option<&codex_state::StateRuntime>,
@@ -438,7 +394,6 @@ pub async fn list_threads_db(
     }
 }
 
-/// Look up the rollout path for a thread id using SQLite.
 pub async fn find_rollout_path_by_id(
     context: Option<&codex_state::StateRuntime>,
     thread_id: ThreadId,
@@ -454,51 +409,6 @@ pub async fn find_rollout_path_by_id(
         })
 }
 
-/// Get dynamic tools for a thread id using SQLite.
-pub async fn get_dynamic_tools(
-    context: Option<&codex_state::StateRuntime>,
-    thread_id: ThreadId,
-    stage: &str,
-) -> Option<Vec<DynamicToolSpec>> {
-    let ctx = context?;
-    match ctx.get_dynamic_tools(thread_id).await {
-        Ok(tools) => tools,
-        Err(err) => {
-            warn!("state db get_dynamic_tools failed during {stage}: {err}");
-            None
-        }
-    }
-}
-
-/// Persist dynamic tools for a thread id using SQLite, if none exist yet.
-pub async fn persist_dynamic_tools(
-    context: Option<&codex_state::StateRuntime>,
-    thread_id: ThreadId,
-    tools: Option<&[DynamicToolSpec]>,
-    stage: &str,
-) {
-    let Some(ctx) = context else {
-        return;
-    };
-    if let Err(err) = ctx.persist_dynamic_tools(thread_id, tools).await {
-        warn!("state db persist_dynamic_tools failed during {stage}: {err}");
-    }
-}
-
-pub async fn mark_thread_memory_mode_polluted(
-    context: Option<&codex_state::StateRuntime>,
-    thread_id: ThreadId,
-    stage: &str,
-) {
-    let Some(ctx) = context else {
-        return;
-    };
-    if let Err(err) = ctx.mark_thread_memory_mode_polluted(thread_id).await {
-        warn!("state db mark_thread_memory_mode_polluted failed during {stage}: {err}");
-    }
-}
-
-/// Reconcile rollout items into SQLite, falling back to scanning the rollout file.
 pub async fn reconcile_rollout(
     context: Option<&codex_state::StateRuntime>,
     rollout_path: &Path,
@@ -506,7 +416,6 @@ pub async fn reconcile_rollout(
     builder: Option<&ThreadMetadataBuilder>,
     items: &[RolloutItem],
     archived_only: Option<bool>,
-    new_thread_memory_mode: Option<&str>,
 ) {
     let Some(ctx) = context else {
         return;
@@ -519,8 +428,7 @@ pub async fn reconcile_rollout(
             builder,
             items,
             "reconcile_rollout",
-            new_thread_memory_mode,
-            /*updated_at_override*/ None,
+            None,
         )
         .await;
         return;
@@ -537,7 +445,6 @@ pub async fn reconcile_rollout(
             }
         };
     let mut metadata = outcome.metadata;
-    let memory_mode = outcome.memory_mode.unwrap_or_else(|| "enabled".to_string());
     metadata.cwd = normalize_cwd_for_state_db(&metadata.cwd);
     if let Ok(Some(existing_metadata)) = ctx.get_thread(metadata.id).await {
         metadata.prefer_existing_git_info(&existing_metadata);
@@ -558,33 +465,8 @@ pub async fn reconcile_rollout(
         );
         return;
     }
-    if let Err(err) = ctx
-        .set_thread_memory_mode(metadata.id, memory_mode.as_str())
-        .await
-    {
-        warn!(
-            "state db reconcile_rollout memory_mode update failed {}: {err}",
-            rollout_path.display()
-        );
-        return;
-    }
-    if let Ok(meta_line) = crate::list::read_session_meta_line(rollout_path).await {
-        persist_dynamic_tools(
-            Some(ctx),
-            meta_line.meta.id,
-            meta_line.meta.dynamic_tools.as_deref(),
-            "reconcile_rollout",
-        )
-        .await;
-    } else {
-        warn!(
-            "state db reconcile_rollout missing session meta {}",
-            rollout_path.display()
-        );
-    }
 }
 
-/// Repair a thread's rollout path after filesystem fallback succeeds.
 pub async fn read_repair_rollout_path(
     context: Option<&codex_state::StateRuntime>,
     thread_id: Option<ThreadId>,
@@ -595,8 +477,6 @@ pub async fn read_repair_rollout_path(
         return;
     };
 
-    // Fast path: update an existing metadata row in place, but avoid writes when
-    // read-repair computes no effective change.
     let mut saw_existing_metadata = false;
     if let Some(thread_id) = thread_id
         && let Ok(Some(metadata)) = ctx.get_thread(thread_id).await
@@ -628,8 +508,6 @@ pub async fn read_repair_rollout_path(
         }
     }
 
-    // Slow path: when the row is missing/unreadable (or direct upsert failed),
-    // rebuild metadata from rollout contents and reconcile it into SQLite.
     if !saw_existing_metadata {
         warn!("state db discrepancy during read_repair_rollout_path: upsert_needed (slow path)");
     }
@@ -642,15 +520,13 @@ pub async fn read_repair_rollout_path(
         Some(ctx),
         rollout_path,
         default_provider.as_str(),
-        /*builder*/ None,
+        None,
         &[],
         archived_only,
-        /*new_thread_memory_mode*/ None,
     )
     .await;
 }
 
-/// Apply rollout items incrementally to SQLite.
 #[allow(clippy::too_many_arguments)]
 pub async fn apply_rollout_items(
     context: Option<&codex_state::StateRuntime>,
@@ -659,7 +535,6 @@ pub async fn apply_rollout_items(
     builder: Option<&ThreadMetadataBuilder>,
     items: &[RolloutItem],
     stage: &str,
-    new_thread_memory_mode: Option<&str>,
     updated_at_override: Option<DateTime<Utc>>,
 ) {
     let Some(ctx) = context else {
@@ -685,7 +560,7 @@ pub async fn apply_rollout_items(
     builder.rollout_path = rollout_path.to_path_buf();
     builder.cwd = normalize_cwd_for_state_db(&builder.cwd);
     if let Err(err) = ctx
-        .apply_rollout_items(&builder, items, new_thread_memory_mode, updated_at_override)
+        .apply_rollout_items(&builder, items, updated_at_override)
         .await
     {
         warn!(

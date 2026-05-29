@@ -2,10 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 
-use codex_analytics::AnalyticsEventsClient;
 use codex_app_server_protocol::ClientResponsePayload;
 use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::RequestId;
@@ -13,11 +10,9 @@ use codex_app_server_protocol::Result;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::ServerRequestPayload;
-use codex_app_server_protocol::ServerResponse;
 use codex_otel::span_w3c_trace_context;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::W3cTraceContext;
-use codex_protocol::request_permissions::RequestPermissionsResponse;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -38,15 +33,12 @@ use codex_protocol::account::PlanType;
 
 pub(crate) type ClientRequestResult = std::result::Result<Result, JSONRPCErrorError>;
 
-/// Stable identifier for a client request scoped to a transport connection.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct ConnectionRequestId {
     pub(crate) connection_id: ConnectionId,
     pub(crate) request_id: RequestId,
 }
 
-/// Trace data we keep for an incoming request until we send its final
-/// response or error.
 #[derive(Clone)]
 pub(crate) struct RequestContext {
     request_id: ConnectionRequestId,
@@ -92,16 +84,12 @@ pub(crate) enum OutgoingEnvelope {
     },
 }
 
-/// Sends messages to the client and manages request callbacks.
 pub(crate) struct OutgoingMessageSender {
     next_server_request_id: AtomicI64,
     sender: mpsc::Sender<OutgoingEnvelope>,
     request_id_to_callback: Mutex<HashMap<RequestId, PendingCallbackEntry>>,
-    /// Incoming requests that are still waiting on a final response or error.
-    /// We keep them here because this is where responses, errors, and
-    /// disconnect cleanup all get handled.
+
     request_contexts: Mutex<HashMap<ConnectionRequestId, RequestContext>>,
-    analytics_events_client: AnalyticsEventsClient,
 }
 
 #[derive(Clone)]
@@ -130,37 +118,7 @@ impl ThreadScopedOutgoingMessageSender {
         }
     }
 
-    pub(crate) async fn send_request(
-        &self,
-        payload: ServerRequestPayload,
-    ) -> (RequestId, oneshot::Receiver<ClientRequestResult>) {
-        self.outgoing
-            .send_request_to_connections(
-                Some(self.connection_ids.as_slice()),
-                payload,
-                Some(self.thread_id),
-            )
-            .await
-    }
-
-    pub(crate) fn track_effective_permissions_approval_response(
-        &self,
-        request_id: RequestId,
-        response: RequestPermissionsResponse,
-    ) {
-        self.outgoing
-            .analytics_events_client
-            .track_effective_permissions_approval_response(
-                now_unix_timestamp_ms(),
-                request_id,
-                response,
-            );
-    }
-
     pub(crate) async fn send_server_notification(&self, notification: ServerNotification) {
-        self.outgoing
-            .analytics_events_client
-            .track_notification(notification.clone());
         if self.connection_ids.is_empty() {
             return;
         }
@@ -169,9 +127,6 @@ impl ThreadScopedOutgoingMessageSender {
             .await;
     }
 
-    pub(crate) async fn send_global_server_notification(&self, notification: ServerNotification) {
-        self.outgoing.send_server_notification(notification).await;
-    }
 
     pub(crate) async fn abort_pending_server_requests(&self) {
         self.outgoing
@@ -196,27 +151,15 @@ impl ThreadScopedOutgoingMessageSender {
     {
         self.outgoing.send_response(request_id, response).await;
     }
-
-    pub(crate) async fn send_error(
-        &self,
-        request_id: ConnectionRequestId,
-        error: impl Into<JSONRPCErrorError>,
-    ) {
-        self.outgoing.send_error(request_id, error).await;
-    }
 }
 
 impl OutgoingMessageSender {
-    pub(crate) fn new(
-        sender: mpsc::Sender<OutgoingEnvelope>,
-        analytics_events_client: AnalyticsEventsClient,
-    ) -> Self {
+    pub(crate) fn new(sender: mpsc::Sender<OutgoingEnvelope>) -> Self {
         Self {
             next_server_request_id: AtomicI64::new(0),
             sender,
             request_id_to_callback: Mutex::new(HashMap::new()),
             request_contexts: Mutex::new(HashMap::new()),
-            analytics_events_client,
         }
     }
 
@@ -273,10 +216,7 @@ impl OutgoingMessageSender {
         &self,
         request: ServerRequestPayload,
     ) -> (RequestId, oneshot::Receiver<ClientRequestResult>) {
-        self.send_request_to_connections(
-            /*connection_ids*/ None, request, /*thread_id*/ None,
-        )
-        .await
+        self.send_request_to_connections(None, request, None).await
     }
 
     fn next_request_id(&self) -> RequestId {
@@ -329,9 +269,6 @@ impl OutgoingMessageSender {
                     {
                         send_error = Some(err);
                         break;
-                    } else {
-                        self.analytics_events_client
-                            .track_server_request(connection_id.0, request.clone());
                     }
                 }
                 match send_error {
@@ -375,13 +312,6 @@ impl OutgoingMessageSender {
 
         match entry {
             Some((id, entry)) => {
-                let completed_at_ms = now_unix_timestamp_ms();
-                if let Ok(response) = entry.request.response_from_result(result.clone())
-                    && !matches!(response, ServerResponse::PermissionsRequestApproval { .. })
-                {
-                    self.analytics_events_client
-                        .track_server_response(completed_at_ms, response);
-                }
                 if let Err(err) = entry.callback.send(Ok(result)) {
                     warn!("could not notify callback for {id:?} due to: {err:?}");
                 }
@@ -398,8 +328,6 @@ impl OutgoingMessageSender {
         match entry {
             Some((id, entry)) => {
                 warn!("client responded with error for {id:?}: {error:?}");
-                self.analytics_events_client
-                    .track_server_request_aborted(now_unix_timestamp_ms(), id.clone());
                 if let Err(err) = entry.callback.send(Err(error)) {
                     warn!("could not notify callback for {id:?} due to: {err:?}");
                 }
@@ -412,9 +340,7 @@ impl OutgoingMessageSender {
 
     pub(crate) async fn cancel_request(&self, id: &RequestId) -> bool {
         let entry = self.take_request_callback(id).await;
-        if let Some((request_id, _entry)) = entry {
-            self.analytics_events_client
-                .track_server_request_aborted(now_unix_timestamp_ms(), request_id);
+        if let Some((_request_id, _entry)) = entry {
             true
         } else {
             false
@@ -431,8 +357,6 @@ impl OutgoingMessageSender {
         };
 
         for entry in entries {
-            self.analytics_events_client
-                .track_server_request_aborted(now_unix_timestamp_ms(), entry.request.id().clone());
             if let Some(error) = error.as_ref()
                 && let Err(err) = entry.callback.send(Err(error.clone()))
             {
@@ -489,8 +413,6 @@ impl OutgoingMessageSender {
         };
 
         for entry in entries {
-            self.analytics_events_client
-                .track_server_request_aborted(now_unix_timestamp_ms(), entry.request.id().clone());
             if let Some(error) = error.as_ref()
                 && let Err(err) = entry.callback.send(Err(error.clone()))
             {
@@ -513,19 +435,9 @@ impl OutgoingMessageSender {
         response: ClientResponsePayload,
     ) {
         let connection_id = request_id.connection_id;
-        let request_id_for_analytics = request_id.request_id.clone();
         let serialized_response = response
             .into_jsonrpc_parts_and_payload(request_id.request_id.clone())
-            .map(|(id, result, response)| {
-                if let Some(response) = response {
-                    self.analytics_events_client.track_response(
-                        connection_id.0,
-                        request_id_for_analytics,
-                        response,
-                    );
-                }
-                (id, result)
-            });
+            .map(|(id, result, _response)| (id, result));
         let request_context = self.take_request_context(&request_id).await;
 
         match serialized_response {
@@ -590,28 +502,6 @@ impl OutgoingMessageSender {
                 warn!("failed to send server notification to client: {err:?}");
             }
         }
-    }
-
-    pub(crate) async fn send_server_notification_to_connection_and_wait(
-        &self,
-        connection_id: ConnectionId,
-        notification: ServerNotification,
-    ) {
-        tracing::trace!("app-server event: {notification}");
-        let outgoing_message = OutgoingMessage::AppServerNotification(notification.clone());
-        let (write_complete_tx, write_complete_rx) = oneshot::channel();
-        if let Err(err) = self
-            .sender
-            .send(OutgoingEnvelope::ToConnection {
-                connection_id,
-                message: outgoing_message,
-                write_complete_tx: Some(write_complete_tx),
-            })
-            .await
-        {
-            warn!("failed to send server notification to client: {err:?}");
-        }
-        let _ = write_complete_rx.await;
     }
 
     pub(crate) async fn send_error(
@@ -683,15 +573,6 @@ impl OutgoingMessageSender {
     }
 }
 
-fn now_unix_timestamp_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .try_into()
-        .unwrap_or_default()
-}
-
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -699,26 +580,16 @@ mod tests {
     use codex_app_server_protocol::AccountLoginCompletedNotification;
     use codex_app_server_protocol::AccountRateLimitsUpdatedNotification;
     use codex_app_server_protocol::AccountUpdatedNotification;
-    use codex_app_server_protocol::ApplyPatchApprovalParams;
     use codex_app_server_protocol::AuthMode;
-    use codex_app_server_protocol::CommandExecutionApprovalDecision;
-    use codex_app_server_protocol::CommandExecutionRequestApprovalParams;
     use codex_app_server_protocol::ConfigWarningNotification;
-    use codex_app_server_protocol::DynamicToolCallParams;
-    use codex_app_server_protocol::FileChangeRequestApprovalParams;
-    use codex_app_server_protocol::GuardianWarningNotification;
     use codex_app_server_protocol::ModelRerouteReason;
     use codex_app_server_protocol::ModelReroutedNotification;
     use codex_app_server_protocol::ModelVerification;
     use codex_app_server_protocol::ModelVerificationNotification;
     use codex_app_server_protocol::RateLimitSnapshot;
     use codex_app_server_protocol::RateLimitWindow;
-    use codex_app_server_protocol::ServerResponse;
-    use codex_app_server_protocol::ToolRequestUserInputParams;
-    use codex_protocol::ThreadId;
     use pretty_assertions::assert_eq;
     use serde_json::json;
-    use std::sync::Arc;
     use tokio::time::timeout;
     use uuid::Uuid;
 
@@ -866,28 +737,6 @@ mod tests {
     }
 
     #[test]
-    fn verify_guardian_warning_notification_serialization() {
-        let notification = ServerNotification::GuardianWarning(GuardianWarningNotification {
-            thread_id: "thread-1".to_string(),
-            message: "Automatic approval review denied the requested action.".to_string(),
-        });
-
-        let jsonrpc_notification = OutgoingMessage::AppServerNotification(notification);
-        assert_eq!(
-            json!({
-                "method": "guardianWarning",
-                "params": {
-                    "threadId": "thread-1",
-                    "message": "Automatic approval review denied the requested action.",
-                },
-            }),
-            serde_json::to_value(jsonrpc_notification)
-                .expect("ensure the notification serializes correctly"),
-            "ensure the notification serializes correctly"
-        );
-    }
-
-    #[test]
     fn verify_model_rerouted_notification_serialization() {
         let notification = ServerNotification::ModelRerouted(ModelReroutedNotification {
             thread_id: "thread-1".to_string(),
@@ -939,52 +788,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn server_request_response_from_result_decodes_typed_response() {
-        let request = ServerRequest::CommandExecutionRequestApproval {
-            request_id: RequestId::Integer(7),
-            params: CommandExecutionRequestApprovalParams {
-                thread_id: "thread-1".to_string(),
-                turn_id: "turn-1".to_string(),
-                item_id: "item-1".to_string(),
-                started_at_ms: 0,
-                approval_id: None,
-                reason: None,
-                network_approval_context: None,
-                command: Some("echo hi".to_string()),
-                cwd: None,
-                command_actions: None,
-                additional_permissions: None,
-                proposed_execpolicy_amendment: None,
-                proposed_network_policy_amendments: None,
-                available_decisions: None,
-            },
-        };
-
-        let response = request
-            .response_from_result(json!({
-                "decision": "acceptForSession",
-            }))
-            .expect("decode typed server response");
-
-        let ServerResponse::CommandExecutionRequestApproval {
-            request_id,
-            response,
-        } = response
-        else {
-            panic!("expected command execution approval response");
-        };
-        assert_eq!(request_id, RequestId::Integer(7));
-        assert_eq!(
-            response.decision,
-            CommandExecutionApprovalDecision::AcceptForSession
-        );
-    }
     #[tokio::test]
     async fn send_response_routes_to_target_connection() {
         let (tx, mut rx) = mpsc::channel::<OutgoingEnvelope>(4);
-        let outgoing =
-            OutgoingMessageSender::new(tx, codex_analytics::AnalyticsEventsClient::disabled());
+        let outgoing = OutgoingMessageSender::new(tx);
         let request_id = ConnectionRequestId {
             connection_id: ConnectionId(42),
             request_id: RequestId::Integer(7),
@@ -1024,8 +831,7 @@ mod tests {
     #[tokio::test]
     async fn send_response_clears_registered_request_context() {
         let (tx, _rx) = mpsc::channel::<OutgoingEnvelope>(4);
-        let outgoing =
-            OutgoingMessageSender::new(tx, codex_analytics::AnalyticsEventsClient::disabled());
+        let outgoing = OutgoingMessageSender::new(tx);
         let request_id = ConnectionRequestId {
             connection_id: ConnectionId(42),
             request_id: RequestId::Integer(7),
@@ -1035,7 +841,7 @@ mod tests {
             .register_request_context(RequestContext::new(
                 request_id.clone(),
                 tracing::info_span!("app_server.request", rpc.method = "thread/start"),
-                /*parent_trace*/ None,
+                None,
             ))
             .await;
         assert_eq!(outgoing.request_context_count().await, 1);
@@ -1055,8 +861,7 @@ mod tests {
     #[tokio::test]
     async fn send_error_routes_to_target_connection() {
         let (tx, mut rx) = mpsc::channel::<OutgoingEnvelope>(4);
-        let outgoing =
-            OutgoingMessageSender::new(tx, codex_analytics::AnalyticsEventsClient::disabled());
+        let outgoing = OutgoingMessageSender::new(tx);
         let request_id = ConnectionRequestId {
             connection_id: ConnectionId(9),
             request_id: RequestId::Integer(3),
@@ -1088,55 +893,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_server_notification_to_connection_and_wait_tracks_write_completion() {
-        let (tx, mut rx) = mpsc::channel::<OutgoingEnvelope>(4);
-        let outgoing =
-            OutgoingMessageSender::new(tx, codex_analytics::AnalyticsEventsClient::disabled());
-        let send_task = tokio::spawn(async move {
-            outgoing
-                .send_server_notification_to_connection_and_wait(
-                    ConnectionId(42),
-                    ServerNotification::ModelRerouted(ModelReroutedNotification {
-                        thread_id: "thread-1".to_string(),
-                        turn_id: "turn-1".to_string(),
-                        from_model: "gpt-5.3-codex".to_string(),
-                        to_model: "gpt-5.2".to_string(),
-                        reason: ModelRerouteReason::HighRiskCyberActivity,
-                    }),
-                )
-                .await
-        });
-
-        let envelope = timeout(Duration::from_secs(1), rx.recv())
-            .await
-            .expect("should receive envelope before timeout")
-            .expect("channel should contain one message");
-        let OutgoingEnvelope::ToConnection {
-            connection_id,
-            message,
-            write_complete_tx,
-        } = envelope
-        else {
-            panic!("expected targeted server notification envelope");
-        };
-        assert_eq!(connection_id, ConnectionId(42));
-        assert!(matches!(message, OutgoingMessage::AppServerNotification(_)));
-        write_complete_tx
-            .expect("write completion sender should be attached")
-            .send(())
-            .expect("receiver should still be waiting");
-
-        timeout(Duration::from_secs(1), send_task)
-            .await
-            .expect("send task should finish after write completion is signaled")
-            .expect("send task should not panic");
-    }
-
-    #[tokio::test]
     async fn connection_closed_clears_registered_request_contexts() {
         let (tx, _rx) = mpsc::channel::<OutgoingEnvelope>(4);
-        let outgoing =
-            OutgoingMessageSender::new(tx, codex_analytics::AnalyticsEventsClient::disabled());
+        let outgoing = OutgoingMessageSender::new(tx);
         let closed_connection_request = ConnectionRequestId {
             connection_id: ConnectionId(9),
             request_id: RequestId::Integer(3),
@@ -1150,14 +909,14 @@ mod tests {
             .register_request_context(RequestContext::new(
                 closed_connection_request,
                 tracing::info_span!("app_server.request", rpc.method = "turn/interrupt"),
-                /*parent_trace*/ None,
+                None,
             ))
             .await;
         outgoing
             .register_request_context(RequestContext::new(
                 open_connection_request,
                 tracing::info_span!("app_server.request", rpc.method = "turn/start"),
-                /*parent_trace*/ None,
+                None,
             ))
             .await;
         assert_eq!(outgoing.request_context_count().await, 2);
@@ -1165,158 +924,5 @@ mod tests {
         outgoing.connection_closed(ConnectionId(9)).await;
 
         assert_eq!(outgoing.request_context_count().await, 1);
-    }
-
-    #[tokio::test]
-    async fn notify_client_error_forwards_error_to_waiter() {
-        let (tx, _rx) = mpsc::channel::<OutgoingEnvelope>(4);
-        let outgoing =
-            OutgoingMessageSender::new(tx, codex_analytics::AnalyticsEventsClient::disabled());
-
-        let (request_id, wait_for_result) = outgoing
-            .send_request(ServerRequestPayload::ApplyPatchApproval(
-                ApplyPatchApprovalParams {
-                    conversation_id: ThreadId::new(),
-                    call_id: "call-id".to_string(),
-                    file_changes: HashMap::new(),
-                    reason: None,
-                    grant_root: None,
-                },
-            ))
-            .await;
-
-        let error = internal_error("refresh failed");
-
-        outgoing
-            .notify_client_error(request_id, error.clone())
-            .await;
-
-        let result = timeout(Duration::from_secs(1), wait_for_result)
-            .await
-            .expect("wait should not time out")
-            .expect("waiter should receive a callback");
-        assert_eq!(result, Err(error));
-    }
-
-    #[tokio::test]
-    async fn pending_requests_for_thread_returns_thread_requests_in_request_id_order() {
-        let (tx, _rx) = mpsc::channel::<OutgoingEnvelope>(8);
-        let outgoing = Arc::new(OutgoingMessageSender::new(
-            tx,
-            codex_analytics::AnalyticsEventsClient::disabled(),
-        ));
-        let thread_id = ThreadId::new();
-        let thread_outgoing = ThreadScopedOutgoingMessageSender::new(
-            outgoing.clone(),
-            vec![ConnectionId(1)],
-            thread_id,
-        );
-
-        let (dynamic_tool_request_id, _dynamic_tool_waiter) = thread_outgoing
-            .send_request(ServerRequestPayload::DynamicToolCall(
-                DynamicToolCallParams {
-                    thread_id: thread_id.to_string(),
-                    turn_id: "turn-1".to_string(),
-                    call_id: "call-0".to_string(),
-                    namespace: None,
-                    tool: "tool".to_string(),
-                    arguments: json!({}),
-                },
-            ))
-            .await;
-        let (first_request_id, _first_waiter) = thread_outgoing
-            .send_request(ServerRequestPayload::ToolRequestUserInput(
-                ToolRequestUserInputParams {
-                    thread_id: thread_id.to_string(),
-                    turn_id: "turn-1".to_string(),
-                    item_id: "call-1".to_string(),
-                    questions: vec![],
-                },
-            ))
-            .await;
-        let (second_request_id, _second_waiter) = thread_outgoing
-            .send_request(ServerRequestPayload::FileChangeRequestApproval(
-                FileChangeRequestApprovalParams {
-                    thread_id: thread_id.to_string(),
-                    turn_id: "turn-1".to_string(),
-                    item_id: "call-2".to_string(),
-                    started_at_ms: 0,
-                    reason: None,
-                    grant_root: None,
-                },
-            ))
-            .await;
-        let pending_requests = outgoing.pending_requests_for_thread(thread_id).await;
-        assert_eq!(
-            pending_requests
-                .iter()
-                .map(ServerRequest::id)
-                .collect::<Vec<_>>(),
-            vec![
-                &dynamic_tool_request_id,
-                &first_request_id,
-                &second_request_id
-            ]
-        );
-    }
-
-    #[tokio::test]
-    async fn cancel_requests_for_thread_cancels_all_thread_requests() {
-        let (tx, _rx) = mpsc::channel::<OutgoingEnvelope>(8);
-        let outgoing = Arc::new(OutgoingMessageSender::new(
-            tx,
-            codex_analytics::AnalyticsEventsClient::disabled(),
-        ));
-        let thread_id = ThreadId::new();
-        let thread_outgoing = ThreadScopedOutgoingMessageSender::new(
-            outgoing.clone(),
-            vec![ConnectionId(1)],
-            thread_id,
-        );
-
-        let (_dynamic_tool_request_id, dynamic_tool_waiter) = thread_outgoing
-            .send_request(ServerRequestPayload::DynamicToolCall(
-                DynamicToolCallParams {
-                    thread_id: thread_id.to_string(),
-                    turn_id: "turn-1".to_string(),
-                    call_id: "call-0".to_string(),
-                    namespace: None,
-                    tool: "tool".to_string(),
-                    arguments: json!({}),
-                },
-            ))
-            .await;
-        let (_request_id, user_input_waiter) = thread_outgoing
-            .send_request(ServerRequestPayload::ToolRequestUserInput(
-                ToolRequestUserInputParams {
-                    thread_id: thread_id.to_string(),
-                    turn_id: "turn-1".to_string(),
-                    item_id: "call-1".to_string(),
-                    questions: vec![],
-                },
-            ))
-            .await;
-        let error = internal_error("tracked request cancelled");
-
-        outgoing
-            .cancel_requests_for_thread(thread_id, Some(error.clone()))
-            .await;
-
-        let dynamic_tool_result = timeout(Duration::from_secs(1), dynamic_tool_waiter)
-            .await
-            .expect("dynamic tool waiter should resolve")
-            .expect("dynamic tool waiter should receive a callback");
-        let user_input_result = timeout(Duration::from_secs(1), user_input_waiter)
-            .await
-            .expect("user input waiter should resolve")
-            .expect("user input waiter should receive a callback");
-        assert_eq!(dynamic_tool_result, Err(error.clone()));
-        assert_eq!(user_input_result, Err(error));
-        assert!(
-            outgoing
-                .pending_requests_for_thread(thread_id)
-                .await
-                .is_empty()
-        );
     }
 }

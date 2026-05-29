@@ -7,10 +7,6 @@ use reqwest::header::HeaderValue;
 
 use crate::chatgpt_hosts::is_allowed_chatgpt_host;
 
-// WARNING: this store is process-global and may be shared across auth contexts.
-// It must only ever contain Cloudflare infrastructure cookies. Never extend this
-// store to persist ChatGPT account, session, auth, or other user-specific cookie
-// data.
 static SHARED_CHATGPT_CLOUDFLARE_COOKIE_STORE: LazyLock<Arc<ChatGptCloudflareCookieStore>> =
     LazyLock::new(|| Arc::new(ChatGptCloudflareCookieStore::default()));
 
@@ -43,12 +39,6 @@ impl CookieStore for ChatGptCloudflareCookieStore {
     }
 }
 
-/// Adds the process-local ChatGPT Cloudflare cookie jar used by Codex HTTP clients.
-///
-/// WARNING: this jar is global within the process. It is only acceptable because it hardcodes a
-/// small allowlist of Cloudflare cookie names and refuses all other ChatGPT cookies. Do not store
-/// ChatGPT account, session, auth, or other user-specific cookies here. If a future caller needs
-/// those cookies, the store must be scoped to the auth/session owner instead of shared globally.
 pub fn with_chatgpt_cloudflare_cookie_store(
     builder: reqwest::ClientBuilder,
 ) -> reqwest::ClientBuilder {
@@ -102,8 +92,6 @@ fn only_cloudflare_cookies(header: HeaderValue) -> Option<HeaderValue> {
 }
 
 fn is_allowed_cloudflare_cookie_name(name: &str) -> bool {
-    // Keep this allowlist aligned with Cloudflare's documented service cookies:
-    // https://developers.cloudflare.com/fundamentals/reference/policies-compliances/cloudflare-cookies/
     matches!(
         name,
         "__cf_bm"

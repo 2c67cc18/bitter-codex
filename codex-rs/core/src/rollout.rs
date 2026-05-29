@@ -11,13 +11,7 @@ pub use codex_rollout::SortDirection;
 pub use codex_rollout::ThreadItem;
 pub use codex_rollout::ThreadSortKey;
 pub use codex_rollout::ThreadsPage;
-pub use codex_rollout::append_thread_name;
 pub use codex_rollout::find_archived_thread_path_by_id_str;
-#[deprecated(note = "use find_thread_path_by_id_str")]
-pub use codex_rollout::find_conversation_path_by_id_str;
-pub use codex_rollout::find_thread_meta_by_name_str;
-pub use codex_rollout::find_thread_name_by_id;
-pub use codex_rollout::find_thread_names_by_ids;
 pub use codex_rollout::find_thread_path_by_id_str;
 pub use codex_rollout::parse_cursor;
 pub use codex_rollout::read_head_for_summary;
@@ -40,10 +34,6 @@ impl codex_rollout::RolloutConfigView for Config {
     fn model_provider_id(&self) -> &str {
         self.model_provider_id.as_str()
     }
-
-    fn generate_memories(&self) -> bool {
-        self.memories.generate_memories
-    }
 }
 
 pub(crate) mod list {
@@ -52,7 +42,6 @@ pub(crate) mod list {
 
 #[cfg(test)]
 pub(crate) mod recorder {
-    pub use codex_rollout::RolloutRecorder;
 }
 
 pub(crate) use crate::session_rollout_init_error::map_session_init_error;

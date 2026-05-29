@@ -1,26 +1,8 @@
 use super::*;
 use codex_app_server_protocol::ConfigWarningNotification;
-use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
-use codex_app_server_protocol::ThreadRealtimeStartedNotification;
-use codex_protocol::protocol::RealtimeConversationVersion;
-use codex_utils_absolute_path::AbsolutePathBuf;
-use pretty_assertions::assert_eq;
-use serde_json::json;
 use tokio::time::Duration;
 use tokio::time::timeout;
-
-fn absolute_path(path: &str) -> AbsolutePathBuf {
-    AbsolutePathBuf::from_absolute_path(path).expect("absolute path")
-}
-
-fn thread_realtime_started_notification() -> ServerNotification {
-    ServerNotification::ThreadRealtimeStarted(ThreadRealtimeStartedNotification {
-        thread_id: "thread-1".to_string(),
-        realtime_session_id: None,
-        version: RealtimeConversationVersion::V1,
-    })
-}
 
 #[tokio::test]
 async fn to_connection_notification_respects_opt_out_filters() {
@@ -33,13 +15,7 @@ async fn to_connection_notification_respects_opt_out_filters() {
     let mut connections = HashMap::new();
     connections.insert(
         connection_id,
-        OutboundConnectionState::new(
-            writer_tx,
-            initialized,
-            Arc::new(AtomicBool::new(true)),
-            opted_out_notification_methods,
-            /*disconnect_sender*/ None,
-        ),
+        OutboundConnectionState::new(writer_tx, initialized, opted_out_notification_methods, None),
     );
 
     route_outgoing_envelope(
@@ -76,9 +52,8 @@ async fn to_connection_notifications_are_dropped_for_opted_out_clients() {
         OutboundConnectionState::new(
             writer_tx,
             Arc::new(AtomicBool::new(true)),
-            Arc::new(AtomicBool::new(true)),
             Arc::new(RwLock::new(HashSet::from(["configWarning".to_string()]))),
-            /*disconnect_sender*/ None,
+            None,
         ),
     );
 
@@ -116,9 +91,8 @@ async fn to_connection_notifications_are_preserved_for_non_opted_out_clients() {
         OutboundConnectionState::new(
             writer_tx,
             Arc::new(AtomicBool::new(true)),
-            Arc::new(AtomicBool::new(true)),
             Arc::new(RwLock::new(HashSet::new())),
-            /*disconnect_sender*/ None,
+            None,
         ),
     );
 
@@ -152,216 +126,6 @@ async fn to_connection_notifications_are_preserved_for_non_opted_out_clients() {
 }
 
 #[tokio::test]
-async fn experimental_notifications_are_dropped_without_capability() {
-    let connection_id = ConnectionId(12);
-    let (writer_tx, mut writer_rx) = mpsc::channel(1);
-
-    let mut connections = HashMap::new();
-    connections.insert(
-        connection_id,
-        OutboundConnectionState::new(
-            writer_tx,
-            Arc::new(AtomicBool::new(true)),
-            Arc::new(AtomicBool::new(false)),
-            Arc::new(RwLock::new(HashSet::new())),
-            /*disconnect_sender*/ None,
-        ),
-    );
-
-    route_outgoing_envelope(
-        &mut connections,
-        OutgoingEnvelope::ToConnection {
-            connection_id,
-            message: OutgoingMessage::AppServerNotification(thread_realtime_started_notification()),
-            write_complete_tx: None,
-        },
-    )
-    .await;
-
-    assert!(
-        writer_rx.try_recv().is_err(),
-        "experimental notifications should not reach clients without capability"
-    );
-}
-
-#[tokio::test]
-async fn experimental_notifications_are_preserved_with_capability() {
-    let connection_id = ConnectionId(13);
-    let (writer_tx, mut writer_rx) = mpsc::channel(1);
-
-    let mut connections = HashMap::new();
-    connections.insert(
-        connection_id,
-        OutboundConnectionState::new(
-            writer_tx,
-            Arc::new(AtomicBool::new(true)),
-            Arc::new(AtomicBool::new(true)),
-            Arc::new(RwLock::new(HashSet::new())),
-            /*disconnect_sender*/ None,
-        ),
-    );
-
-    route_outgoing_envelope(
-        &mut connections,
-        OutgoingEnvelope::ToConnection {
-            connection_id,
-            message: OutgoingMessage::AppServerNotification(thread_realtime_started_notification()),
-            write_complete_tx: None,
-        },
-    )
-    .await;
-
-    let message = writer_rx
-        .recv()
-        .await
-        .expect("experimental notification should reach opted-in client");
-    assert!(matches!(
-        message.message,
-        OutgoingMessage::AppServerNotification(ServerNotification::ThreadRealtimeStarted(_))
-    ));
-}
-
-#[tokio::test]
-async fn command_execution_request_approval_strips_additional_permissions_without_capability() {
-    let connection_id = ConnectionId(8);
-    let (writer_tx, mut writer_rx) = mpsc::channel(1);
-
-    let mut connections = HashMap::new();
-    connections.insert(
-        connection_id,
-        OutboundConnectionState::new(
-            writer_tx,
-            Arc::new(AtomicBool::new(true)),
-            Arc::new(AtomicBool::new(false)),
-            Arc::new(RwLock::new(HashSet::new())),
-            /*disconnect_sender*/ None,
-        ),
-    );
-
-    route_outgoing_envelope(
-        &mut connections,
-        OutgoingEnvelope::ToConnection {
-            connection_id,
-            message: OutgoingMessage::Request(ServerRequest::CommandExecutionRequestApproval {
-                request_id: RequestId::Integer(1),
-                params: codex_app_server_protocol::CommandExecutionRequestApprovalParams {
-                    thread_id: "thr_123".to_string(),
-                    turn_id: "turn_123".to_string(),
-                    item_id: "call_123".to_string(),
-                    started_at_ms: 0,
-                    approval_id: None,
-                    reason: Some("Need extra read access".to_string()),
-                    network_approval_context: None,
-                    command: Some("cat file".to_string()),
-                    cwd: Some(absolute_path("/tmp")),
-                    command_actions: None,
-                    additional_permissions: Some(
-                        codex_app_server_protocol::AdditionalPermissionProfile {
-                            network: None,
-                            file_system: Some(
-                                codex_app_server_protocol::AdditionalFileSystemPermissions {
-                                    read: Some(vec![absolute_path("/tmp/allowed")]),
-                                    write: None,
-                                    glob_scan_max_depth: None,
-                                    entries: None,
-                                },
-                            ),
-                        },
-                    ),
-                    proposed_execpolicy_amendment: None,
-                    proposed_network_policy_amendments: None,
-                    available_decisions: None,
-                },
-            }),
-            write_complete_tx: None,
-        },
-    )
-    .await;
-
-    let message = writer_rx
-        .recv()
-        .await
-        .expect("request should be delivered to the connection");
-    let json = serde_json::to_value(message.message).expect("request should serialize");
-    assert_eq!(json["params"].get("additionalPermissions"), None);
-}
-
-#[tokio::test]
-async fn command_execution_request_approval_keeps_additional_permissions_with_capability() {
-    let connection_id = ConnectionId(9);
-    let (writer_tx, mut writer_rx) = mpsc::channel(1);
-
-    let mut connections = HashMap::new();
-    connections.insert(
-        connection_id,
-        OutboundConnectionState::new(
-            writer_tx,
-            Arc::new(AtomicBool::new(true)),
-            Arc::new(AtomicBool::new(true)),
-            Arc::new(RwLock::new(HashSet::new())),
-            /*disconnect_sender*/ None,
-        ),
-    );
-
-    route_outgoing_envelope(
-        &mut connections,
-        OutgoingEnvelope::ToConnection {
-            connection_id,
-            message: OutgoingMessage::Request(ServerRequest::CommandExecutionRequestApproval {
-                request_id: RequestId::Integer(1),
-                params: codex_app_server_protocol::CommandExecutionRequestApprovalParams {
-                    thread_id: "thr_123".to_string(),
-                    turn_id: "turn_123".to_string(),
-                    item_id: "call_123".to_string(),
-                    started_at_ms: 0,
-                    approval_id: None,
-                    reason: Some("Need extra read access".to_string()),
-                    network_approval_context: None,
-                    command: Some("cat file".to_string()),
-                    cwd: Some(absolute_path("/tmp")),
-                    command_actions: None,
-                    additional_permissions: Some(
-                        codex_app_server_protocol::AdditionalPermissionProfile {
-                            network: None,
-                            file_system: Some(
-                                codex_app_server_protocol::AdditionalFileSystemPermissions {
-                                    read: Some(vec![absolute_path("/tmp/allowed")]),
-                                    write: None,
-                                    glob_scan_max_depth: None,
-                                    entries: None,
-                                },
-                            ),
-                        },
-                    ),
-                    proposed_execpolicy_amendment: None,
-                    proposed_network_policy_amendments: None,
-                    available_decisions: None,
-                },
-            }),
-            write_complete_tx: None,
-        },
-    )
-    .await;
-
-    let message = writer_rx
-        .recv()
-        .await
-        .expect("request should be delivered to the connection");
-    let json = serde_json::to_value(message.message).expect("request should serialize");
-    let allowed_path = absolute_path("/tmp/allowed").to_string_lossy().into_owned();
-    assert_eq!(
-        json["params"]["additionalPermissions"],
-        json!({
-            "network": null,
-            "fileSystem": {
-                "read": [allowed_path],
-            "write": null,
-            },
-        })
-    );
-}
-
-#[tokio::test]
 async fn broadcast_does_not_block_on_slow_connection() {
     let fast_connection_id = ConnectionId(1);
     let slow_connection_id = ConnectionId(2);
@@ -377,7 +141,6 @@ async fn broadcast_does_not_block_on_slow_connection() {
         OutboundConnectionState::new(
             fast_writer_tx,
             Arc::new(AtomicBool::new(true)),
-            Arc::new(AtomicBool::new(true)),
             Arc::new(RwLock::new(HashSet::new())),
             Some(fast_disconnect_token.clone()),
         ),
@@ -386,7 +149,6 @@ async fn broadcast_does_not_block_on_slow_connection() {
         slow_connection_id,
         OutboundConnectionState::new(
             slow_writer_tx.clone(),
-            Arc::new(AtomicBool::new(true)),
             Arc::new(AtomicBool::new(true)),
             Arc::new(RwLock::new(HashSet::new())),
             Some(slow_disconnect_token.clone()),
@@ -472,9 +234,8 @@ async fn to_connection_stdio_waits_instead_of_disconnecting_when_writer_queue_is
         OutboundConnectionState::new(
             writer_tx,
             Arc::new(AtomicBool::new(true)),
-            Arc::new(AtomicBool::new(true)),
             Arc::new(RwLock::new(HashSet::new())),
-            /*disconnect_sender*/ None,
+            None,
         ),
     );
 

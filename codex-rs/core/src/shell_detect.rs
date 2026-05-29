@@ -6,7 +6,6 @@ pub(crate) fn detect_shell_type(shell_path: &PathBuf) -> Option<ShellType> {
     match shell_path.as_os_str().to_str() {
         Some("zsh") => Some(ShellType::Zsh),
         Some("sh") => Some(ShellType::Sh),
-        Some("cmd") => Some(ShellType::Cmd),
         Some("bash") => Some(ShellType::Bash),
         Some("pwsh") => Some(ShellType::PowerShell),
         Some("powershell") => Some(ShellType::PowerShell),

@@ -41,7 +41,6 @@ impl MetricsConfig {
         }
     }
 
-    /// Create an in-memory config (used in tests).
     pub fn in_memory(
         environment: impl Into<String>,
         service_name: impl Into<String>,
@@ -59,19 +58,16 @@ impl MetricsConfig {
         }
     }
 
-    /// Override the interval between periodic metric exports.
     pub fn with_export_interval(mut self, interval: Duration) -> Self {
         self.export_interval = Some(interval);
         self
     }
 
-    /// Enable a manual reader for on-demand runtime snapshots.
     pub fn with_runtime_reader(mut self) -> Self {
         self.runtime_reader = true;
         self
     }
 
-    /// Add a default tag that will be sent with every metric.
     pub fn with_tag(mut self, key: impl Into<String>, value: impl Into<String>) -> Result<Self> {
         let key = key.into();
         let value = value.into();

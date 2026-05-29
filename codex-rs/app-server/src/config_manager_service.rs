@@ -15,13 +15,10 @@ use codex_config::CONFIG_TOML_FILE;
 use codex_config::ConfigLayerEntry;
 use codex_config::ConfigLayerStack;
 use codex_config::ConfigLayerStackOrdering;
-use codex_config::ConfigRequirementsToml;
 use codex_config::config_toml::ConfigToml;
 use codex_config::merge_toml_values;
-use codex_core::config::deserialize_config_toml_with_base;
 use codex_core::config::edit::ConfigEdit;
 use codex_core::config::edit::ConfigEditsBuilder;
-use codex_core::config::validate_feature_requirements_for_config_toml;
 use codex_core::path_utils;
 use codex_core::path_utils::SymlinkWritePaths;
 use codex_core::path_utils::resolve_symlink_write_paths;
@@ -139,31 +136,12 @@ impl ConfigManager {
             origins: layers.origins(),
             layers: params.include_layers.then(|| {
                 layers
-                    .get_layers(
-                        ConfigLayerStackOrdering::HighestPrecedenceFirst,
-                        /*include_disabled*/ true,
-                    )
+                    .get_layers(ConfigLayerStackOrdering::HighestPrecedenceFirst, true)
                     .iter()
                     .map(|layer| layer.as_layer())
                     .collect()
             }),
         })
-    }
-
-    pub(crate) async fn read_requirements(
-        &self,
-    ) -> Result<Option<ConfigRequirementsToml>, ConfigManagerError> {
-        let layers = self
-            .load_thread_agnostic_config()
-            .await
-            .map_err(|err| ConfigManagerError::io("failed to read configuration layers", err))?;
-
-        let requirements = layers.requirements_toml().clone();
-        if requirements.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(requirements))
-        }
     }
 
     pub(crate) async fn write_value(
@@ -237,23 +215,6 @@ impl ConfigManager {
             let segments = parse_key_path(&key_path).map_err(|message| {
                 ConfigManagerError::write(ConfigWriteErrorCode::ConfigValidationError, message)
             })?;
-            if !value.is_null() {
-                match segments.as_slice() {
-                    [segment] if segment == "profile" => {
-                        return Err(ConfigManagerError::write(
-                            ConfigWriteErrorCode::ConfigValidationError,
-                            "`profile` is a legacy config selector and can no longer be written; use `--profile <name>` with `<name>.config.toml` instead",
-                        ));
-                    }
-                    [segment, ..] if segment == "profiles" => {
-                        return Err(ConfigManagerError::write(
-                            ConfigWriteErrorCode::ConfigValidationError,
-                            "`profiles` contains legacy config profile tables and can no longer be written; use `--profile <name>` with `<name>.config.toml` instead",
-                        ));
-                    }
-                    _ => {}
-                }
-            }
             let original_value = value_at_path(&user_config, &segments).cloned();
             let parsed_value = parse_value(value).map_err(|message| {
                 ConfigManagerError::write(ConfigWriteErrorCode::ConfigValidationError, message)
@@ -288,25 +249,6 @@ impl ConfigManager {
         }
 
         validate_config(&user_config).map_err(|err| {
-            ConfigManagerError::write(
-                ConfigWriteErrorCode::ConfigValidationError,
-                format!("Invalid configuration: {err}"),
-            )
-        })?;
-        let user_config_toml =
-            deserialize_config_toml_with_base(user_config.clone(), self.codex_home()).map_err(
-                |err| {
-                    ConfigManagerError::write(
-                        ConfigWriteErrorCode::ConfigValidationError,
-                        format!("Invalid configuration: {err}"),
-                    )
-                },
-            )?;
-        validate_feature_requirements_for_config_toml(
-            &user_config_toml,
-            layers.requirements().feature_requirements.as_ref(),
-        )
-        .map_err(|err| {
             ConfigManagerError::write(
                 ConfigWriteErrorCode::ConfigValidationError,
                 format!("Invalid configuration: {err}"),
@@ -352,11 +294,8 @@ impl ConfigManager {
         })
     }
 
-    /// Loads a "thread-agnostic" config, which means the config layers do not
-    /// include any in-repo .codex/ folders because there is no cwd/project root
-    /// associated with this query.
     async fn load_thread_agnostic_config(&self) -> std::io::Result<ConfigLayerStack> {
-        self.load_config_layers(/*cwd*/ None).await
+        self.load_config_layers(None).await
     }
 }
 
@@ -392,7 +331,6 @@ async fn create_empty_user_layer(
     Ok(ConfigLayerEntry::new(
         ConfigLayerSource::User {
             file: config_toml.clone(),
-            profile: None,
         },
         toml_value,
     ))
@@ -425,16 +363,11 @@ fn parse_key_path(path: &str) -> Result<Vec<String>, String> {
     let mut chars = path.chars();
     let mut quoted = false;
 
-    // Split on dots unless they appear inside a quoted segment. Bare segments
-    // intentionally stay permissive so existing paths like `sample@catalog`
-    // remain valid.
     while let Some(ch) = chars.next() {
         match ch {
             '"' if segment.is_empty() && !quoted => quoted = true,
             '"' if quoted => quoted = false,
             '\\' if quoted => {
-                // Quoted segments may escape punctuation that would otherwise
-                // participate in parsing, such as `.` or `"`.
                 let Some(escaped) = chars.next() else {
                     return Err("unterminated escape in keyPath".to_string());
                 };
@@ -632,15 +565,6 @@ fn override_message(layer: &ConfigLayerSource) -> String {
         ConfigLayerSource::User { file, .. } => {
             format!("Overridden by user config: {}", file.display())
         }
-        ConfigLayerSource::LegacyManagedConfigTomlFromFile { file } => {
-            format!(
-                "Overridden by legacy managed_config.toml: {}",
-                file.display()
-            )
-        }
-        ConfigLayerSource::LegacyManagedConfigTomlFromMdm => {
-            "Overridden by legacy managed configuration from MDM".to_string()
-        }
     }
 }
 
@@ -700,7 +624,3 @@ fn find_effective_layer(
 
     None
 }
-
-#[cfg(test)]
-#[path = "config_manager_service_tests.rs"]
-mod tests;

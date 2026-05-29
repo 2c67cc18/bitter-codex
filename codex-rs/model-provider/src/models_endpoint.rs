@@ -8,8 +8,6 @@ use codex_api::ReqwestTransport;
 use codex_api::TransportError;
 use codex_api::auth_header_telemetry;
 use codex_api::map_api_error;
-use codex_feedback::FeedbackRequestTags;
-use codex_feedback::emit_feedback_request_tags_with_auth_env;
 use codex_login::AuthEnvTelemetry;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
@@ -21,8 +19,6 @@ use codex_otel::TelemetryAuthMode;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CoreResult;
 use codex_protocol::openai_models::ModelInfo;
-use codex_response_debug_context::extract_response_debug_context;
-use codex_response_debug_context::telemetry_transport_error_message;
 use http::HeaderMap;
 use tokio::time::timeout;
 
@@ -31,7 +27,10 @@ use crate::auth::resolve_provider_auth;
 const MODELS_REFRESH_TIMEOUT: Duration = Duration::from_secs(5);
 const MODELS_ENDPOINT: &str = "/models";
 
-/// Provider-owned OpenAI-compatible `/models` endpoint.
+fn telemetry_transport_error_message(error: &TransportError) -> String {
+    error.to_string()
+}
+
 #[derive(Debug)]
 pub(crate) struct OpenAiModelsEndpoint {
     provider_info: ModelProviderInfo,
@@ -67,10 +66,6 @@ impl OpenAiModelsEndpoint {
 
 #[async_trait]
 impl ModelsEndpointClient for OpenAiModelsEndpoint {
-    fn has_command_auth(&self) -> bool {
-        self.provider_info.has_command_auth()
-    }
-
     async fn uses_codex_backend(&self) -> bool {
         self.auth()
             .await
@@ -127,9 +122,6 @@ impl RequestTelemetry for ModelsRequestTelemetry {
     ) {
         let success = status.is_some_and(|code| code.is_success()) && error.is_none();
         let error_message = error.map(telemetry_transport_error_message);
-        let response_debug = error
-            .map(extract_response_debug_context)
-            .unwrap_or_default();
         let status = status.map(|status| status.as_u16());
         tracing::event!(
             target: "codex_otel.log_only",
@@ -149,10 +141,10 @@ impl RequestTelemetry for ModelsRequestTelemetry {
             auth.env_provider_key_name = self.auth_env.provider_env_key_name.as_deref(),
             auth.env_provider_key_present = self.auth_env.provider_env_key_present,
             auth.env_refresh_token_url_override_present = self.auth_env.refresh_token_url_override_present,
-            auth.request_id = response_debug.request_id.as_deref(),
-            auth.cf_ray = response_debug.cf_ray.as_deref(),
-            auth.error = response_debug.auth_error.as_deref(),
-            auth.error_code = response_debug.auth_error_code.as_deref(),
+            auth.request_id = tracing::field::Empty,
+            auth.cf_ray = tracing::field::Empty,
+            auth.error = tracing::field::Empty,
+            auth.error_code = tracing::field::Empty,
             auth.mode = self.auth_mode.as_deref(),
         );
         tracing::event!(
@@ -173,75 +165,11 @@ impl RequestTelemetry for ModelsRequestTelemetry {
             auth.env_provider_key_name = self.auth_env.provider_env_key_name.as_deref(),
             auth.env_provider_key_present = self.auth_env.provider_env_key_present,
             auth.env_refresh_token_url_override_present = self.auth_env.refresh_token_url_override_present,
-            auth.request_id = response_debug.request_id.as_deref(),
-            auth.cf_ray = response_debug.cf_ray.as_deref(),
-            auth.error = response_debug.auth_error.as_deref(),
-            auth.error_code = response_debug.auth_error_code.as_deref(),
+            auth.request_id = tracing::field::Empty,
+            auth.cf_ray = tracing::field::Empty,
+            auth.error = tracing::field::Empty,
+            auth.error_code = tracing::field::Empty,
             auth.mode = self.auth_mode.as_deref(),
         );
-        emit_feedback_request_tags_with_auth_env(
-            &FeedbackRequestTags {
-                endpoint: MODELS_ENDPOINT,
-                auth_header_attached: self.auth_header_attached,
-                auth_header_name: self.auth_header_name,
-                auth_mode: self.auth_mode.as_deref(),
-                auth_retry_after_unauthorized: None,
-                auth_recovery_mode: None,
-                auth_recovery_phase: None,
-                auth_connection_reused: None,
-                auth_request_id: response_debug.request_id.as_deref(),
-                auth_cf_ray: response_debug.cf_ray.as_deref(),
-                auth_error: response_debug.auth_error.as_deref(),
-                auth_error_code: response_debug.auth_error_code.as_deref(),
-                auth_recovery_followup_success: None,
-                auth_recovery_followup_status: None,
-            },
-            &self.auth_env,
-        );
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::num::NonZeroU64;
-
-    use super::*;
-    use codex_protocol::config_types::ModelProviderAuthInfo;
-
-    fn provider_info_with_command_auth() -> ModelProviderInfo {
-        ModelProviderInfo {
-            auth: Some(ModelProviderAuthInfo {
-                command: "print-token".to_string(),
-                args: Vec::new(),
-                timeout_ms: NonZeroU64::new(5_000).expect("timeout should be non-zero"),
-                refresh_interval_ms: 300_000,
-                cwd: std::env::current_dir()
-                    .expect("current dir should be available")
-                    .try_into()
-                    .expect("current dir should be absolute"),
-            }),
-            requires_openai_auth: false,
-            ..ModelProviderInfo::create_openai_provider(/*base_url*/ None)
-        }
-    }
-
-    #[test]
-    fn command_auth_provider_reports_command_auth_without_cached_auth() {
-        let endpoint = OpenAiModelsEndpoint::new(
-            provider_info_with_command_auth(),
-            /*auth_manager*/ None,
-        );
-
-        assert!(endpoint.has_command_auth());
-    }
-
-    #[test]
-    fn provider_without_command_auth_reports_no_command_auth() {
-        let endpoint = OpenAiModelsEndpoint::new(
-            ModelProviderInfo::create_openai_provider(/*base_url*/ None),
-            /*auth_manager*/ None,
-        );
-
-        assert!(!endpoint.has_command_auth());
     }
 }

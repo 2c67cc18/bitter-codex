@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use codex_protocol::ThreadId;
-use codex_protocol::protocol::ThreadMemoryMode;
 use codex_rollout::RolloutConfig;
 use codex_rollout::RolloutRecorder;
 use codex_rollout::RolloutRecorderParams;
@@ -63,7 +62,6 @@ pub(super) async fn resume_thread(
         sqlite_home: store.config.sqlite_home.clone(),
         cwd,
         model_provider_id: params.metadata.model_provider.clone(),
-        generate_memories: matches!(params.metadata.memory_mode, ThreadMemoryMode::Enabled),
     };
     let recorder = RolloutRecorder::new(&config, RolloutRecorderParams::resume(rollout_path))
         .await
@@ -82,8 +80,7 @@ pub(super) async fn append_items(
         .record_canonical_items(params.items.as_slice())
         .await
         .map_err(thread_store_io_error)?;
-    // LiveThread applies metadata immediately after append_items returns. Wait for the local
-    // writer so SQLite never gets ahead of JSONL for accepted live appends.
+
     recorder.flush().await.map_err(thread_store_io_error)
 }
 

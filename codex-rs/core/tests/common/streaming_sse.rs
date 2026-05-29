@@ -10,14 +10,12 @@ use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::Notify;
 use tokio::sync::oneshot;
 
-/// Streaming SSE chunk payload gated by a per-chunk signal.
 #[derive(Debug)]
 pub struct StreamingSseChunk {
     pub gate: Option<oneshot::Receiver<()>>,
     pub body: String,
 }
 
-/// Minimal streaming SSE server for tests that need gated per-chunk delivery.
 pub struct StreamingSseServer {
     uri: String,
     requests: Arc<TokioMutex<Vec<Vec<u8>>>>,
@@ -50,12 +48,6 @@ impl StreamingSseServer {
     }
 }
 
-/// Starts a lightweight HTTP server that supports:
-/// - GET /v1/models -> empty models response
-/// - POST /v1/responses -> SSE stream gated per-chunk, served in order
-///
-/// Returns the server handle and a list of receivers that fire when each
-/// response stream finishes sending its final chunk.
 pub async fn start_streaming_sse_server(
     responses: Vec<Vec<StreamingSseChunk>>,
 ) -> (StreamingSseServer, Vec<oneshot::Receiver<i64>>) {
@@ -95,7 +87,7 @@ pub async fn start_streaming_sse_server(
                     tokio::spawn(async move {
                         let (request, body_prefix) = read_http_request(&mut stream).await;
                         let Some((method, path)) = parse_request_line(&request) else {
-                            let _ = write_http_response(&mut stream, /*status*/ 400, "bad request", "text/plain").await;
+                            let _ = write_http_response(&mut stream,  400, "bad request", "text/plain").await;
                             return;
                         };
 
@@ -104,7 +96,7 @@ pub async fn start_streaming_sse_server(
                                 .await
                                 .is_err()
                             {
-                                let _ = write_http_response(&mut stream, /*status*/ 400, "bad request", "text/plain").await;
+                                let _ = write_http_response(&mut stream,  400, "bad request", "text/plain").await;
                                 return;
                             }
                             let body = serde_json::json!({
@@ -112,7 +104,7 @@ pub async fn start_streaming_sse_server(
                                 "object": "list"
                             })
                             .to_string();
-                            let _ = write_http_response(&mut stream, /*status*/ 200, &body, "application/json").await;
+                            let _ = write_http_response(&mut stream,  200, &body, "application/json").await;
                             return;
                         }
 
@@ -122,14 +114,14 @@ pub async fn start_streaming_sse_server(
                             {
                                 Ok(body) => body,
                                 Err(_) => {
-                                    let _ = write_http_response(&mut stream, /*status*/ 400, "bad request", "text/plain").await;
+                                    let _ = write_http_response(&mut stream,  400, "bad request", "text/plain").await;
                                     return;
                                 }
                             };
                             requests.lock().await.push(body);
                             request_notify.notify_one();
                             let Some((chunks, completion)) = take_next_stream(&state).await else {
-                                let _ = write_http_response(&mut stream, /*status*/ 500, "no responses queued", "text/plain").await;
+                                let _ = write_http_response(&mut stream,  500, "no responses queued", "text/plain").await;
                                 return;
                             };
 
@@ -153,7 +145,7 @@ pub async fn start_streaming_sse_server(
                             return;
                         }
 
-                        let _ = write_http_response(&mut stream, /*status*/ 404, "not found", "text/plain").await;
+                        let _ = write_http_response(&mut stream,  404, "not found", "text/plain").await;
                     });
                 }
             }

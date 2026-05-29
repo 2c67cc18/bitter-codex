@@ -1,10 +1,4 @@
-//! Session-wide mutable state.
-
-use codex_protocol::models::AdditionalPermissionProfile;
 use codex_protocol::models::ResponseItem;
-use codex_sandboxing::policy_transforms::merge_permission_profiles;
-use std::collections::HashSet;
-use std::collections::VecDeque;
 
 use super::auto_compact_window::AutoCompactWindow;
 use super::auto_compact_window::AutoCompactWindowSnapshot;
@@ -18,29 +12,21 @@ use codex_protocol::protocol::TokenUsageInfo;
 use codex_protocol::protocol::TurnContextItem;
 use codex_utils_output_truncation::TruncationPolicy;
 
-/// Persistent, session-scoped state previously stored directly on `Session`.
 pub(crate) struct SessionState {
     pub(crate) session_configuration: SessionConfiguration,
     pub(crate) history: ContextManager,
     pub(crate) latest_rate_limits: Option<RateLimitSnapshot>,
     pub(crate) server_reasoning_included: bool,
-    pub(crate) mcp_dependency_prompted: HashSet<String>,
-    /// Settings used by the latest regular user turn, used for turn-to-turn
-    /// model/realtime handling on subsequent regular turns (including full-context
-    /// reinjection after resume or `/compact`).
+
     previous_turn_settings: Option<PreviousTurnSettings>,
-    /// Runtime accounting state for the active auto-compaction window.
+
     auto_compact_window: AutoCompactWindow,
-    /// Startup prewarmed session prepared during session initialization.
+
     pub(crate) startup_prewarm: Option<SessionStartupPrewarmHandle>,
-    pub(crate) active_connector_selection: HashSet<String>,
-    pub(crate) pending_session_start_sources: VecDeque<codex_hooks::SessionStartSource>,
-    granted_permissions: Option<AdditionalPermissionProfile>,
     next_turn_is_first: bool,
 }
 
 impl SessionState {
-    /// Create a new session state mirroring previous `State::default()` semantics.
     pub(crate) fn new(session_configuration: SessionConfiguration) -> Self {
         let history = ContextManager::new();
         Self {
@@ -48,18 +34,13 @@ impl SessionState {
             history,
             latest_rate_limits: None,
             server_reasoning_included: false,
-            mcp_dependency_prompted: HashSet::new(),
             previous_turn_settings: None,
             auto_compact_window: AutoCompactWindow::new(),
             startup_prewarm: None,
-            active_connector_selection: HashSet::new(),
-            pending_session_start_sources: VecDeque::new(),
-            granted_permissions: None,
             next_turn_is_first: true,
         }
     }
 
-    // History helpers
     pub(crate) fn record_items<I>(&mut self, items: I, policy: TruncationPolicy)
     where
         I: IntoIterator,
@@ -82,11 +63,6 @@ impl SessionState {
         self.next_turn_is_first = value;
     }
 
-    pub(crate) fn take_next_turn_is_first(&mut self) -> bool {
-        let is_first_turn = self.next_turn_is_first;
-        self.next_turn_is_first = false;
-        is_first_turn
-    }
 
     pub(crate) fn clone_history(&self) -> ContextManager {
         self.history.clone()
@@ -115,7 +91,6 @@ impl SessionState {
         self.history.reference_context_item()
     }
 
-    // Token/rate limit helpers
     pub(crate) fn update_token_info_from_usage(
         &mut self,
         usage: &TokenUsage,
@@ -161,9 +136,6 @@ impl SessionState {
         (self.token_info(), self.latest_rate_limits.clone())
     }
 
-    pub(crate) fn set_token_usage_full(&mut self, context_window: i64) {
-        self.history.set_token_usage_full(context_window);
-    }
 
     pub(crate) fn get_total_token_usage(&self, server_reasoning_included: bool) -> i64 {
         self.history
@@ -178,17 +150,6 @@ impl SessionState {
         self.server_reasoning_included
     }
 
-    pub(crate) fn record_mcp_dependency_prompted<I>(&mut self, names: I)
-    where
-        I: IntoIterator<Item = String>,
-    {
-        self.mcp_dependency_prompted.extend(names);
-    }
-
-    pub(crate) fn mcp_dependency_prompted(&self) -> HashSet<String> {
-        self.mcp_dependency_prompted.clone()
-    }
-
     pub(crate) fn set_session_startup_prewarm(
         &mut self,
         startup_prewarm: SessionStartupPrewarmHandle,
@@ -199,52 +160,8 @@ impl SessionState {
     pub(crate) fn take_session_startup_prewarm(&mut self) -> Option<SessionStartupPrewarmHandle> {
         self.startup_prewarm.take()
     }
-
-    // Adds connector IDs to the active set and returns the merged selection.
-    pub(crate) fn merge_connector_selection<I>(&mut self, connector_ids: I) -> HashSet<String>
-    where
-        I: IntoIterator<Item = String>,
-    {
-        self.active_connector_selection.extend(connector_ids);
-        self.active_connector_selection.clone()
-    }
-
-    // Returns the current connector selection tracked on session state.
-    pub(crate) fn get_connector_selection(&self) -> HashSet<String> {
-        self.active_connector_selection.clone()
-    }
-
-    // Removes all currently tracked connector selections.
-    pub(crate) fn clear_connector_selection(&mut self) {
-        self.active_connector_selection.clear();
-    }
-
-    pub(crate) fn queue_pending_session_start_source(
-        &mut self,
-        value: codex_hooks::SessionStartSource,
-    ) {
-        self.pending_session_start_sources.push_back(value);
-    }
-
-    pub(crate) fn take_pending_session_start_source(
-        &mut self,
-    ) -> Option<codex_hooks::SessionStartSource> {
-        self.pending_session_start_sources.pop_front()
-    }
-
-    pub(crate) fn record_granted_permissions(&mut self, permissions: AdditionalPermissionProfile) {
-        self.granted_permissions =
-            merge_permission_profiles(self.granted_permissions.as_ref(), Some(&permissions));
-    }
-
-    pub(crate) fn granted_permissions(&self) -> Option<AdditionalPermissionProfile> {
-        self.granted_permissions.clone()
-    }
 }
 
-// Sometimes new snapshots don't include credits or plan information.
-// Preserve those from the previous snapshot when missing. For `limit_id`, treat
-// missing values as the default `"codex"` bucket.
 fn merge_rate_limit_fields(
     previous: Option<&RateLimitSnapshot>,
     mut snapshot: RateLimitSnapshot,
@@ -260,7 +177,3 @@ fn merge_rate_limit_fields(
     }
     snapshot
 }
-
-#[cfg(test)]
-#[path = "session_tests.rs"]
-mod tests;

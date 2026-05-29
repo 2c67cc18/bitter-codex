@@ -162,7 +162,7 @@ const WEBSOCKET_CONNECTION_LIMIT_REACHED_MESSAGE: &str = "Responses websocket co
 
 pub struct ResponsesWebsocketConnection {
     stream: Arc<Mutex<Option<WsStream>>>,
-    // TODO (pakrym): is this the right place for timeout?
+
     idle_timeout: Duration,
     server_reasoning_included: bool,
     models_etag: Option<String>,
@@ -235,7 +235,7 @@ impl ResponsesWebsocketConnection {
             request_body,
             self.idle_timeout,
             self.telemetry.as_ref(),
-            /*connection_reused*/ true,
+            true,
         )
         .await
     }
@@ -304,8 +304,6 @@ impl ResponsesWebsocketConnection {
                 };
 
                 if let Err(err) = result {
-                    // A terminal stream error should reach the caller immediately. Waiting for a
-                    // graceful close handshake here can stall indefinitely and mask the error.
                     let failed_stream = guard.take();
                     drop(guard);
                     drop(failed_stream);
@@ -322,40 +320,34 @@ impl ResponsesWebsocketConnection {
     }
 }
 
-/// Client for connecting to the Responses WebSocket endpoint for one provider.
 pub struct ResponsesWebsocketClient {
     provider: Provider,
     auth: SharedAuthProvider,
 }
 
-/// Close frame information captured by a handshake probe.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResponsesWebsocketClose {
-    /// WebSocket close code returned by the server.
     pub code: String,
-    /// Human-readable close reason returned by the server.
+
     pub reason: String,
 }
 
-/// Result of a handshake-only Responses WebSocket probe.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResponsesWebsocketProbe {
-    /// Redacted by callers before displaying or serializing support reports.
     pub url: String,
-    /// HTTP status returned by the successful WebSocket upgrade.
+
     pub status: StatusCode,
-    /// Whether the server reported reasoning support in the upgrade response.
+
     pub reasoning_included: bool,
-    /// Whether the server returned a model catalog ETag in the upgrade response.
+
     pub models_etag_present: bool,
-    /// Whether the server returned a server-selected model in the upgrade response.
+
     pub server_model_present: bool,
-    /// Close frame received immediately after upgrade, when one arrives quickly.
+
     pub immediate_close: Option<ResponsesWebsocketClose>,
 }
 
 impl ResponsesWebsocketClient {
-    /// Creates a Responses WebSocket client for an already-resolved provider and auth source.
     pub fn new(provider: Provider, auth: SharedAuthProvider) -> Self {
         Self { provider, auth }
     }
@@ -394,13 +386,6 @@ impl ResponsesWebsocketClient {
         ))
     }
 
-    /// Opens a WebSocket connection long enough to validate the upgrade response.
-    ///
-    /// The probe uses the same URL construction, headers, authentication, TLS,
-    /// and custom-CA path as a real Responses WebSocket connection, but it does
-    /// not send a request frame. After the HTTP 101 upgrade succeeds, it waits
-    /// briefly for an immediate server close frame so diagnostics can distinguish
-    /// a usable connection from a policy rejection that closes right away.
     pub async fn probe_handshake(
         &self,
         extra_headers: HeaderMap,
@@ -417,7 +402,7 @@ impl ResponsesWebsocketClient {
         self.auth.add_auth_headers(&mut headers);
 
         let (mut stream, status, reasoning_included, models_etag, server_model) =
-            connect_websocket(ws_url.clone(), headers, /*turn_state*/ None).await?;
+            connect_websocket(ws_url.clone(), headers, None).await?;
         let immediate_close = tokio::time::timeout(immediate_close_timeout, stream.next())
             .await
             .ok()
@@ -482,20 +467,12 @@ async fn connect_websocket(
         .map_err(|err| ApiError::Stream(format!("failed to build websocket request: {err}")))?;
     request.headers_mut().extend(headers);
 
-    // Secure websocket traffic needs the same custom-CA policy as reqwest-based HTTPS traffic.
-    // If a Codex-specific CA bundle is configured, build an explicit rustls connector so this
-    // websocket path does not fall back to tungstenite's default native-roots-only behavior.
     let connector = maybe_build_rustls_client_config_with_custom_ca()
         .map_err(|err| ApiError::Stream(format!("failed to configure websocket TLS: {err}")))?
         .map(tokio_tungstenite::Connector::Rustls);
 
-    let response = connect_async_tls_with_config(
-        request,
-        Some(websocket_config()),
-        false, // `false` means "do not disable Nagle", which is tungstenite's recommended default.
-        connector,
-    )
-    .await;
+    let response =
+        connect_async_tls_with_config(request, Some(websocket_config()), false, connector).await;
 
     let (stream, response) = match response {
         Ok((stream, response)) => {

@@ -1,6 +1,3 @@
-//! Helpers for mapping config parse/validation failures to file locations and
-//! rendering them in a user-friendly way.
-
 use crate::ConfigLayerEntry;
 use crate::ConfigLayerStack;
 use crate::ConfigLayerStackOrdering;
@@ -25,7 +22,6 @@ pub struct TextPosition {
     pub column: usize,
 }
 
-/// Text range in 1-based line/column coordinates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TextRange {
     pub start: TextPosition,
@@ -89,16 +85,12 @@ impl std::error::Error for ConfigLoadError {
 #[derive(Clone, Copy)]
 pub(crate) enum ConfigDiagnosticSource<'a> {
     Path(&'a Path),
-    #[cfg(any(target_os = "macos", test))]
-    DisplayName(&'a str),
 }
 
 impl ConfigDiagnosticSource<'_> {
     pub(crate) fn to_path_buf(self) -> PathBuf {
         match self {
             ConfigDiagnosticSource::Path(path) => path.to_path_buf(),
-            #[cfg(any(target_os = "macos", test))]
-            ConfigDiagnosticSource::DisplayName(name) => PathBuf::from(name),
         }
     }
 }
@@ -173,14 +165,8 @@ pub async fn first_layer_config_error<T: DeserializeOwned>(
     layers: &ConfigLayerStack,
     config_toml_file: &str,
 ) -> Option<ConfigError> {
-    // When the merged config fails schema validation, we surface the first concrete
-    // per-file error to point users at a specific file and range rather than an
-    // opaque merged-layer failure.
     first_layer_config_error_for_entries::<T, _>(
-        layers.get_layers(
-            ConfigLayerStackOrdering::LowestPrecedenceFirst,
-            /*include_disabled*/ false,
-        ),
+        layers.get_layers(ConfigLayerStackOrdering::LowestPrecedenceFirst, false),
         config_toml_file,
     )
     .await
@@ -233,10 +219,7 @@ fn config_path_for_layer(layer: &ConfigLayerEntry, config_toml_file: &str) -> Op
         ConfigLayerSource::Project { dot_codex_folder } => {
             Some(dot_codex_folder.as_path().join(config_toml_file))
         }
-        ConfigLayerSource::LegacyManagedConfigTomlFromFile { file } => Some(file.to_path_buf()),
-        ConfigLayerSource::Mdm { .. }
-        | ConfigLayerSource::SessionFlags
-        | ConfigLayerSource::LegacyManagedConfigTomlFromMdm => None,
+        ConfigLayerSource::Mdm { .. } | ConfigLayerSource::SessionFlags => None,
     }
 }
 

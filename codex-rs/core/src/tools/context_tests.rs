@@ -1,17 +1,20 @@
 use super::*;
 use codex_protocol::models::DEFAULT_IMAGE_DETAIL;
-use codex_protocol::models::SearchToolCallParams;
 use core_test_support::assert_regex_match;
 use pretty_assertions::assert_eq;
-use serde_json::json;
 
 #[test]
 fn custom_tool_calls_should_roundtrip_as_custom_outputs() {
     let payload = ToolPayload::Custom {
         input: "patch".to_string(),
     };
-    let response = FunctionToolOutput::from_text("patched".to_string(), Some(true))
-        .to_response_item("call-42", &payload);
+    let response = FunctionToolOutput::from_content(
+        vec![FunctionCallOutputContentItem::InputText {
+            text: "patched".to_string(),
+        }],
+        Some(true),
+    )
+    .to_response_item("call-42", &payload);
 
     match response {
         ResponseInputItem::CustomToolCallOutput {
@@ -31,8 +34,13 @@ fn function_payloads_remain_function_outputs() {
     let payload = ToolPayload::Function {
         arguments: "{}".to_string(),
     };
-    let response = FunctionToolOutput::from_text("ok".to_string(), Some(true))
-        .to_response_item("fn-1", &payload);
+    let response = FunctionToolOutput::from_content(
+        vec![FunctionCallOutputContentItem::InputText {
+            text: "ok".to_string(),
+        }],
+        Some(true),
+    )
+    .to_response_item("fn-1", &payload);
 
     match response {
         ResponseInputItem::FunctionCallOutput { call_id, output } => {
@@ -43,232 +51,6 @@ fn function_payloads_remain_function_outputs() {
         }
         other => panic!("expected FunctionCallOutput, got {other:?}"),
     }
-}
-
-#[test]
-fn mcp_code_mode_result_serializes_full_call_tool_result() {
-    let output = CallToolResult {
-        content: vec![serde_json::json!({
-            "type": "text",
-            "text": "ignored",
-        })],
-        structured_content: Some(serde_json::json!({
-            "threadId": "thread_123",
-            "content": "done",
-        })),
-        is_error: Some(false),
-        meta: Some(serde_json::json!({
-            "source": "mcp",
-        })),
-    };
-
-    let result = output.code_mode_result(&ToolPayload::Function {
-        arguments: "{}".to_string(),
-    });
-
-    assert_eq!(
-        result,
-        serde_json::json!({
-            "content": [{
-                "type": "text",
-                "text": "ignored",
-            }],
-            "structuredContent": {
-                "threadId": "thread_123",
-                "content": "done",
-            },
-            "isError": false,
-            "_meta": {
-                "source": "mcp",
-            },
-        })
-    );
-}
-
-#[test]
-fn mcp_tool_output_response_item_includes_wall_time() {
-    let output = McpToolOutput {
-        result: CallToolResult {
-            content: vec![serde_json::json!({
-                "type": "text",
-                "text": "done",
-            })],
-            structured_content: None,
-            is_error: Some(false),
-            meta: None,
-        },
-        tool_input: json!({}),
-        wall_time: std::time::Duration::from_millis(1250),
-        original_image_detail_supported: false,
-        truncation_policy: TruncationPolicy::Bytes(1024),
-    };
-
-    let response = output.to_response_item(
-        "mcp-call-1",
-        &ToolPayload::Function {
-            arguments: "{}".to_string(),
-        },
-    );
-
-    match response {
-        ResponseInputItem::FunctionCallOutput { call_id, output } => {
-            assert_eq!(call_id, "mcp-call-1");
-            assert_eq!(output.success, Some(true));
-            let Some(text) = output.body.to_text() else {
-                panic!("MCP output should serialize as text");
-            };
-            let Some(payload) = text.strip_prefix("Wall time: 1.2500 seconds\nOutput:\n") else {
-                panic!("MCP output should include wall-time header: {text}");
-            };
-            let parsed: serde_json::Value = serde_json::from_str(payload).unwrap_or_else(|err| {
-                panic!("MCP output should serialize JSON content: {err}");
-            });
-            assert_eq!(
-                parsed,
-                json!([{
-                    "type": "text",
-                    "text": "done",
-                }])
-            );
-        }
-        other => panic!("expected FunctionCallOutput, got {other:?}"),
-    }
-}
-
-#[test]
-fn mcp_tool_output_response_item_truncates_large_structured_content() {
-    let output = McpToolOutput {
-        result: CallToolResult {
-            content: vec![serde_json::json!({
-                "type": "text",
-                "text": "ignored when structured content is present",
-            })],
-            structured_content: Some(serde_json::json!({
-                "items": "large structured value ".repeat(1_000),
-            })),
-            is_error: Some(false),
-            meta: None,
-        },
-        tool_input: json!({}),
-        wall_time: std::time::Duration::from_millis(1250),
-        original_image_detail_supported: false,
-        truncation_policy: TruncationPolicy::Bytes(128),
-    };
-
-    let response = output.to_response_item(
-        "mcp-call-large",
-        &ToolPayload::Function {
-            arguments: "{}".to_string(),
-        },
-    );
-
-    match response {
-        ResponseInputItem::FunctionCallOutput { call_id, output } => {
-            assert_eq!(call_id, "mcp-call-large");
-            assert_eq!(output.success, Some(true));
-            let text = output
-                .body
-                .to_text()
-                .expect("MCP output should serialize as text");
-            assert!(text.starts_with("Wall time: 1.2500 seconds\nOutput:\n"));
-            assert!(text.contains("chars truncated"));
-            assert!(!text.contains("ignored when structured content is present"));
-        }
-        other => panic!("expected FunctionCallOutput, got {other:?}"),
-    }
-}
-
-#[test]
-fn mcp_tool_output_response_item_preserves_content_items() {
-    let image_url = "data:image/png;base64,AAA";
-    let output = McpToolOutput {
-        result: CallToolResult {
-            content: vec![serde_json::json!({
-                "type": "image",
-                "mimeType": "image/png",
-                "data": "AAA",
-            })],
-            structured_content: None,
-            is_error: Some(false),
-            meta: None,
-        },
-        tool_input: json!({}),
-        wall_time: std::time::Duration::from_millis(500),
-        original_image_detail_supported: false,
-        truncation_policy: TruncationPolicy::Bytes(1024),
-    };
-
-    let response = output.to_response_item(
-        "mcp-call-2",
-        &ToolPayload::Function {
-            arguments: "{}".to_string(),
-        },
-    );
-
-    match response {
-        ResponseInputItem::FunctionCallOutput { output, .. } => {
-            assert_eq!(
-                output.content_items(),
-                Some(
-                    vec![
-                        FunctionCallOutputContentItem::InputText {
-                            text: "Wall time: 0.5000 seconds\nOutput:".to_string(),
-                        },
-                        FunctionCallOutputContentItem::InputImage {
-                            image_url: image_url.to_string(),
-                            detail: Some(DEFAULT_IMAGE_DETAIL),
-                        },
-                    ]
-                    .as_slice()
-                )
-            );
-            assert_eq!(
-                output.body.to_text().as_deref(),
-                Some("Wall time: 0.5000 seconds\nOutput:")
-            );
-        }
-        other => panic!("expected FunctionCallOutput, got {other:?}"),
-    }
-}
-
-#[test]
-fn mcp_tool_output_code_mode_result_stays_raw_call_tool_result() {
-    let large_content = "large structured value ".repeat(1_000);
-    let output = McpToolOutput {
-        result: CallToolResult {
-            content: vec![serde_json::json!({
-                "type": "text",
-                "text": "ignored",
-            })],
-            structured_content: Some(serde_json::json!({
-                "content": large_content,
-            })),
-            is_error: Some(false),
-            meta: None,
-        },
-        tool_input: json!({}),
-        wall_time: std::time::Duration::from_millis(1250),
-        original_image_detail_supported: false,
-        truncation_policy: TruncationPolicy::Bytes(64),
-    };
-
-    let result = output.code_mode_result(&ToolPayload::Function {
-        arguments: "{}".to_string(),
-    });
-
-    assert_eq!(
-        result,
-        serde_json::json!({
-            "content": [{
-                "type": "text",
-                "text": "ignored",
-            }],
-            "structuredContent": {
-                "content": "large structured value ".repeat(1_000),
-            },
-            "isError": false,
-        })
-    );
 }
 
 #[test]
@@ -315,59 +97,6 @@ fn custom_tool_calls_can_derive_text_from_content_items() {
             assert_eq!(output.success, Some(true));
         }
         other => panic!("expected CustomToolCallOutput, got {other:?}"),
-    }
-}
-
-#[test]
-fn tool_search_payloads_roundtrip_as_tool_search_outputs() {
-    let payload = ToolPayload::ToolSearch {
-        arguments: SearchToolCallParams {
-            query: "calendar".to_string(),
-            limit: None,
-        },
-    };
-    let response = ToolSearchOutput {
-        tools: vec![LoadableToolSpec::Function(codex_tools::ResponsesApiTool {
-            name: "create_event".to_string(),
-            description: String::new(),
-            strict: false,
-            defer_loading: Some(true),
-            parameters: codex_tools::JsonSchema::object(
-                /*properties*/ Default::default(),
-                /*required*/ None,
-                /*additional_properties*/ None,
-            ),
-            output_schema: None,
-        })],
-    }
-    .to_response_item("search-1", &payload);
-
-    match response {
-        ResponseInputItem::ToolSearchOutput {
-            call_id,
-            status,
-            execution,
-            tools,
-        } => {
-            assert_eq!(call_id, "search-1");
-            assert_eq!(status, "completed");
-            assert_eq!(execution, "client");
-            assert_eq!(
-                tools,
-                vec![json!({
-                    "type": "function",
-                    "name": "create_event",
-                    "description": "",
-                    "strict": false,
-                    "defer_loading": true,
-                    "parameters": {
-                        "type": "object",
-                        "properties": {}
-                    }
-                })]
-            );
-        }
-        other => panic!("expected ToolSearchOutput, got {other:?}"),
     }
 }
 
@@ -434,7 +163,6 @@ fn exec_command_tool_output_formats_truncated_response() {
         process_id: None,
         exit_code: Some(0),
         original_token_count: Some(10),
-        hook_command: None,
     }
     .to_response_item("call-42", &payload);
 

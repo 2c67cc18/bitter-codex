@@ -77,11 +77,6 @@ impl Request {
         self
     }
 
-    /// Convert the request body into the exact bytes that will be sent.
-    ///
-    /// Auth schemes such as AWS SigV4 need to sign the final body bytes, including
-    /// compression and content headers. Calling this method does not mutate the
-    /// request.
     pub fn prepare_body_for_send(&self) -> Result<PreparedRequestBody, String> {
         let mut headers = self.headers.clone();
         match self.body.as_ref() {

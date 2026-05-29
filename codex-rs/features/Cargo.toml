@@ -14,11 +14,5 @@ workspace = true
 
 [dependencies]
 codex-otel = { workspace = true }
-codex-protocol = { workspace = true }
-schemars = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-toml = { workspace = true }
 tracing = { workspace = true, features = ["log"] }
-
-[dev-dependencies]
-pretty_assertions = { workspace = true }

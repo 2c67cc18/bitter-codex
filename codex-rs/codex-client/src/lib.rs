@@ -12,11 +12,7 @@ mod transport;
 pub use crate::chatgpt_cloudflare_cookies::with_chatgpt_cloudflare_cookie_store;
 pub use crate::chatgpt_hosts::is_allowed_chatgpt_host;
 pub use crate::custom_ca::BuildCustomCaTransportError;
-/// Test-only subprocess hook for custom CA coverage.
-///
-/// This stays public only so the `custom_ca_probe` binary target can reuse the shared helper. It
-/// is hidden from normal docs because ordinary callers should use
-/// [`build_reqwest_client_with_custom_ca`] instead.
+
 #[doc(hidden)]
 pub use crate::custom_ca::build_reqwest_client_for_subprocess_tests;
 pub use crate::custom_ca::build_reqwest_client_with_custom_ca;

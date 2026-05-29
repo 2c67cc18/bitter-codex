@@ -1,7 +1,3 @@
-// - In the default output mode, it is paramount that the only thing written to
-//   stdout is the final message (if any).
-// - In --json mode, stdout must be valid JSONL, one event per line.
-// For both modes, any other output must be written to stderr.
 #![deny(clippy::print_stdout)]
 
 mod cli;
@@ -12,22 +8,14 @@ pub(crate) mod exec_events;
 
 pub use cli::Cli;
 pub use cli::Command;
-pub use cli::ReviewArgs;
 use codex_app_server_client::DEFAULT_IN_PROCESS_CHANNEL_CAPACITY;
-use codex_app_server_client::EnvironmentManager;
-use codex_app_server_client::ExecServerRuntimePaths;
 use codex_app_server_client::InProcessAppServerClient;
 use codex_app_server_client::InProcessClientStartArgs;
 use codex_app_server_client::InProcessServerEvent;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ConfigWarningNotification;
 use codex_app_server_protocol::JSONRPCErrorError;
-use codex_app_server_protocol::McpServerElicitationAction;
-use codex_app_server_protocol::McpServerElicitationRequestResponse;
 use codex_app_server_protocol::RequestId;
-use codex_app_server_protocol::ReviewStartParams;
-use codex_app_server_protocol::ReviewStartResponse;
-use codex_app_server_protocol::ReviewTarget as ApiReviewTarget;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::Thread as AppServerThread;
@@ -39,8 +27,6 @@ use codex_app_server_protocol::ThreadReadResponse;
 use codex_app_server_protocol::ThreadResumeParams;
 use codex_app_server_protocol::ThreadResumeResponse;
 use codex_app_server_protocol::ThreadSortKey;
-use codex_app_server_protocol::ThreadSource;
-use codex_app_server_protocol::ThreadSourceKind;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::ThreadUnsubscribeParams;
@@ -49,43 +35,26 @@ use codex_app_server_protocol::TurnInterruptParams;
 use codex_app_server_protocol::TurnInterruptResponse;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
-use codex_app_server_protocol::TurnStartedNotification;
 use codex_arg0::Arg0DispatchPaths;
-use codex_cloud_requirements::cloud_requirements_loader_for_storage;
 use codex_config::ConfigLoadError;
 use codex_config::ConfigLoadOptions;
 use codex_config::LoaderOverrides;
 use codex_config::format_config_error_with_source;
 use codex_core::StateDbHandle;
-use codex_core::check_execpolicy_for_warnings;
 use codex_core::config::Config;
 use codex_core::config::ConfigBuilder;
 use codex_core::config::ConfigOverrides;
 use codex_core::config::find_codex_home;
 use codex_core::config::load_config_as_toml_with_cli_and_load_options;
-use codex_core::config::resolve_oss_provider;
-use codex_core::config::resolve_profile_v2_config_path;
-use codex_core::find_thread_meta_by_name_str;
-use codex_core::format_exec_policy_error_with_source;
 use codex_core::path_utils;
-use codex_feedback::CodexFeedback;
 use codex_git_utils::get_git_repo_root;
 use codex_login::AuthConfig;
-use codex_login::default_client::set_default_client_residency_requirement;
 use codex_login::default_client::set_default_originator;
 use codex_login::enforce_login_restrictions;
-use codex_model_provider_info::LMSTUDIO_OSS_PROVIDER_ID;
-use codex_model_provider_info::OLLAMA_OSS_PROVIDER_ID;
 use codex_otel::set_parent_from_context;
 use codex_otel::traceparent_context_from_env;
 use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
-use codex_protocol::config_types::SandboxMode;
-use codex_protocol::models::ActivePermissionProfile;
-use codex_protocol::models::PermissionProfile;
-use codex_protocol::protocol::AskForApproval;
-use codex_protocol::protocol::ReviewRequest;
-use codex_protocol::protocol::ReviewTarget;
 use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::RolloutLine;
 use codex_protocol::protocol::SessionConfiguredEvent;
@@ -94,31 +63,18 @@ use codex_protocol::user_input::UserInput;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::canonicalize_existing_preserving_symlinks;
 use codex_utils_cli::SharedCliOptions;
-use codex_utils_oss::ensure_oss_provider_ready;
-use codex_utils_oss::get_default_model_for_oss_provider;
 use event_processor_with_human_output::EventProcessorWithHumanOutput;
 pub use event_processor_with_jsonl_output::CodexStatus;
 pub use event_processor_with_jsonl_output::CollectedThreadEvents;
 pub use event_processor_with_jsonl_output::EventProcessorWithJsonOutput;
 pub use exec_events::AgentMessageItem;
-pub use exec_events::CollabAgentState;
-pub use exec_events::CollabAgentStatus;
-pub use exec_events::CollabTool;
-pub use exec_events::CollabToolCallItem;
-pub use exec_events::CollabToolCallStatus;
 pub use exec_events::CommandExecutionItem;
 pub use exec_events::CommandExecutionStatus;
 pub use exec_events::ErrorItem;
-pub use exec_events::FileChangeItem;
 pub use exec_events::FileUpdateChange;
 pub use exec_events::ItemCompletedEvent;
 pub use exec_events::ItemStartedEvent;
 pub use exec_events::ItemUpdatedEvent;
-pub use exec_events::McpToolCallItem;
-pub use exec_events::McpToolCallItemError;
-pub use exec_events::McpToolCallItemResult;
-pub use exec_events::McpToolCallStatus;
-pub use exec_events::PatchApplyStatus;
 pub use exec_events::PatchChangeKind;
 pub use exec_events::ReasoningItem;
 pub use exec_events::ThreadErrorEvent;
@@ -138,10 +94,8 @@ use std::io::IsTerminal;
 use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
-use supports_color::Stream;
 use tokio::sync::mpsc;
 use tracing::Instrument;
-use tracing::error;
 use tracing::field;
 use tracing::info;
 use tracing::info_span;
@@ -153,7 +107,6 @@ use uuid::Uuid;
 use crate::cli::Command as ExecCommand;
 use crate::event_processor::EventProcessor;
 
-const DEFAULT_ANALYTICS_ENABLED: bool = true;
 const EXEC_DEFAULT_LOG_FILTER: &str = "error,opentelemetry_sdk=off,opentelemetry_otlp=off";
 
 enum InitialOperation {
@@ -161,20 +114,13 @@ enum InitialOperation {
         items: Vec<UserInput>,
         output_schema: Option<Value>,
     },
-    Review {
-        review_request: ReviewRequest,
-    },
 }
 
 enum StdinPromptBehavior {
-    /// Read stdin only when there is no positional prompt, which is the legacy
-    /// `codex exec` behavior for `codex exec` with piped input.
     RequiredIfPiped,
-    /// Always treat stdin as the prompt, used for the explicit `codex exec -`
-    /// sentinel and similar forced-stdin call sites.
+
     Forced,
-    /// If stdin is piped alongside a positional prompt, treat stdin as
-    /// additional context to append rather than as the primary prompt.
+
     OptionalAppend,
 }
 
@@ -199,13 +145,10 @@ struct ExecRunArgs {
     state_db: Option<StateDbHandle>,
     command: Option<ExecCommand>,
     config: Config,
-    dangerously_bypass_approvals_and_sandbox: bool,
     exec_span: tracing::Span,
     images: Vec<PathBuf>,
     json_mode: bool,
     last_message_file: Option<PathBuf>,
-    model_provider: Option<String>,
-    oss: bool,
     output_schema_path: Option<PathBuf>,
     prompt: Option<String>,
     skip_git_repo_check: bool,
@@ -222,19 +165,12 @@ fn exec_root_span() -> tracing::Span {
 }
 
 fn exec_stderr_env_filter() -> EnvFilter {
-    // OTEL export is best-effort; keep exporter self-diagnostics out of
-    // headless command output unless the caller opts in with RUST_LOG.
     EnvFilter::try_from_default_env()
         .or_else(|_| EnvFilter::try_new(EXEC_DEFAULT_LOG_FILTER))
         .unwrap_or_else(|_| EnvFilter::new("error"))
 }
 
 pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
-    #[allow(clippy::print_stderr)]
-    if let Some(message) = cli.removed_full_auto_warning() {
-        eprintln!("{message}");
-    }
-
     if let Err(err) = set_default_originator("codex_exec".to_string()) {
         tracing::warn!(?err, "Failed to set codex exec originator override {err:?}");
     }
@@ -246,9 +182,6 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         skip_git_repo_check,
         ephemeral,
         ignore_user_config,
-        ignore_rules,
-        removed_full_auto,
-        color,
         last_message_file,
         json: json_mode,
         prompt,
@@ -259,38 +192,16 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
     let SharedCliOptions {
         images,
         model: model_cli_arg,
-        oss,
-        oss_provider,
-        config_profile_v2,
-        sandbox_mode: sandbox_mode_cli_arg,
-        dangerously_bypass_approvals_and_sandbox,
-        bypass_hook_trust,
         cwd,
         add_dir,
     } = shared;
 
-    let (_stdout_with_ansi, stderr_with_ansi) = match color {
-        cli::Color::Always => (true, true),
-        cli::Color::Never => (false, false),
-        cli::Color::Auto => (
-            supports_color::on_cached(Stream::Stdout).is_some(),
-            supports_color::on_cached(Stream::Stderr).is_some(),
-        ),
-    };
+    let stderr_with_ansi = std::io::stderr().is_terminal();
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_ansi(stderr_with_ansi)
         .with_writer(std::io::stderr)
         .with_filter(exec_stderr_env_filter());
 
-    let sandbox_mode = if removed_full_auto {
-        Some(SandboxMode::WorkspaceWrite)
-    } else if dangerously_bypass_approvals_and_sandbox {
-        Some(SandboxMode::DangerFullAccess)
-    } else {
-        sandbox_mode_cli_arg.map(Into::<SandboxMode>::into)
-    };
-
-    // Parse `-c` overrides from the CLI.
     let cli_kv_overrides = match config_overrides.parse_overrides() {
         Ok(v) => v,
         #[allow(clippy::print_stderr)]
@@ -308,7 +219,6 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         None => AbsolutePathBuf::current_dir()?,
     };
 
-    // we load config.toml here to determine project state.
     #[allow(clippy::print_stderr)]
     let codex_home = match find_codex_home() {
         Ok(codex_home) => codex_home,
@@ -317,18 +227,13 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
             std::process::exit(1);
         }
     };
-    let user_config_path = config_profile_v2
-        .as_ref()
-        .map(|profile_v2| resolve_profile_v2_config_path(&codex_home, profile_v2));
     let loader_overrides = LoaderOverrides {
-        user_config_path,
-        user_config_profile: config_profile_v2,
+        user_config_path: None,
         ignore_user_config,
-        ignore_user_and_project_exec_policy_rules: ignore_rules,
         ..Default::default()
     };
 
-    let config_toml = match load_config_as_toml_with_cli_and_load_options(
+    let _config_toml = match load_config_as_toml_with_cli_and_load_options(
         &codex_home,
         Some(&config_cwd),
         cli_kv_overrides.clone(),
@@ -357,74 +262,26 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         }
     };
 
-    let chatgpt_base_url = config_toml
-        .chatgpt_base_url
-        .clone()
-        .unwrap_or_else(|| "https://chatgpt.com/backend-api/".to_string());
-    // TODO(gt): Make cloud requirements failures blocking once we can fail-closed.
-    let cloud_requirements = cloud_requirements_loader_for_storage(
-        codex_home.to_path_buf(),
-        /*enable_codex_api_key_env*/ false,
-        config_toml.cli_auth_credentials_store.unwrap_or_default(),
-        chatgpt_base_url,
-    )
-    .await;
     let run_cli_overrides = cli_kv_overrides.clone();
     let run_loader_overrides = loader_overrides.clone();
-    let run_cloud_requirements = cloud_requirements.clone();
 
-    let model_provider = if oss {
-        let resolved = resolve_oss_provider(oss_provider.as_deref(), &config_toml);
+    let model = model_cli_arg;
 
-        if let Some(provider) = resolved {
-            Some(provider)
-        } else {
-            return Err(anyhow::anyhow!(
-                "No default OSS provider configured. Use --local-provider=provider or set oss_provider to one of: {LMSTUDIO_OSS_PROVIDER_ID}, {OLLAMA_OSS_PROVIDER_ID} in config.toml"
-            ));
-        }
-    } else {
-        None // No OSS mode enabled
-    };
-
-    // When using `--oss`, let the bootstrapper pick the model based on selected provider
-    let model = if let Some(model) = model_cli_arg {
-        Some(model)
-    } else if oss {
-        model_provider
-            .as_ref()
-            .and_then(|provider_id| get_default_model_for_oss_provider(provider_id))
-            .map(std::borrow::ToOwned::to_owned)
-    } else {
-        None // No model specified, will use the default.
-    };
-
-    // Load configuration and determine approval policy
     let overrides = ConfigOverrides {
         model,
-        review_model: None,
-        // Default to never ask for approvals in headless mode. Feature flags can override.
-        approval_policy: Some(AskForApproval::Never),
-        approvals_reviewer: None,
-        sandbox_mode,
-        permission_profile: None,
-        default_permissions: None,
+        model_provider: None,
         cwd: resolved_cwd,
         workspace_roots: None,
-        model_provider: model_provider.clone(),
         service_tier: None,
         codex_self_exe: arg0_paths.codex_self_exe.clone(),
-        codex_linux_sandbox_exe: arg0_paths.codex_linux_sandbox_exe.clone(),
         main_execve_wrapper_exe: arg0_paths.main_execve_wrapper_exe.clone(),
         zsh_path: None,
         base_instructions: None,
         developer_instructions: None,
-        personality: None,
         compact_prompt: None,
-        show_raw_agent_reasoning: oss.then_some(true),
+        show_raw_agent_reasoning: None,
         tools_web_search_request: None,
         ephemeral: ephemeral.then_some(true),
-        bypass_hook_trust: bypass_hook_trust.then_some(true),
         additional_writable_roots: add_dir,
     };
 
@@ -433,23 +290,8 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         .harness_overrides(overrides)
         .loader_overrides(loader_overrides)
         .strict_config(strict_config)
-        .cloud_requirements(cloud_requirements)
         .build()
         .await?;
-
-    #[allow(clippy::print_stderr)]
-    match check_execpolicy_for_warnings(&config.config_layer_stack).await {
-        Ok(None) => {}
-        Ok(Some(err)) | Err(err) => {
-            eprintln!(
-                "Error loading rules:\n{}",
-                format_exec_policy_error_with_source(&err)
-            );
-            std::process::exit(1);
-        }
-    }
-
-    set_default_client_residency_requirement(config.enforce_residency.value());
 
     if let Err(err) = enforce_login_restrictions(&AuthConfig {
         codex_home: config.codex_home.to_path_buf(),
@@ -465,12 +307,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
     }
 
     let otel = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        codex_core::otel_init::build_provider(
-            &config,
-            env!("CARGO_PKG_VERSION"),
-            /*service_name_override*/ None,
-            DEFAULT_ANALYTICS_ENABLED,
-        )
+        codex_core::otel_init::build_provider(&config, env!("CARGO_PKG_VERSION"), None)
     })) {
         Ok(Ok(otel)) => otel,
         Ok(Err(e)) => {
@@ -509,34 +346,20 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
             range: None,
         })
         .collect();
-    let local_runtime_paths = ExecServerRuntimePaths::from_optional_paths(
-        arg0_paths.codex_self_exe.clone(),
-        arg0_paths.codex_linux_sandbox_exe.clone(),
-    )?;
     let state_db = codex_core::init_state_db(&config).await;
-    let environment_manager = if run_loader_overrides.ignore_user_config {
-        EnvironmentManager::from_env(Some(local_runtime_paths)).await?
-    } else {
-        EnvironmentManager::from_codex_home(config.codex_home.clone(), Some(local_runtime_paths))
-            .await?
-    };
     let in_process_start_args = InProcessClientStartArgs {
         arg0_paths,
         config: std::sync::Arc::new(config.clone()),
         cli_overrides: run_cli_overrides,
         loader_overrides: run_loader_overrides,
         strict_config,
-        cloud_requirements: run_cloud_requirements,
-        feedback: CodexFeedback::new(),
         log_db: None,
         state_db: state_db.clone(),
-        environment_manager: std::sync::Arc::new(environment_manager),
         config_warnings,
         session_source: SessionSource::Exec,
         enable_codex_api_key_env: true,
         client_name: "codex_exec".to_string(),
         client_version: env!("CARGO_PKG_VERSION").to_string(),
-        experimental_api: true,
         opt_out_notification_methods: Vec::new(),
         channel_capacity: DEFAULT_IN_PROCESS_CHANNEL_CAPACITY,
     };
@@ -545,13 +368,10 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         state_db,
         command,
         config,
-        dangerously_bypass_approvals_and_sandbox,
         exec_span: exec_span.clone(),
         images,
         json_mode,
         last_message_file,
-        model_provider,
-        oss,
         output_schema_path,
         prompt,
         skip_git_repo_check,
@@ -567,13 +387,10 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         state_db,
         command,
         config,
-        dangerously_bypass_approvals_and_sandbox,
         exec_span,
         images,
         json_mode,
         last_message_file,
-        model_provider,
-        oss,
         output_schema_path,
         prompt,
         skip_git_repo_check,
@@ -588,33 +405,11 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
             last_message_file.clone(),
         )),
     };
-    if oss {
-        // We're in the oss section, so provider_id should be Some
-        // Let's handle None case gracefully though just in case
-        let provider_id = match model_provider.as_ref() {
-            Some(id) => id,
-            None => {
-                error!("OSS provider unexpectedly not set when oss flag is used");
-                return Err(anyhow::anyhow!(
-                    "OSS provider not set but oss flag was used"
-                ));
-            }
-        };
-        ensure_oss_provider_ready(provider_id, &config)
-            .await
-            .map_err(|e| anyhow::anyhow!("OSS setup failed: {e}"))?;
-    }
 
     let default_cwd = config.cwd.to_path_buf();
-    let default_approval_policy = config.permissions.approval_policy.value();
     let default_effort = config.model_reasoning_effort;
 
     let (initial_operation, prompt_summary) = match (command.as_ref(), prompt, images) {
-        (Some(ExecCommand::Review(review_cli)), _, _) => {
-            let review_request = build_review_request(review_cli)?;
-            let summary = codex_core::review_prompts::user_facing_hint(&review_request.target);
-            (InitialOperation::Review { review_request }, summary)
-        }
         (Some(ExecCommand::Resume(args)), root_prompt, imgs) => {
             let prompt_arg = args
                 .prompt
@@ -635,7 +430,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                 .collect();
             items.push(UserInput::Text {
                 text: prompt_text.clone(),
-                // CLI input doesn't track UI element ranges, so none are available here.
+
                 text_elements: Vec::new(),
             });
             let output_schema = load_output_schema(output_schema_path.clone());
@@ -655,7 +450,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                 .collect();
             items.push(UserInput::Text {
                 text: prompt_text.clone(),
-                // CLI input doesn't track UI element ranges, so none are available here.
+
                 text_elements: Vec::new(),
             });
             let output_schema = load_output_schema(output_schema_path);
@@ -669,12 +464,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         }
     };
 
-    // When --yolo (dangerously_bypass_approvals_and_sandbox) is set, also skip the git repo check
-    // since the user is explicitly running in an externally sandboxed environment.
-    if !skip_git_repo_check
-        && !dangerously_bypass_approvals_and_sandbox
-        && get_git_repo_root(&default_cwd).is_none()
-    {
+    if !skip_git_repo_check && get_git_repo_root(&default_cwd).is_none() {
         eprintln!("Not inside a trusted directory and --skip-git-repo-check was not specified.");
         std::process::exit(1);
     }
@@ -686,8 +476,6 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
             anyhow::anyhow!("failed to initialize in-process app-server client: {err}")
         })?;
 
-    // Handle resume subcommand through existing `thread/list` + `thread/resume`
-    // APIs so exec no longer reaches into rollout storage directly.
     let (primary_thread_id, fallback_session_configured) = if let Some(ExecCommand::Resume(args)) =
         command.as_ref()
     {
@@ -741,23 +529,12 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     };
 
     let primary_thread_id_for_span = primary_thread_id.to_string();
-    // Use the start/resume response as the authoritative bootstrap payload.
-    // Waiting for a later streamed `SessionConfigured` event adds up to 10s of
-    // avoidable startup latency on the in-process path.
+
     let session_configured = fallback_session_configured;
 
     exec_span.record("thread.id", primary_thread_id_for_span.as_str());
 
-    // Print the effective configuration and initial request so users can see what Codex
-    // is using.
     event_processor.print_config_summary(&config, &prompt_summary, &session_configured);
-    if !json_mode
-        && let Some(message) =
-            codex_core::config::system_bwrap_warning(config.permissions.permission_profile())
-    {
-        event_processor.process_warning(message);
-    }
-
     info!("Codex initialized with event: {session_configured:?}");
 
     let (interrupt_tx, mut interrupt_rx) = mpsc::unbounded_channel::<()>();
@@ -784,17 +561,11 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                         environments: None,
                         cwd: Some(default_cwd),
                         runtime_workspace_roots: None,
-                        approval_policy: Some(default_approval_policy.into()),
-                        approvals_reviewer: None,
-                        sandbox_policy: None,
-                        permissions: None,
                         model: None,
                         service_tier: None,
                         effort: default_effort,
                         summary: None,
-                        personality: None,
                         output_schema,
-                        collaboration_mode: None,
                     },
                 },
                 "turn/start",
@@ -805,37 +576,9 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
             info!("Sent prompt with event ID: {task_id}");
             task_id
         }
-        InitialOperation::Review { review_request } => {
-            let response: ReviewStartResponse = send_request_with_response(
-                &client,
-                ClientRequest::ReviewStart {
-                    request_id: request_ids.next(),
-                    params: ReviewStartParams {
-                        thread_id: primary_thread_id_for_span.clone(),
-                        target: review_target_to_api(review_request.target),
-                        delivery: None,
-                    },
-                },
-                "review/start",
-            )
-            .await
-            .map_err(anyhow::Error::msg)?;
-            let _ = event_processor.process_server_notification(ServerNotification::TurnStarted(
-                TurnStartedNotification {
-                    thread_id: response.review_thread_id.clone(),
-                    turn: response.turn.clone(),
-                },
-            ));
-            let task_id = response.turn.id;
-            info!("Sent review request with event ID: {task_id}");
-            task_id
-        }
     };
     exec_span.record("turn.id", task_id.as_str());
 
-    // Run the loop until the task is complete.
-    // Track whether a fatal error was reported by the server so we can
-    // exit with a non-zero status for automation-friendly signaling.
     let mut error_seen = false;
     let mut interrupt_channel_open = true;
     let primary_thread_id_for_requests = primary_thread_id.to_string();
@@ -944,13 +687,6 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
 }
 
 fn thread_start_params_from_config(config: &Config) -> ThreadStartParams {
-    let permissions = permissions_selection_from_config(config);
-    let sandbox = permissions.is_none().then(|| {
-        sandbox_mode_from_permission_profile(
-            &config.permissions.effective_permission_profile(),
-            config.cwd.as_path(),
-        )
-    });
     ThreadStartParams {
         model: config.model.clone(),
         model_provider: Some(config.model_provider_id.clone()),
@@ -962,25 +698,13 @@ fn thread_start_params_from_config(config: &Config) -> ThreadStartParams {
                 .map(AbsolutePathBuf::to_path_buf)
                 .collect(),
         ),
-        approval_policy: Some(config.permissions.approval_policy.value().into()),
-        approvals_reviewer: approvals_reviewer_override_from_config(config),
-        sandbox: sandbox.flatten(),
-        permissions,
         config: None,
         ephemeral: Some(config.ephemeral),
-        thread_source: Some(ThreadSource::User),
         ..ThreadStartParams::default()
     }
 }
 
 fn thread_resume_params_from_config(config: &Config, thread_id: String) -> ThreadResumeParams {
-    let permissions = permissions_selection_from_config(config);
-    let sandbox = permissions.is_none().then(|| {
-        sandbox_mode_from_permission_profile(
-            &config.permissions.effective_permission_profile(),
-            config.cwd.as_path(),
-        )
-    });
     ThreadResumeParams {
         thread_id,
         model: config.model.clone(),
@@ -993,55 +717,9 @@ fn thread_resume_params_from_config(config: &Config, thread_id: String) -> Threa
                 .map(AbsolutePathBuf::to_path_buf)
                 .collect(),
         ),
-        approval_policy: Some(config.permissions.approval_policy.value().into()),
-        approvals_reviewer: approvals_reviewer_override_from_config(config),
-        sandbox: sandbox.flatten(),
-        permissions,
         config: None,
         ..ThreadResumeParams::default()
     }
-}
-
-fn permissions_selection_from_config(config: &Config) -> Option<String> {
-    config
-        .permissions
-        .active_permission_profile()
-        .map(permission_profile_id_from_active_profile)
-}
-
-fn permission_profile_id_from_active_profile(active: ActivePermissionProfile) -> String {
-    active.id
-}
-
-fn sandbox_mode_from_permission_profile(
-    permission_profile: &PermissionProfile,
-    cwd: &Path,
-) -> Option<codex_app_server_protocol::SandboxMode> {
-    match permission_profile {
-        PermissionProfile::Disabled => {
-            Some(codex_app_server_protocol::SandboxMode::DangerFullAccess)
-        }
-        PermissionProfile::External { .. } => None,
-        PermissionProfile::Managed { .. } => {
-            let file_system_policy = permission_profile.file_system_sandbox_policy();
-            if file_system_policy.has_full_disk_write_access() {
-                permission_profile
-                    .network_sandbox_policy()
-                    .is_enabled()
-                    .then_some(codex_app_server_protocol::SandboxMode::DangerFullAccess)
-            } else if file_system_policy.can_write_path_with_cwd(cwd, cwd) {
-                Some(codex_app_server_protocol::SandboxMode::WorkspaceWrite)
-            } else {
-                Some(codex_app_server_protocol::SandboxMode::ReadOnly)
-            }
-        }
-    }
-}
-
-fn approvals_reviewer_override_from_config(
-    config: &Config,
-) -> Option<codex_app_server_protocol::ApprovalsReviewer> {
-    Some(config.approvals_reviewer.into())
 }
 
 async fn send_request_with_response<T>(
@@ -1063,21 +741,16 @@ where
 
 fn session_configured_from_thread_start_response(
     response: &ThreadStartResponse,
-    config: &Config,
+    _config: &Config,
 ) -> Result<SessionConfiguredEvent, String> {
     session_configured_from_thread_response(
         &response.thread.session_id,
         &response.thread.id,
-        response.thread.thread_source.map(Into::into),
         response.thread.name.clone(),
         response.thread.path.clone(),
         response.model.clone(),
         response.model_provider.clone(),
         response.service_tier.clone(),
-        response.approval_policy.to_core(),
-        response.approvals_reviewer.to_core(),
-        config.permissions.effective_permission_profile(),
-        response.active_permission_profile.clone().map(Into::into),
         response.cwd.clone(),
         response.reasoning_effort,
     )
@@ -1085,33 +758,19 @@ fn session_configured_from_thread_start_response(
 
 fn session_configured_from_thread_resume_response(
     response: &ThreadResumeResponse,
-    config: &Config,
+    _config: &Config,
 ) -> Result<SessionConfiguredEvent, String> {
     session_configured_from_thread_response(
         &response.thread.session_id,
         &response.thread.id,
-        response.thread.thread_source.map(Into::into),
         response.thread.name.clone(),
         response.thread.path.clone(),
         response.model.clone(),
         response.model_provider.clone(),
         response.service_tier.clone(),
-        response.approval_policy.to_core(),
-        response.approvals_reviewer.to_core(),
-        config.permissions.effective_permission_profile(),
-        response.active_permission_profile.clone().map(Into::into),
         response.cwd.clone(),
         response.reasoning_effort,
     )
-}
-
-fn review_target_to_api(target: ReviewTarget) -> ApiReviewTarget {
-    match target {
-        ReviewTarget::UncommittedChanges => ApiReviewTarget::UncommittedChanges,
-        ReviewTarget::BaseBranch { branch } => ApiReviewTarget::BaseBranch { branch },
-        ReviewTarget::Commit { sha, title } => ApiReviewTarget::Commit { sha, title },
-        ReviewTarget::Custom { instructions } => ApiReviewTarget::Custom { instructions },
-    }
 }
 
 #[expect(
@@ -1121,16 +780,11 @@ fn review_target_to_api(target: ReviewTarget) -> ApiReviewTarget {
 fn session_configured_from_thread_response(
     session_id: &str,
     thread_id: &str,
-    thread_source: Option<codex_protocol::protocol::ThreadSource>,
     thread_name: Option<String>,
     rollout_path: Option<PathBuf>,
     model: String,
     model_provider_id: String,
     service_tier: Option<String>,
-    approval_policy: AskForApproval,
-    approvals_reviewer: codex_protocol::config_types::ApprovalsReviewer,
-    permission_profile: PermissionProfile,
-    active_permission_profile: Option<codex_protocol::models::ActivePermissionProfile>,
     cwd: AbsolutePathBuf,
     reasoning_effort: Option<codex_protocol::openai_models::ReasoningEffort>,
 ) -> Result<SessionConfiguredEvent, String> {
@@ -1143,19 +797,13 @@ fn session_configured_from_thread_response(
         session_id,
         thread_id,
         forked_from_id: None,
-        thread_source,
         thread_name,
         model,
         model_provider_id,
         service_tier,
-        approval_policy,
-        approvals_reviewer,
-        permission_profile,
-        active_permission_profile,
         cwd,
         reasoning_effort,
         initial_messages: None,
-        network_proxy: None,
         rollout_path,
     })
 }
@@ -1173,20 +821,6 @@ fn should_process_notification(
         ServerNotification::ConfigWarning(_) | ServerNotification::DeprecationNotice(_) => true,
         ServerNotification::Error(notification) => {
             notification.thread_id == thread_id && notification.turn_id == turn_id
-        }
-        ServerNotification::HookCompleted(notification) => {
-            notification.thread_id == thread_id
-                && notification
-                    .turn_id
-                    .as_deref()
-                    .is_none_or(|candidate| candidate == turn_id)
-        }
-        ServerNotification::HookStarted(notification) => {
-            notification.thread_id == thread_id
-                && notification
-                    .turn_id
-                    .as_deref()
-                    .is_none_or(|candidate| candidate == turn_id)
         }
         ServerNotification::ItemCompleted(notification) => {
             notification.thread_id == thread_id && notification.turn_id == turn_id
@@ -1206,12 +840,6 @@ fn should_process_notification(
         ServerNotification::TurnCompleted(notification) => {
             notification.thread_id == thread_id && notification.turn.id == turn_id
         }
-        ServerNotification::TurnDiffUpdated(notification) => {
-            notification.thread_id == thread_id && notification.turn_id == turn_id
-        }
-        ServerNotification::TurnPlanUpdated(notification) => {
-            notification.thread_id == thread_id && notification.turn_id == turn_id
-        }
         ServerNotification::TurnStarted(notification) => {
             notification.thread_id == thread_id && notification.turn.id == turn_id
         }
@@ -1225,10 +853,6 @@ async fn maybe_backfill_turn_completed_items(
     request_ids: &mut RequestIdSequencer,
     notification: &mut ServerNotification,
 ) {
-    // In-process delivery may drop non-terminal item notifications under backpressure while still
-    // guaranteeing `turn/completed`. Because app-server currently emits that completion with an
-    // empty `turn.items`, exec does one last `thread/read` here so human/json output can recover
-    // the final message and reconcile any still-running items before shutdown.
     if !should_backfill_turn_completed_items(thread_ephemeral, notification) {
         return;
     }
@@ -1262,8 +886,6 @@ async fn maybe_backfill_turn_completed_items(
     }
 }
 
-/// Returns true only when `exec` can safely recover missing turn items from
-/// rollout-backed thread history.
 fn should_backfill_turn_completed_items(
     thread_ephemeral: bool,
     notification: &ServerNotification,
@@ -1284,21 +906,6 @@ fn turn_items_for_thread(
         .iter()
         .find(|turn| turn.id == turn_id)
         .map(|turn| turn.items.clone())
-}
-
-fn all_thread_source_kinds() -> Vec<ThreadSourceKind> {
-    vec![
-        ThreadSourceKind::Cli,
-        ThreadSourceKind::VsCode,
-        ThreadSourceKind::Exec,
-        ThreadSourceKind::AppServer,
-        ThreadSourceKind::SubAgent,
-        ThreadSourceKind::SubAgentReview,
-        ThreadSourceKind::SubAgentCompact,
-        ThreadSourceKind::SubAgentThreadSpawn,
-        ThreadSourceKind::SubAgentOther,
-        ThreadSourceKind::Unknown,
-    ]
 }
 
 async fn latest_thread_cwd(thread: &AppServerThread) -> PathBuf {
@@ -1352,7 +959,6 @@ async fn resolve_resume_thread_id(
                         sort_key: Some(ThreadSortKey::UpdatedAt),
                         sort_direction: None,
                         model_providers: model_providers.clone(),
-                        source_kinds: Some(all_thread_source_kinds()),
                         archived: Some(false),
                         cwd: None,
                         use_state_db_only: false,
@@ -1385,23 +991,10 @@ async fn resolve_resume_thread_id(
     if let Some(state_db) = state_db {
         let cwd = (!args.all).then_some(config.cwd.as_path());
         let resolved = state_db
-            .find_thread_by_exact_title(
-                session_id,
-                &[],
-                /*model_providers*/ None,
-                /*archived_only*/ false,
-                cwd,
-            )
+            .find_thread_by_exact_title(session_id, &[], None, false, cwd)
             .await?;
         if let Some(thread) = resolved {
             return Ok(Some(thread.id.to_string()));
-        }
-        if let Some((_, session_meta)) =
-            find_thread_meta_by_name_str(&config.codex_home, session_id, Some(state_db.as_ref()))
-                .await?
-            && (args.all || cwds_match(config.cwd.as_path(), &session_meta.meta.cwd))
-        {
-            return Ok(Some(session_meta.meta.id.to_string()));
         }
     }
 
@@ -1417,7 +1010,6 @@ async fn resolve_resume_thread_id(
                     sort_key: Some(ThreadSortKey::UpdatedAt),
                     sort_direction: None,
                     model_providers: model_providers.clone(),
-                    source_kinds: Some(all_thread_source_kinds()),
                     archived: Some(false),
                     cwd: None,
                     use_state_db_only: false,
@@ -1455,15 +1047,6 @@ fn resume_lookup_model_providers(
     }
 }
 
-fn canceled_mcp_server_elicitation_response() -> Result<Value, String> {
-    serde_json::to_value(McpServerElicitationRequestResponse {
-        action: McpServerElicitationAction::Cancel,
-        content: None,
-        meta: None,
-    })
-    .map_err(|err| format!("failed to encode mcp elicitation response: {err}"))
-}
-
 async fn request_shutdown(
     client: &InProcessAppServerClient,
     request_ids: &mut RequestIdSequencer,
@@ -1478,18 +1061,6 @@ async fn request_shutdown(
     send_request_with_response::<ThreadUnsubscribeResponse>(client, request, "thread/unsubscribe")
         .await
         .map(|_| ())
-}
-
-async fn resolve_server_request(
-    client: &InProcessAppServerClient,
-    request_id: RequestId,
-    value: serde_json::Value,
-    method: &str,
-) -> Result<(), String> {
-    client
-        .resolve_server_request(request_id, value)
-        .await
-        .map_err(|err| format!("failed to resolve `{method}` server request: {err}"))
 }
 
 async fn reject_server_request(
@@ -1530,71 +1101,6 @@ async fn handle_server_request(
 ) {
     let method = server_request_method_name(&request);
     let handle_result = match request {
-        ServerRequest::McpServerElicitationRequest { request_id, .. } => {
-            // Exec auto-cancels elicitation instead of surfacing it
-            // interactively. Preserve that behavior for attached subagent
-            // threads too so we do not turn a cancel into a decline/error.
-            match canceled_mcp_server_elicitation_response() {
-                Ok(value) => {
-                    resolve_server_request(
-                        client,
-                        request_id,
-                        value,
-                        "mcpServer/elicitation/request",
-                    )
-                    .await
-                }
-                Err(err) => Err(err),
-            }
-        }
-        ServerRequest::CommandExecutionRequestApproval { request_id, params } => {
-            reject_server_request(
-                client,
-                request_id,
-                &method,
-                format!(
-                    "command execution approval is not supported in exec mode for thread `{}`",
-                    params.thread_id
-                ),
-            )
-            .await
-        }
-        ServerRequest::FileChangeRequestApproval { request_id, params } => {
-            reject_server_request(
-                client,
-                request_id,
-                &method,
-                format!(
-                    "file change approval is not supported in exec mode for thread `{}`",
-                    params.thread_id
-                ),
-            )
-            .await
-        }
-        ServerRequest::ToolRequestUserInput { request_id, params } => {
-            reject_server_request(
-                client,
-                request_id,
-                &method,
-                format!(
-                    "request_user_input is not supported in exec mode for thread `{}`",
-                    params.thread_id
-                ),
-            )
-            .await
-        }
-        ServerRequest::DynamicToolCall { request_id, params } => {
-            reject_server_request(
-                client,
-                request_id,
-                &method,
-                format!(
-                    "dynamic tool calls are not supported in exec mode for thread `{}`",
-                    params.thread_id
-                ),
-            )
-            .await
-        }
         ServerRequest::ChatgptAuthTokensRefresh { request_id, .. } => {
             reject_server_request(
                 client,
@@ -1604,48 +1110,12 @@ async fn handle_server_request(
             )
             .await
         }
-        ServerRequest::AttestationGenerate { request_id, .. } => {
+        ServerRequest::DynamicToolCall { request_id, .. } => {
             reject_server_request(
                 client,
                 request_id,
                 &method,
-                "attestation generation is not supported in exec mode".to_string(),
-            )
-            .await
-        }
-        ServerRequest::ApplyPatchApproval { request_id, params } => {
-            reject_server_request(
-                client,
-                request_id,
-                &method,
-                format!(
-                    "apply_patch approval is not supported in exec mode for thread `{}`",
-                    params.conversation_id
-                ),
-            )
-            .await
-        }
-        ServerRequest::ExecCommandApproval { request_id, params } => {
-            reject_server_request(
-                client,
-                request_id,
-                &method,
-                format!(
-                    "exec command approval is not supported in exec mode for thread `{}`",
-                    params.conversation_id
-                ),
-            )
-            .await
-        }
-        ServerRequest::PermissionsRequestApproval { request_id, params } => {
-            reject_server_request(
-                client,
-                request_id,
-                &method,
-                format!(
-                    "permissions approval is not supported in exec mode for thread `{}`",
-                    params.thread_id
-                ),
+                "dynamic tool calls are not supported in exec mode".to_string(),
             )
             .await
         }
@@ -1841,37 +1311,3 @@ fn resolve_root_prompt(prompt_arg: Option<String>) -> String {
         maybe_dash => resolve_prompt(maybe_dash),
     }
 }
-
-fn build_review_request(args: &ReviewArgs) -> anyhow::Result<ReviewRequest> {
-    let target = if args.uncommitted {
-        ReviewTarget::UncommittedChanges
-    } else if let Some(branch) = args.base.clone() {
-        ReviewTarget::BaseBranch { branch }
-    } else if let Some(sha) = args.commit.clone() {
-        ReviewTarget::Commit {
-            sha,
-            title: args.commit_title.clone(),
-        }
-    } else if let Some(prompt_arg) = args.prompt.clone() {
-        let prompt = resolve_prompt(Some(prompt_arg)).trim().to_string();
-        if prompt.is_empty() {
-            anyhow::bail!("Review prompt cannot be empty");
-        }
-        ReviewTarget::Custom {
-            instructions: prompt,
-        }
-    } else {
-        anyhow::bail!(
-            "Specify --uncommitted, --base, --commit, or provide custom review instructions"
-        );
-    };
-
-    Ok(ReviewRequest {
-        target,
-        user_facing_hint: None,
-    })
-}
-
-#[cfg(test)]
-#[path = "lib_tests.rs"]
-mod tests;

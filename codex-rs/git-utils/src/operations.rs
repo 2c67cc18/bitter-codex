@@ -6,7 +6,7 @@ use std::process::Command;
 
 use crate::GitToolingError;
 
-const DISABLED_HOOKS_PATH: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
+const DISABLED_HOOKS_PATH: &str = "/dev/null";
 
 pub(crate) fn ensure_git_repository(path: &Path) -> Result<(), GitToolingError> {
     match run_git_for_stdout(
@@ -15,7 +15,7 @@ pub(crate) fn ensure_git_repository(path: &Path) -> Result<(), GitToolingError> 
             OsString::from("rev-parse"),
             OsString::from("--is-inside-work-tree"),
         ],
-        /*env*/ None,
+        None,
     ) {
         Ok(output) if output.trim() == "true" => Ok(()),
         Ok(_) => Err(GitToolingError::NotAGitRepository {
@@ -38,7 +38,7 @@ pub(crate) fn resolve_head(path: &Path) -> Result<Option<String>, GitToolingErro
             OsString::from("--verify"),
             OsString::from("HEAD"),
         ],
-        /*env*/ None,
+        None,
     ) {
         Ok(sha) => Ok(Some(sha)),
         Err(GitToolingError::GitCommand { status, .. }) if status.code() == Some(128) => Ok(None),
@@ -53,7 +53,7 @@ pub(crate) fn resolve_repository_root(path: &Path) -> Result<PathBuf, GitTooling
             OsString::from("rev-parse"),
             OsString::from("--show-toplevel"),
         ],
-        /*env*/ None,
+        None,
     )?;
     Ok(PathBuf::from(root))
 }
@@ -101,7 +101,7 @@ where
     let iterator = args.into_iter();
     let (lower, upper) = iterator.size_hint();
     let mut args_vec = Vec::with_capacity(upper.unwrap_or(lower) + 2);
-    // Keep internal Git helper commands independent of configured hook directories.
+
     args_vec.push(OsString::from("-c"));
     args_vec.push(OsString::from(format!(
         "core.hooksPath={DISABLED_HOOKS_PATH}"

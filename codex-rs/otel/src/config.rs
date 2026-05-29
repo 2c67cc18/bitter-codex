@@ -13,10 +13,6 @@ pub(crate) const STATSIG_API_KEY: &str = "client-MkRuleRQBd6qakfnDYqJVR9JuXcY57L
 pub(crate) fn resolve_exporter(exporter: &OtelExporter) -> OtelExporter {
     match exporter {
         OtelExporter::Statsig => {
-            // Keep the built-in Statsig default off in debug builds so
-            // incremental local development and test runs do not emit
-            // best-effort OTEL traffic unless a test or binary opts into an
-            // explicit exporter configuration.
             if cfg!(debug_assertions) {
                 return OtelExporter::None;
             }
@@ -35,7 +31,6 @@ pub(crate) fn resolve_exporter(exporter: &OtelExporter) -> OtelExporter {
     }
 }
 
-/// Validates configured span attributes before they are attached to exported spans.
 pub fn validate_span_attributes(attributes: &BTreeMap<String, String>) -> std::io::Result<()> {
     if attributes.keys().any(String::is_empty) {
         return Err(std::io::Error::new(
@@ -61,9 +56,6 @@ pub struct OtelSettings {
     pub tracestate: BTreeMap<String, BTreeMap<String, String>>,
 }
 
-/// Resolved Statsig metrics settings that another process can use to recreate
-/// the built-in metrics exporter configuration without receiving generic
-/// exporter credentials in-process.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StatsigMetricsSettings {
     pub environment: String,
@@ -71,9 +63,8 @@ pub struct StatsigMetricsSettings {
 
 #[derive(Clone, Debug)]
 pub enum OtelHttpProtocol {
-    /// HTTP protocol with binary protobuf
     Binary,
-    /// HTTP protocol with JSON payload
+
     Json,
 }
 
@@ -87,9 +78,7 @@ pub struct OtelTlsConfig {
 #[derive(Clone, Debug)]
 pub enum OtelExporter {
     None,
-    /// Statsig metrics ingestion exporter using Codex-internal defaults.
-    ///
-    /// This is intended for metrics only.
+
     Statsig,
     OtlpGrpc {
         endpoint: String,

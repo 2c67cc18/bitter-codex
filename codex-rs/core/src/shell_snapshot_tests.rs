@@ -68,7 +68,6 @@ impl Drop for BlockingStdinPipe {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
 fn assert_posix_snapshot_sections(snapshot: &str) {
     assert!(snapshot.contains("# Snapshot file"));
     assert!(snapshot.contains("aliases "));
@@ -102,12 +101,12 @@ fn strip_snapshot_preamble_requires_marker() {
 }
 
 #[test]
-fn snapshot_file_name_parser_supports_legacy_and_suffixed_names() {
+fn snapshot_file_name_parser_supports_current_suffixed_names() {
     let session_id = "019cf82b-6a62-7700-bbbd-46909794ef89";
 
     assert_eq!(
         snapshot_session_id_from_file_name(&format!("{session_id}.sh")),
-        Some(session_id)
+        None
     );
     assert_eq!(
         snapshot_session_id_from_file_name(&format!("{session_id}.123.sh")),
@@ -115,7 +114,7 @@ fn snapshot_file_name_parser_supports_legacy_and_suffixed_names() {
     );
     assert_eq!(
         snapshot_session_id_from_file_name(&format!("{session_id}.tmp-123")),
-        Some(session_id)
+        None
     );
     assert_eq!(
         snapshot_session_id_from_file_name("not-a-snapshot.txt"),
@@ -202,7 +201,7 @@ async fn try_new_creates_and_deletes_snapshot_file() -> Result<()> {
         ThreadId::new(),
         &dir.path().abs(),
         &shell,
-        /*state_db*/ None,
+        None,
     )
     .await
     .expect("snapshot should be created");
@@ -233,7 +232,7 @@ async fn try_new_uses_distinct_generation_paths() -> Result<()> {
         session_id,
         &dir.path().abs(),
         &shell,
-        /*state_db*/ None,
+        None,
     )
     .await
     .expect("initial snapshot should be created");
@@ -242,7 +241,7 @@ async fn try_new_uses_distinct_generation_paths() -> Result<()> {
         session_id,
         &dir.path().abs(),
         &shell,
-        /*state_db*/ None,
+        None,
     )
     .await
     .expect("refreshed snapshot should be created");
@@ -274,8 +273,7 @@ async fn snapshot_shell_does_not_inherit_stdin() -> Result<()> {
     let home = dir.path().abs();
     let read_status_path = home.join("stdin-read-status");
     let read_status_display = read_status_path.display();
-    // Persist the startup `read` exit status so the test can assert whether
-    // bash saw EOF on stdin after the snapshot process exits.
+
     let bashrc = format!("read -t 1 -r ignored\nprintf '%s' \"$?\" > \"{read_status_display}\"\n");
     fs::write(home.join(".bashrc"), bashrc).await?;
 
@@ -290,15 +288,9 @@ async fn snapshot_shell_does_not_inherit_stdin() -> Result<()> {
         "HOME=\"{home_display}\"; export HOME; {}",
         bash_snapshot_script()
     );
-    let output = run_script_with_timeout(
-        &shell,
-        &script,
-        Duration::from_secs(2),
-        /*use_login_shell*/ true,
-        &home,
-    )
-    .await
-    .context("run snapshot command")?;
+    let output = run_script_with_timeout(&shell, &script, Duration::from_secs(2), true, &home)
+        .await
+        .context("run snapshot command")?;
     let read_status = fs::read_to_string(&read_status_path)
         .await
         .context("read stdin probe status")?;
@@ -338,7 +330,7 @@ async fn timed_out_snapshot_shell_is_terminated() -> Result<()> {
         &shell,
         &script,
         Duration::from_secs(1),
-        /*use_login_shell*/ true,
+        true,
         &dir.path().abs(),
     )
     .await
@@ -398,17 +390,6 @@ async fn linux_sh_snapshot_includes_sections() -> Result<()> {
     Ok(())
 }
 
-#[cfg(target_os = "windows")]
-#[ignore]
-#[tokio::test]
-async fn windows_powershell_snapshot_includes_sections() -> Result<()> {
-    let snapshot = get_snapshot(ShellType::PowerShell).await?;
-    assert!(snapshot.contains("# Snapshot file"));
-    assert!(snapshot.contains("aliases "));
-    assert!(snapshot.contains("exports "));
-    Ok(())
-}
-
 async fn write_rollout_stub(codex_home: &Path, session_id: ThreadId) -> Result<PathBuf> {
     let dir = codex_home
         .join("sessions")
@@ -439,7 +420,7 @@ async fn cleanup_stale_snapshots_removes_orphans_and_keeps_live() -> Result<()> 
     fs::write(&orphan_snapshot, "orphan").await?;
     fs::write(&invalid_snapshot, "invalid").await?;
 
-    cleanup_stale_snapshots(&codex_home, ThreadId::new(), /*state_db*/ None).await?;
+    cleanup_stale_snapshots(&codex_home, ThreadId::new(), None).await?;
 
     assert_eq!(live_snapshot.exists(), true);
     assert_eq!(orphan_snapshot.exists(), false);
@@ -462,7 +443,7 @@ async fn cleanup_stale_snapshots_removes_stale_rollouts() -> Result<()> {
 
     set_file_mtime(&rollout_path, SNAPSHOT_RETENTION + Duration::from_secs(60))?;
 
-    cleanup_stale_snapshots(&codex_home, ThreadId::new(), /*state_db*/ None).await?;
+    cleanup_stale_snapshots(&codex_home, ThreadId::new(), None).await?;
 
     assert_eq!(stale_snapshot.exists(), false);
     Ok(())
@@ -483,7 +464,7 @@ async fn cleanup_stale_snapshots_skips_active_session() -> Result<()> {
 
     set_file_mtime(&rollout_path, SNAPSHOT_RETENTION + Duration::from_secs(60))?;
 
-    cleanup_stale_snapshots(&codex_home, active_session, /*state_db*/ None).await?;
+    cleanup_stale_snapshots(&codex_home, active_session, None).await?;
 
     assert_eq!(active_snapshot.exists(), true);
     Ok(())

@@ -5,10 +5,8 @@ use std::path::PathBuf;
 
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
-use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::RolloutLine;
-use codex_protocol::protocol::USER_MESSAGE_BEGIN;
 use regex::Regex;
 use regex::RegexBuilder;
 use tokio::io::AsyncBufReadExt;
@@ -19,7 +17,6 @@ use super::SESSIONS_SUBDIR;
 
 const MATCH_CONTEXT_BEFORE_CHARS: usize = 48;
 const MATCH_CONTEXT_AFTER_CHARS: usize = 96;
-
 pub async fn search_rollout_paths(
     rg_command: &Path,
     codex_home: &Path,
@@ -169,21 +166,6 @@ fn content_match_snippet(jsonl_line: &str, search_term: &Regex) -> Option<String
 
 fn conversation_text_from_item(item: &RolloutItem) -> Option<String> {
     match item {
-        RolloutItem::EventMsg(EventMsg::UserMessage(user)) => {
-            let text = strip_user_message_prefix(user.message.as_str());
-            if text.is_empty() {
-                None
-            } else {
-                Some(text.to_string())
-            }
-        }
-        RolloutItem::EventMsg(EventMsg::AgentMessage(agent)) => {
-            if agent.message.trim().is_empty() {
-                None
-            } else {
-                Some(agent.message.trim().to_string())
-            }
-        }
         RolloutItem::ResponseItem(ResponseItem::Message { role, content, .. }) => {
             let text = content
                 .iter()
@@ -208,13 +190,6 @@ fn content_item_text(item: &ContentItem) -> Option<&str> {
     match item {
         ContentItem::InputText { text } | ContentItem::OutputText { text } => Some(text.as_str()),
         ContentItem::InputImage { .. } => None,
-    }
-}
-
-fn strip_user_message_prefix(text: &str) -> &str {
-    match text.find(USER_MESSAGE_BEGIN) {
-        Some(idx) => text[idx + USER_MESSAGE_BEGIN.len()..].trim(),
-        None => text.trim(),
     }
 }
 

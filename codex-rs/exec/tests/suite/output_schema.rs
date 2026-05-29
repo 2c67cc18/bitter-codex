@@ -1,4 +1,3 @@
-#![cfg(not(target_os = "windows"))]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use core_test_support::responses;
@@ -31,7 +30,6 @@ async fn exec_includes_output_schema_in_request() -> anyhow::Result<()> {
 
     test.cmd_with_server(&server)
         .arg("--skip-git-repo-check")
-        // keep using -C in the test to exercise the flag as well
         .arg("-C")
         .arg(test.cwd_path())
         .arg("--output-schema")

@@ -2,25 +2,18 @@ use std::sync::Arc;
 
 use crate::Prompt;
 use crate::client::CompactConversationRequestSettings;
-use crate::compact::CompactionAnalyticsAttempt;
+use crate::compact::CompactionPhase;
+use crate::compact::CompactionReason;
+use crate::compact::CompactionTrigger;
 use crate::compact::InitialContextInjection;
-use crate::compact::compaction_status_from_result;
 use crate::compact::insert_initial_context_before_last_real_user_or_summary;
 use crate::context_manager::ContextManager;
 use crate::context_manager::TotalTokenUsageBreakdown;
 use crate::context_manager::estimate_response_item_model_visible_bytes;
 use crate::context_manager::is_codex_generated_item;
-use crate::hook_runtime::PostCompactHookOutcome;
-use crate::hook_runtime::PreCompactHookOutcome;
-use crate::hook_runtime::run_post_compact_hooks;
-use crate::hook_runtime::run_pre_compact_hooks;
 use crate::session::session::Session;
 use crate::session::turn::built_tools;
 use crate::session::turn_context::TurnContext;
-use codex_analytics::CompactionImplementation;
-use codex_analytics::CompactionPhase;
-use codex_analytics::CompactionReason;
-use codex_analytics::CompactionTrigger;
 use codex_app_server_protocol::AuthMode;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
@@ -28,10 +21,11 @@ use codex_protocol::items::ContextCompactionItem;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::CompactedItem;
+use codex_protocol::protocol::ErrorEvent;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::TurnStartedEvent;
-use codex_rollout_trace::CompactionCheckpointTracePayload;
 use futures::TryFutureExt;
 use tokio_util::sync::CancellationToken;
 use tracing::error;
@@ -65,7 +59,6 @@ pub(crate) async fn run_remote_compact_task(
         trace_id: turn_context.trace_id.clone(),
         started_at: turn_context.turn_timing_state.started_at_unix_secs().await,
         model_context_window: turn_context.model_context_window(),
-        collaboration_mode_kind: turn_context.collaboration_mode.mode,
     });
     sess.send_event(&turn_context, start_event).await;
 
@@ -85,50 +78,17 @@ async fn run_remote_compact_task_inner(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
     initial_context_injection: InitialContextInjection,
-    trigger: CompactionTrigger,
-    reason: CompactionReason,
-    phase: CompactionPhase,
+    _trigger: CompactionTrigger,
+    _reason: CompactionReason,
+    _phase: CompactionPhase,
 ) -> CodexResult<()> {
-    let attempt = CompactionAnalyticsAttempt::begin(
-        sess.as_ref(),
-        turn_context.as_ref(),
-        trigger,
-        reason,
-        CompactionImplementation::ResponsesCompact,
-        phase,
-    )
-    .await;
-    let pre_compact_outcome = run_pre_compact_hooks(sess, turn_context, trigger).await;
-    match pre_compact_outcome {
-        PreCompactHookOutcome::Continue => {}
-        PreCompactHookOutcome::Stopped { reason } => {
-            let error = reason.unwrap_or_else(|| "PreCompact hook stopped execution".to_string());
-            attempt
-                .track(
-                    sess.as_ref(),
-                    codex_analytics::CompactionStatus::Interrupted,
-                    Some(error),
-                )
-                .await;
-            return Err(CodexErr::TurnAborted);
-        }
-    }
     let result =
         run_remote_compact_task_inner_impl(sess, turn_context, initial_context_injection).await;
-    let status = compaction_status_from_result(&result);
-    let error = result.as_ref().err().map(ToString::to_string);
-    if result.is_ok() {
-        let post_compact_outcome = run_post_compact_hooks(sess, turn_context, trigger).await;
-        if let PostCompactHookOutcome::Stopped = post_compact_outcome {
-            attempt.track(sess.as_ref(), status, error).await;
-            return Err(CodexErr::TurnAborted);
-        }
-    }
-    attempt.track(sess.as_ref(), status, error.clone()).await;
     if let Err(err) = result {
-        let event = EventMsg::Error(
-            err.to_error_event(Some("Error running remote compact task".to_string())),
-        );
+        let event = EventMsg::Error(ErrorEvent {
+            message: format!("Error running remote compact task: {err}"),
+            codex_error_info: Some(CodexErrorInfo::Other),
+        });
         sess.send_event(turn_context, event).await;
         return Err(err);
     }
@@ -141,14 +101,6 @@ async fn run_remote_compact_task_inner_impl(
     initial_context_injection: InitialContextInjection,
 ) -> CodexResult<()> {
     let context_compaction_item = ContextCompactionItem::new();
-    // Use the UI compaction item ID as the trace compaction ID so protocol lifecycle events,
-    // endpoint attempts, and the installed history checkpoint all have one join key.
-    let compaction_trace = sess.services.rollout_thread_trace.compaction_trace_context(
-        turn_context.sub_id.as_str(),
-        context_compaction_item.id.as_str(),
-        turn_context.model_info.slug.as_str(),
-        turn_context.provider.info().name.as_str(),
-    );
     let compaction_item = TurnItem::ContextCompaction(context_compaction_item);
     sess.emit_turn_item_started(turn_context, &compaction_item)
         .await;
@@ -166,10 +118,6 @@ async fn run_remote_compact_task_inner_impl(
             "trimmed history items before remote compaction"
         );
     }
-    // This is the history selected for remote compaction, after any trimming required to fit the
-    // compact endpoint. The checkpoint below records it separately from the next sampling request,
-    // whose prompt will repeat current developer/context prefix items.
-    let trace_input_history = history.raw_items().to_vec();
     let prompt_input = history.for_prompt(&turn_context.model_info.input_modalities);
     let tool_router = built_tools(
         sess.as_ref(),
@@ -182,7 +130,6 @@ async fn run_remote_compact_task_inner_impl(
         tools: tool_router.model_visible_specs(),
         parallel_tool_calls: turn_context.model_info.supports_parallel_tool_calls,
         base_instructions,
-        personality: turn_context.personality,
         output_schema: None,
         output_schema_strict: true,
     };
@@ -202,7 +149,7 @@ async fn run_remote_compact_task_inner_impl(
                 },
             },
             &turn_context.session_telemetry,
-            &compaction_trace,
+            &(),
         )
         .or_else(|err| async {
             let total_usage_breakdown = sess.get_total_token_usage_breakdown().await;
@@ -233,13 +180,6 @@ async fn run_remote_compact_task_inner_impl(
         message: String::new(),
         replacement_history: Some(new_history.clone()),
     };
-    // Install is the semantic boundary where the compact endpoint's output becomes live
-    // thread history. Keep it distinct from the later inference request so the reducer can
-    // still represent repeated developer/context prefix items exactly as the model saw them.
-    compaction_trace.record_installed(&CompactionCheckpointTracePayload {
-        input_history: &trace_input_history,
-        replacement_history: &new_history,
-    });
     sess.replace_compacted_history(new_history, reference_context_item, compacted_item)
         .await;
     sess.recompute_token_usage(turn_context).await;
@@ -255,9 +195,6 @@ pub(crate) async fn process_compacted_history(
     mut compacted_history: Vec<ResponseItem>,
     initial_context_injection: InitialContextInjection,
 ) -> Vec<ResponseItem> {
-    // Mid-turn compaction is the only path that must inject initial context above the last user
-    // message in the replacement history. Pre-turn compaction instead injects context after the
-    // compaction item, but mid-turn compaction keeps the compaction item last for model training.
     let initial_context = if matches!(
         initial_context_injection,
         InitialContextInjection::BeforeLastUserMessage
@@ -271,29 +208,13 @@ pub(crate) async fn process_compacted_history(
     insert_initial_context_before_last_real_user_or_summary(compacted_history, initial_context)
 }
 
-/// Returns whether an item from remote compaction output should be preserved.
-///
-/// Called while processing the model-provided compacted transcript, before we
-/// append fresh canonical context from the current session.
-///
-/// We drop:
-/// - `developer` messages because remote output can include stale/duplicated
-///   instruction content.
-/// - non-user-content `user` messages (session prefix/instruction wrappers),
-///   while preserving real user messages and persisted hook prompts.
-///
-/// This intentionally keeps:
-/// - `assistant` messages (future remote compaction models may emit them)
-/// - `user`-role warnings that parse as `TurnItem::UserMessage` and compaction-generated summary
-///   messages. Legacy warning fragments are filtered by `parse_turn_item` before they reach this
-///   check.
 pub(crate) fn should_keep_compacted_history_item(item: &ResponseItem) -> bool {
     match item {
         ResponseItem::Message { role, .. } if role == "developer" => false,
         ResponseItem::Message { role, .. } if role == "user" => {
             matches!(
                 crate::event_mapping::parse_turn_item(item),
-                Some(TurnItem::UserMessage(_) | TurnItem::HookPrompt(_))
+                Some(TurnItem::UserMessage(_))
             )
         }
         ResponseItem::Message { role, .. } if role == "assistant" => true,
@@ -303,9 +224,7 @@ pub(crate) fn should_keep_compacted_history_item(item: &ResponseItem) -> bool {
         ResponseItem::Reasoning { .. }
         | ResponseItem::LocalShellCall { .. }
         | ResponseItem::FunctionCall { .. }
-        | ResponseItem::ToolSearchCall { .. }
         | ResponseItem::FunctionCallOutput { .. }
-        | ResponseItem::ToolSearchOutput { .. }
         | ResponseItem::CustomToolCall { .. }
         | ResponseItem::CustomToolCallOutput { .. }
         | ResponseItem::WebSearchCall { .. }

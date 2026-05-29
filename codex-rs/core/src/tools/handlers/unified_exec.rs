@@ -1,20 +1,8 @@
-use crate::sandboxing::SandboxPermissions;
 use crate::shell::Shell;
-use crate::shell::ShellType;
 use crate::shell::get_shell_by_model_provided_path;
-use crate::tools::context::ToolInvocation;
-use crate::tools::context::ToolOutput;
-use crate::tools::context::ToolPayload;
-use crate::tools::hook_names::HookToolName;
-use crate::tools::registry::PostToolUsePayload;
-use codex_protocol::models::AdditionalPermissionProfile;
-use codex_tools::UnifiedExecShellMode;
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::Arc;
-
-#[cfg(test)]
-use crate::tools::handlers::parse_arguments;
 
 mod exec_command;
 mod write_stdin;
@@ -38,24 +26,6 @@ pub(crate) struct ExecCommandArgs {
     yield_time_ms: u64,
     #[serde(default)]
     max_output_tokens: Option<usize>,
-    #[serde(default)]
-    sandbox_permissions: SandboxPermissions,
-    #[serde(default)]
-    additional_permissions: Option<AdditionalPermissionProfile>,
-    #[serde(default)]
-    justification: Option<String>,
-    #[serde(default)]
-    prefix_rule: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ExecCommandEnvironmentArgs {
-    #[serde(default)]
-    environment_id: Option<String>,
-    // Keep this raw until after environment selection; relative paths must be
-    // resolved against the selected environment cwd, not the process cwd.
-    #[serde(default)]
-    workdir: Option<String>,
 }
 
 fn default_exec_yield_time_ms() -> u64 {
@@ -73,32 +43,11 @@ fn default_tty() -> bool {
 #[derive(Debug)]
 pub(crate) struct ResolvedCommand {
     pub(crate) command: Vec<String>,
-    pub(crate) shell_type: ShellType,
-}
-
-fn post_unified_exec_tool_use_payload(
-    invocation: &ToolInvocation,
-    result: &dyn ToolOutput,
-) -> Option<PostToolUsePayload> {
-    let ToolPayload::Function { .. } = &invocation.payload else {
-        return None;
-    };
-
-    let tool_input = result.post_tool_use_input(&invocation.payload)?;
-    let tool_use_id = result.post_tool_use_id(&invocation.call_id);
-    let tool_response = result.post_tool_use_response(&tool_use_id, &invocation.payload)?;
-    Some(PostToolUsePayload {
-        tool_name: HookToolName::bash(),
-        tool_use_id,
-        tool_input,
-        tool_response,
-    })
 }
 
 pub(crate) fn get_command(
     args: &ExecCommandArgs,
     session_shell: Arc<Shell>,
-    shell_mode: &UnifiedExecShellMode,
     allow_login_shell: bool,
 ) -> Result<ResolvedCommand, String> {
     let use_login_shell = match args.login {
@@ -111,30 +60,13 @@ pub(crate) fn get_command(
         None => allow_login_shell,
     };
 
-    match shell_mode {
-        UnifiedExecShellMode::Direct => {
-            let model_shell = args.shell.as_ref().map(|shell_str| {
-                let mut shell = get_shell_by_model_provided_path(&PathBuf::from(shell_str));
-                shell.shell_snapshot = crate::shell::empty_shell_snapshot_receiver();
-                shell
-            });
-            let shell = model_shell.as_ref().unwrap_or(session_shell.as_ref());
-            Ok(ResolvedCommand {
-                command: shell.derive_exec_args(&args.cmd, use_login_shell),
-                shell_type: shell.shell_type.clone(),
-            })
-        }
-        UnifiedExecShellMode::ZshFork(zsh_fork_config) => Ok(ResolvedCommand {
-            command: vec![
-                zsh_fork_config.shell_zsh_path.to_string_lossy().to_string(),
-                if use_login_shell { "-lc" } else { "-c" }.to_string(),
-                args.cmd.clone(),
-            ],
-            shell_type: ShellType::Zsh,
-        }),
-    }
+    let model_shell = args.shell.as_ref().map(|shell_str| {
+        let mut shell = get_shell_by_model_provided_path(&PathBuf::from(shell_str));
+        shell.shell_snapshot = crate::shell::empty_shell_snapshot_receiver();
+        shell
+    });
+    let shell = model_shell.as_ref().unwrap_or(session_shell.as_ref());
+    Ok(ResolvedCommand {
+        command: shell.derive_exec_args(&args.cmd, use_login_shell),
+    })
 }
-
-#[cfg(test)]
-#[path = "unified_exec_tests.rs"]
-mod tests;

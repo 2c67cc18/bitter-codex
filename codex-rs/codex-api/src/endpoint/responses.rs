@@ -8,7 +8,6 @@ use crate::requests::Compression;
 use crate::requests::attach_item_ids;
 use crate::requests::headers::build_session_headers;
 use crate::requests::headers::insert_header;
-use crate::requests::headers::subagent_header;
 use crate::sse::spawn_response_stream;
 use crate::telemetry::SseTelemetry;
 use codex_client::HttpTransport;
@@ -75,7 +74,7 @@ impl<T: HttpTransport> ResponsesClient<T> {
         let ResponsesOptions {
             session_id,
             thread_id,
-            session_source,
+            session_source: _,
             extra_headers,
             compression,
             turn_state,
@@ -92,9 +91,6 @@ impl<T: HttpTransport> ResponsesClient<T> {
             insert_header(&mut headers, "x-client-request-id", thread_id);
         }
         headers.extend(build_session_headers(session_id, thread_id));
-        if let Some(subagent) = subagent_header(&session_source) {
-            insert_header(&mut headers, "x-openai-subagent", &subagent);
-        }
 
         self.stream(body, headers, compression, turn_state).await
     }

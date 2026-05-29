@@ -7,11 +7,6 @@ use crate::operations::resolve_head;
 use crate::operations::resolve_repository_root;
 use crate::operations::run_git_for_stdout;
 
-/// Returns the merge-base commit between `HEAD` and the latest version between local
-/// and remote of the provided branch, if both exist.
-///
-/// The function mirrors `git merge-base HEAD <branch>` but returns `Ok(None)` when
-/// the repository has no `HEAD` yet or when the branch cannot be resolved.
 pub fn merge_base_with_head(
     repo_path: &Path,
     branch: &str,
@@ -41,7 +36,7 @@ pub fn merge_base_with_head(
             OsString::from(head),
             OsString::from(preferred_ref),
         ],
-        /*env*/ None,
+        None,
     )?;
 
     Ok(Some(merge_base))
@@ -55,7 +50,7 @@ fn resolve_branch_ref(repo_root: &Path, branch: &str) -> Result<Option<String>, 
             OsString::from("--verify"),
             OsString::from(branch),
         ],
-        /*env*/ None,
+        None,
     );
 
     match rev {
@@ -77,7 +72,7 @@ fn resolve_upstream_if_remote_ahead(
             OsString::from("--symbolic-full-name"),
             OsString::from(format!("{branch}@{{upstream}}")),
         ],
-        /*env*/ None,
+        None,
     ) {
         Ok(name) => {
             let trimmed = name.trim();
@@ -98,7 +93,7 @@ fn resolve_upstream_if_remote_ahead(
             OsString::from("--count"),
             OsString::from(format!("{branch}...{upstream}")),
         ],
-        /*env*/ None,
+        None,
     ) {
         Ok(counts) => counts,
         Err(GitToolingError::GitCommand { .. }) => return Ok(None),

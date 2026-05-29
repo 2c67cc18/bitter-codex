@@ -9,14 +9,12 @@ use thiserror::Error;
 
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Default)]
 pub struct TokenData {
-    /// Flat info parsed from the JWT in auth.json.
     #[serde(
         deserialize_with = "deserialize_id_token",
         serialize_with = "serialize_id_token"
     )]
     pub id_token: IdTokenInfo,
 
-    /// This is a JWT.
     pub access_token: String,
 
     pub refresh_token: String,
@@ -24,19 +22,16 @@ pub struct TokenData {
     pub account_id: Option<String>,
 }
 
-/// Flat subset of useful claims in id_token from auth.json.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct IdTokenInfo {
     pub email: Option<String>,
-    /// The ChatGPT subscription plan type
-    /// (e.g., "free", "plus", "pro", "business", "enterprise", "edu").
-    /// (Note: values may vary by backend.)
+
     pub chatgpt_plan_type: Option<PlanType>,
-    /// ChatGPT user identifier associated with the token, if present.
+
     pub chatgpt_user_id: Option<String>,
-    /// Organization/workspace identifier associated with the token, if present.
+
     pub chatgpt_account_id: Option<String>,
-    /// Whether the selected ChatGPT workspace must route through the FedRAMP edge.
+
     pub chatgpt_account_is_fedramp: bool,
     pub raw_jwt: String,
 }
@@ -115,7 +110,6 @@ pub enum IdTokenInfoError {
 }
 
 fn decode_jwt_payload<T: DeserializeOwned>(jwt: &str) -> Result<T, IdTokenInfoError> {
-    // JWT format: header.payload.signature
     let mut parts = jwt.split('.');
     let (_header_b64, payload_b64, _sig_b64) = match (parts.next(), parts.next(), parts.next()) {
         (Some(h), Some(p), Some(s)) if !h.is_empty() && !p.is_empty() && !s.is_empty() => (h, p, s),

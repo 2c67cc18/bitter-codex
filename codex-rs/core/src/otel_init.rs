@@ -10,14 +10,10 @@ use codex_otel::OtelSettings;
 use codex_otel::OtelTlsConfig as OtelTlsSettings;
 use std::error::Error;
 
-/// Build an OpenTelemetry provider from the app Config.
-///
-/// Returns `None` when OTEL export is disabled.
 pub fn build_provider(
     config: &Config,
     service_version: &str,
     service_name_override: Option<&str>,
-    default_analytics_enabled: bool,
 ) -> Result<Option<OtelProvider>, Box<dyn Error>> {
     let to_otel_exporter = |kind: &Kind| match kind {
         Kind::None => OtelExporter::None,
@@ -67,14 +63,7 @@ pub fn build_provider(
 
     let exporter = to_otel_exporter(&config.otel.exporter);
     let trace_exporter = to_otel_exporter(&config.otel.trace_exporter);
-    let metrics_exporter = if config
-        .analytics_enabled
-        .unwrap_or(default_analytics_enabled)
-    {
-        to_otel_exporter(&config.otel.metrics_exporter)
-    } else {
-        OtelExporter::None
-    };
+    let metrics_exporter = to_otel_exporter(&config.otel.metrics_exporter);
 
     let originator = originator();
     let service_name = service_name_override.unwrap_or(originator.value.as_str());
@@ -94,8 +83,6 @@ pub fn build_provider(
     })
 }
 
-/// Filter predicate for exporting only Codex-owned events via OTEL.
-/// Keeps events that originated from codex_otel module
 pub fn codex_export_filter(meta: &tracing::Metadata<'_>) -> bool {
     meta.target().starts_with("codex_otel")
 }

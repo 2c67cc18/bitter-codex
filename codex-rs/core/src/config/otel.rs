@@ -15,13 +15,10 @@ pub(crate) fn resolve_config(
         .environment
         .unwrap_or_else(|| DEFAULT_OTEL_ENVIRONMENT.to_string());
     let exporter = config.exporter.unwrap_or(OtelExporterKind::None);
-    // OTLP HTTP endpoints are signal-specific in our config, so enabling log
-    // export must not implicitly send spans to a /v1/logs endpoint.
+
     let trace_exporter = config.trace_exporter.unwrap_or(OtelExporterKind::None);
     let metrics_exporter = config.metrics_exporter.unwrap_or(OtelExporterKind::Statsig);
-    // Provider initialization installs process-global OTEL state. Sanitize
-    // user-editable trace metadata here so malformed config is reported as a
-    // startup warning instead of making startup fail.
+
     let span_attributes = resolve_span_attributes(config.span_attributes, startup_warnings);
     let tracestate = resolve_tracestate(config.tracestate, startup_warnings);
 
@@ -78,9 +75,6 @@ fn resolve_tracestate(
         valid_entries.insert(member_key, fields);
     }
 
-    // Tracestate members can be valid individually while the combined W3C
-    // tracestate header is not, so validate the filtered set before handing it
-    // to provider initialization.
     if let Err(err) = codex_otel::validate_tracestate_entries(&valid_entries) {
         push_invalid_config_warning("otel.tracestate", err, startup_warnings);
         return BTreeMap::new();

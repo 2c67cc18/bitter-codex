@@ -19,16 +19,12 @@ use std::sync::Mutex;
 use tracing::warn;
 
 use crate::token_data::TokenData;
-use codex_agent_identity::AgentIdentityJwtClaims;
-use codex_agent_identity::decode_agent_identity_jwt;
 use codex_app_server_protocol::AuthMode;
 use codex_config::types::AuthCredentialsStoreMode;
 use codex_keyring_store::DefaultKeyringStore;
 use codex_keyring_store::KeyringStore;
-use codex_protocol::account::PlanType as AccountPlanType;
 use once_cell::sync::Lazy;
 
-/// Expected structure for $CODEX_HOME/auth.json.
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub struct AuthDotJson {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -42,43 +38,6 @@ pub struct AuthDotJson {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_refresh: Option<DateTime<Utc>>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_identity: Option<String>,
-}
-
-#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]
-pub struct AgentIdentityAuthRecord {
-    pub agent_runtime_id: String,
-    pub agent_private_key: String,
-    pub account_id: String,
-    pub chatgpt_user_id: String,
-    pub email: String,
-    pub plan_type: AccountPlanType,
-    pub chatgpt_account_is_fedramp: bool,
-}
-
-impl AgentIdentityAuthRecord {
-    pub(crate) fn from_agent_identity_jwt(jwt: &str) -> std::io::Result<Self> {
-        let claims =
-            decode_agent_identity_jwt(jwt, /*jwks*/ None).map_err(std::io::Error::other)?;
-
-        Ok(claims.into())
-    }
-}
-
-impl From<AgentIdentityJwtClaims> for AgentIdentityAuthRecord {
-    fn from(claims: AgentIdentityJwtClaims) -> Self {
-        Self {
-            agent_runtime_id: claims.agent_runtime_id,
-            agent_private_key: claims.agent_private_key,
-            account_id: claims.account_id,
-            chatgpt_user_id: claims.chatgpt_user_id,
-            email: claims.email,
-            plan_type: claims.plan_type.into(),
-            chatgpt_account_is_fedramp: claims.chatgpt_account_is_fedramp,
-        }
-    }
 }
 
 pub(super) fn get_auth_file(codex_home: &Path) -> PathBuf {
@@ -110,8 +69,6 @@ impl FileAuthStorage {
         Self { codex_home }
     }
 
-    /// Attempt to read and parse the `auth.json` file in the given `CODEX_HOME` directory.
-    /// Returns the full AuthDotJson structure.
     pub(super) fn try_read_auth_json(&self, auth_file: &Path) -> std::io::Result<AuthDotJson> {
         let mut file = File::open(auth_file)?;
         let mut contents = String::new();
@@ -159,7 +116,6 @@ impl AuthStorageBackend for FileAuthStorage {
 
 const KEYRING_SERVICE: &str = "Codex Auth";
 
-// turns codex_home path into a stable, short key string
 fn compute_store_key(codex_home: &Path) -> std::io::Result<String> {
     let canonical = codex_home
         .canonicalize()
@@ -225,7 +181,7 @@ impl AuthStorageBackend for KeyringAuthStorage {
 
     fn save(&self, auth: &AuthDotJson) -> std::io::Result<()> {
         let key = compute_store_key(&self.codex_home)?;
-        // Simpler error mapping per style: prefer method reference over closure
+
         let serialized = serde_json::to_string(auth).map_err(std::io::Error::other)?;
         self.save_to_keyring(&key, &serialized)?;
         if let Err(err) = delete_file_if_exists(&self.codex_home) {
@@ -285,12 +241,10 @@ impl AuthStorageBackend for AutoAuthStorage {
     }
 
     fn delete(&self) -> std::io::Result<bool> {
-        // Keyring storage will delete from disk as well
         self.keyring_storage.delete()
     }
 }
 
-// A global in-memory store for mapping codex_home -> AuthDotJson.
 static EPHEMERAL_AUTH_STORE: Lazy<Mutex<HashMap<String, AuthDotJson>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 

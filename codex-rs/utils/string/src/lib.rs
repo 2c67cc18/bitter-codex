@@ -8,7 +8,6 @@ pub use truncate::approx_tokens_from_byte_count;
 pub use truncate::truncate_middle_chars;
 pub use truncate::truncate_middle_with_token_budget;
 
-// Truncate a &str to a byte budget at a char boundary (prefix)
 #[inline]
 pub fn take_bytes_at_char_boundary(s: &str, maxb: usize) -> &str {
     if s.len() <= maxb {
@@ -25,8 +24,6 @@ pub fn take_bytes_at_char_boundary(s: &str, maxb: usize) -> &str {
     &s[..last_ok]
 }
 
-/// Sanitize a tag value to comply with metric tag validation rules:
-/// only ASCII alphanumeric, '.', '_', '-', and '/' are allowed.
 pub fn sanitize_metric_tag_value(value: &str) -> String {
     const MAX_LEN: usize = 256;
     let sanitized: String = value
@@ -50,7 +47,6 @@ pub fn sanitize_metric_tag_value(value: &str) -> String {
     }
 }
 
-/// Find all UUIDs in a string.
 #[allow(clippy::unwrap_used)]
 pub fn find_uuids(s: &str) -> Vec<String> {
     static RE: std::sync::OnceLock<regex_lite::Regex> = std::sync::OnceLock::new();
@@ -58,14 +54,12 @@ pub fn find_uuids(s: &str) -> Vec<String> {
         regex_lite::Regex::new(
             r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}",
         )
-        .unwrap() // Unwrap is safe thanks to the tests.
+        .unwrap()
     });
 
     re.find_iter(s).map(|m| m.as_str().to_string()).collect()
 }
 
-/// Convert a markdown-style `#L..` location suffix into a terminal-friendly
-/// `:line[:column][-line[:column]]` suffix.
 pub fn normalize_markdown_hash_location_suffix(suffix: &str) -> Option<String> {
     let fragment = suffix.strip_prefix('#')?;
     let (start, end) = match fragment.split_once('-') {

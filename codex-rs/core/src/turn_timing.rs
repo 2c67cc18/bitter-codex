@@ -180,7 +180,6 @@ fn response_item_records_turn_ttft(item: &ResponseItem) -> bool {
         ResponseItem::LocalShellCall { .. }
         | ResponseItem::FunctionCall { .. }
         | ResponseItem::CustomToolCall { .. }
-        | ResponseItem::ToolSearchCall { .. }
         | ResponseItem::WebSearchCall { .. }
         | ResponseItem::ImageGenerationCall { .. }
         | ResponseItem::Compaction { .. }
@@ -188,7 +187,6 @@ fn response_item_records_turn_ttft(item: &ResponseItem) -> bool {
         ResponseItem::CompactionTrigger => false,
         ResponseItem::FunctionCallOutput { .. }
         | ResponseItem::CustomToolCallOutput { .. }
-        | ResponseItem::ToolSearchOutput { .. }
         | ResponseItem::Other => false,
     }
 }

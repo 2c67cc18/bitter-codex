@@ -19,10 +19,6 @@ use wiremock::ResponseTemplate;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 
-use core_test_support::skip_if_no_network;
-
-// ---------- Small helpers  ----------
-
 const WORKSPACE_ID_ALLOWED: &str = "123e4567-e89b-42d3-a456-426614174000";
 const WORKSPACE_ID_DISALLOWED: &str = "123e4567-e89b-42d3-a456-426614174002";
 
@@ -40,7 +36,7 @@ async fn mock_usercode_success(server: &MockServer) {
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "device_auth_id": "device-auth-123",
             "user_code": "CODE-12345",
-            // NOTE: Interval is kept 0 in order to avoid waiting for the interval to pass
+
             "interval": "0"
         })))
         .mount(server)
@@ -108,7 +104,7 @@ fn server_opts(
     let mut opts = ServerOptions::new(
         codex_home.path().to_path_buf(),
         "client-id".to_string(),
-        /*forced_chatgpt_workspace_id*/ None,
+        None,
         cli_auth_credentials_store_mode,
     );
     opts.issuer = issuer;
@@ -118,19 +114,12 @@ fn server_opts(
 
 #[tokio::test]
 async fn device_code_login_integration_succeeds() -> anyhow::Result<()> {
-    skip_if_no_network!(Ok(()));
-
     let codex_home = tempdir().unwrap();
     let mock_server = MockServer::start().await;
 
     mock_usercode_success(&mock_server).await;
 
-    mock_poll_token_two_step(
-        &mock_server,
-        Arc::new(AtomicUsize::new(0)),
-        /*first_response_status*/ 404,
-    )
-    .await;
+    mock_poll_token_two_step(&mock_server, Arc::new(AtomicUsize::new(0)), 404).await;
 
     let jwt = make_jwt(json!({
         "https://api.openai.com/auth": {
@@ -150,7 +139,7 @@ async fn device_code_login_integration_succeeds() -> anyhow::Result<()> {
     let auth = load_auth_dot_json(codex_home.path(), AuthCredentialsStoreMode::File)
         .context("auth.json should load after login succeeds")?
         .context("auth.json written")?;
-    // assert_eq!(auth.openai_api_key.as_deref(), Some("api-key-321"));
+
     let tokens = auth.tokens.expect("tokens persisted");
     assert_eq!(tokens.access_token, "access-token-123");
     assert_eq!(tokens.refresh_token, "refresh-token-123");
@@ -161,19 +150,12 @@ async fn device_code_login_integration_succeeds() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn device_code_login_rejects_workspace_mismatch() -> anyhow::Result<()> {
-    skip_if_no_network!(Ok(()));
-
     let codex_home = tempdir().unwrap();
     let mock_server = MockServer::start().await;
 
     mock_usercode_success(&mock_server).await;
 
-    mock_poll_token_two_step(
-        &mock_server,
-        Arc::new(AtomicUsize::new(0)),
-        /*first_response_status*/ 404,
-    )
-    .await;
+    mock_poll_token_two_step(&mock_server, Arc::new(AtomicUsize::new(0)), 404).await;
 
     let jwt = make_jwt(json!({
         "https://api.openai.com/auth": {
@@ -204,12 +186,10 @@ async fn device_code_login_rejects_workspace_mismatch() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn device_code_login_integration_handles_usercode_http_failure() -> anyhow::Result<()> {
-    skip_if_no_network!(Ok(()));
-
     let codex_home = tempdir().unwrap();
     let mock_server = MockServer::start().await;
 
-    mock_usercode_failure(&mock_server, /*status*/ 503).await;
+    mock_usercode_failure(&mock_server, 503).await;
 
     let issuer = mock_server.uri();
 
@@ -236,20 +216,13 @@ async fn device_code_login_integration_handles_usercode_http_failure() -> anyhow
 #[tokio::test]
 async fn device_code_login_integration_persists_without_api_key_on_exchange_failure()
 -> anyhow::Result<()> {
-    skip_if_no_network!(Ok(()));
-
     let codex_home = tempdir().unwrap();
 
     let mock_server = MockServer::start().await;
 
     mock_usercode_success(&mock_server).await;
 
-    mock_poll_token_two_step(
-        &mock_server,
-        Arc::new(AtomicUsize::new(0)),
-        /*first_response_status*/ 404,
-    )
-    .await;
+    mock_poll_token_two_step(&mock_server, Arc::new(AtomicUsize::new(0)), 404).await;
 
     let jwt = make_jwt(json!({}));
 
@@ -260,7 +233,7 @@ async fn device_code_login_integration_persists_without_api_key_on_exchange_fail
     let mut opts = ServerOptions::new(
         codex_home.path().to_path_buf(),
         "client-id".to_string(),
-        /*forced_chatgpt_workspace_id*/ None,
+        None,
         AuthCredentialsStoreMode::File,
     );
     opts.issuer = issuer;
@@ -283,16 +256,12 @@ async fn device_code_login_integration_persists_without_api_key_on_exchange_fail
 
 #[tokio::test]
 async fn device_code_login_integration_handles_error_payload() -> anyhow::Result<()> {
-    skip_if_no_network!(Ok(()));
-
     let codex_home = tempdir().unwrap();
 
-    // Start WireMock
     let mock_server = MockServer::start().await;
 
     mock_usercode_success(&mock_server).await;
 
-    // // /deviceauth/token → returns error payload with status 401
     mock_poll_token_single(
         &mock_server,
         "/api/accounts/deviceauth/token",
@@ -303,14 +272,12 @@ async fn device_code_login_integration_handles_error_payload() -> anyhow::Result
     )
     .await;
 
-    // (WireMock will automatically 404 for other paths)
-
     let issuer = mock_server.uri();
 
     let mut opts = ServerOptions::new(
         codex_home.path().to_path_buf(),
         "client-id".to_string(),
-        /*forced_chatgpt_workspace_id*/ None,
+        None,
         AuthCredentialsStoreMode::File,
     );
     opts.issuer = issuer;
@@ -320,7 +287,6 @@ async fn device_code_login_integration_handles_error_payload() -> anyhow::Result
         .await
         .expect_err("integration failure path should return error");
 
-    // Accept either the specific error payload, a 400, or a 404 (since the client may return 404 if the flow is incomplete)
     assert!(
         err.to_string().contains("authorization_declined") || err.to_string().contains("401"),
         "Expected an authorization_declined / 400 / 404 error, got {err:?}"

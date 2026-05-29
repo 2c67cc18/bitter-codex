@@ -1,12 +1,3 @@
-//! Tracing helpers shared by socket and in-process app-server entry points.
-//!
-//! The in-process path intentionally reuses the same span shape as JSON-RPC
-//! transports so request telemetry stays comparable across stdio, websocket,
-//! and embedded callers. [`typed_request_span`] is the in-process counterpart
-//! of [`request_span`] and stamps `rpc.transport` as `"in-process"` while
-//! deriving client identity from the typed [`ClientRequest`] rather than
-//! from a parsed JSON envelope.
-
 use crate::message_processor::ConnectionSessionState;
 use crate::outgoing_message::ConnectionId;
 use crate::transport::AppServerTransport;
@@ -54,11 +45,6 @@ pub(crate) fn request_span(
     span
 }
 
-/// Builds tracing span metadata for typed in-process requests.
-///
-/// This mirrors `request_span` semantics while stamping transport as
-/// `in-process` and deriving client info either from initialize params or
-/// from existing connection session state.
 pub(crate) fn typed_request_span(
     request: &ClientRequest,
     connection_id: ConnectionId,
@@ -78,15 +64,13 @@ pub(crate) fn typed_request_span(
             .or(session.client_version()),
     );
 
-    attach_parent_context(&span, &method, request.id(), /*parent_trace*/ None);
+    attach_parent_context(&span, &method, request.id(), None);
     span
 }
 
 fn transport_name(transport: &AppServerTransport) -> &'static str {
     match transport {
-        AppServerTransport::Stdio => "stdio",
         AppServerTransport::UnixSocket { .. } => "unix_socket",
-        AppServerTransport::WebSocket { .. } => "websocket",
         AppServerTransport::Off => "off",
     }
 }

@@ -23,47 +23,6 @@ pub(crate) struct ThreadWatchManager {
     running_turn_count_tx: watch::Sender<usize>,
 }
 
-pub(crate) struct ThreadWatchActiveGuard {
-    manager: ThreadWatchManager,
-    thread_id: String,
-    guard_type: ThreadWatchActiveGuardType,
-    handle: tokio::runtime::Handle,
-}
-
-impl ThreadWatchActiveGuard {
-    fn new(
-        manager: ThreadWatchManager,
-        thread_id: String,
-        guard_type: ThreadWatchActiveGuardType,
-    ) -> Self {
-        Self {
-            manager,
-            thread_id,
-            guard_type,
-            handle: tokio::runtime::Handle::current(),
-        }
-    }
-}
-
-impl Drop for ThreadWatchActiveGuard {
-    fn drop(&mut self) {
-        let manager = self.manager.clone();
-        let thread_id = self.thread_id.clone();
-        let guard_type = self.guard_type;
-        self.handle.spawn(async move {
-            manager
-                .note_active_guard_released(thread_id, guard_type)
-                .await;
-        });
-    }
-}
-
-#[derive(Clone, Copy)]
-enum ThreadWatchActiveGuardType {
-    Permission,
-    UserInput,
-}
-
 impl Default for ThreadWatchManager {
     fn default() -> Self {
         Self::new()
@@ -90,17 +49,13 @@ impl ThreadWatchManager {
     }
 
     pub(crate) async fn upsert_thread(&self, thread: Thread) {
-        self.mutate_and_publish(move |state| {
-            state.upsert_thread(thread.id, /*emit_notification*/ true)
-        })
-        .await;
+        self.mutate_and_publish(move |state| state.upsert_thread(thread.id, true))
+            .await;
     }
 
     pub(crate) async fn upsert_thread_silently(&self, thread: Thread) {
-        self.mutate_and_publish(move |state| {
-            state.upsert_thread(thread.id, /*emit_notification*/ false)
-        })
-        .await;
+        self.mutate_and_publish(move |state| state.upsert_thread(thread.id, false))
+            .await;
     }
 
     pub(crate) async fn remove_thread(&self, thread_id: &str) {
@@ -162,7 +117,6 @@ impl ThreadWatchManager {
     pub(crate) async fn note_thread_shutdown(&self, thread_id: &str) {
         self.update_runtime_for_thread(thread_id, |runtime| {
             runtime.running = false;
-            runtime.pending_permission_requests = 0;
             runtime.pending_user_input_requests = 0;
             runtime.is_loaded = false;
         })
@@ -172,7 +126,6 @@ impl ThreadWatchManager {
     pub(crate) async fn note_system_error(&self, thread_id: &str) {
         self.update_runtime_for_thread(thread_id, |runtime| {
             runtime.running = false;
-            runtime.pending_permission_requests = 0;
             runtime.pending_user_input_requests = 0;
             runtime.has_system_error = true;
         })
@@ -182,40 +135,9 @@ impl ThreadWatchManager {
     async fn clear_active_state(&self, thread_id: &str) {
         self.update_runtime_for_thread(thread_id, move |runtime| {
             runtime.running = false;
-            runtime.pending_permission_requests = 0;
             runtime.pending_user_input_requests = 0;
         })
         .await;
-    }
-
-    pub(crate) async fn note_permission_requested(
-        &self,
-        thread_id: &str,
-    ) -> ThreadWatchActiveGuard {
-        self.note_pending_request(thread_id, ThreadWatchActiveGuardType::Permission)
-            .await
-    }
-
-    pub(crate) async fn note_user_input_requested(
-        &self,
-        thread_id: &str,
-    ) -> ThreadWatchActiveGuard {
-        self.note_pending_request(thread_id, ThreadWatchActiveGuardType::UserInput)
-            .await
-    }
-
-    async fn note_pending_request(
-        &self,
-        thread_id: &str,
-        guard_type: ThreadWatchActiveGuardType,
-    ) -> ThreadWatchActiveGuard {
-        self.update_runtime_for_thread(thread_id, move |runtime| {
-            runtime.is_loaded = true;
-            let counter = Self::pending_counter(runtime, guard_type);
-            *counter = counter.saturating_add(1);
-        })
-        .await;
-        ThreadWatchActiveGuard::new(self.clone(), thread_id.to_string(), guard_type)
     }
 
     async fn mutate_and_publish<F>(&self, mutate: F)
@@ -250,18 +172,6 @@ impl ThreadWatchManager {
         Some(self.state.lock().await.subscribe(thread_id.to_string()))
     }
 
-    async fn note_active_guard_released(
-        &self,
-        thread_id: String,
-        guard_type: ThreadWatchActiveGuardType,
-    ) {
-        self.update_runtime_for_thread(&thread_id, move |runtime| {
-            let counter = Self::pending_counter(runtime, guard_type);
-            *counter = counter.saturating_sub(1);
-        })
-        .await;
-    }
-
     async fn update_runtime_for_thread<F>(&self, thread_id: &str, update: F)
     where
         F: FnOnce(&mut RuntimeFacts),
@@ -270,25 +180,12 @@ impl ThreadWatchManager {
         self.mutate_and_publish(move |state| state.update_runtime(&thread_id, update))
             .await;
     }
-
-    fn pending_counter(
-        runtime: &mut RuntimeFacts,
-        guard_type: ThreadWatchActiveGuardType,
-    ) -> &mut u32 {
-        match guard_type {
-            ThreadWatchActiveGuardType::Permission => &mut runtime.pending_permission_requests,
-            ThreadWatchActiveGuardType::UserInput => &mut runtime.pending_user_input_requests,
-        }
-    }
 }
 
 pub(crate) fn resolve_thread_status(
     status: ThreadStatus,
     has_in_progress_turn: bool,
 ) -> ThreadStatus {
-    // Running-turn events can arrive before the watch runtime state is observed by
-    // the listener loop. In that window we prefer to reflect a real active turn as
-    // `Active` instead of `Idle`/`NotLoaded`.
     if has_in_progress_turn && matches!(status, ThreadStatus::Idle | ThreadStatus::NotLoaded) {
         return ThreadStatus::Active {
             active_flags: Vec::new(),
@@ -421,7 +318,6 @@ impl ThreadWatchState {
 struct RuntimeFacts {
     is_loaded: bool,
     running: bool,
-    pending_permission_requests: u32,
     pending_user_input_requests: u32,
     has_system_error: bool,
 }
@@ -432,9 +328,6 @@ fn loaded_thread_status(runtime: &RuntimeFacts) -> ThreadStatus {
     }
 
     let mut active_flags = Vec::new();
-    if runtime.pending_permission_requests > 0 {
-        active_flags.push(ThreadActiveFlag::WaitingOnApproval);
-    }
     if runtime.pending_user_input_requests > 0 {
         active_flags.push(ThreadActiveFlag::WaitingOnUserInput);
     }
@@ -475,28 +368,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tracks_non_interactive_thread_status() {
-        let manager = ThreadWatchManager::new();
-        manager
-            .upsert_thread(test_thread(
-                NON_INTERACTIVE_THREAD_ID,
-                codex_app_server_protocol::SessionSource::AppServer,
-            ))
-            .await;
-
-        manager.note_turn_started(NON_INTERACTIVE_THREAD_ID).await;
-
-        assert_eq!(
-            manager
-                .loaded_status_for_thread(NON_INTERACTIVE_THREAD_ID)
-                .await,
-            ThreadStatus::Active {
-                active_flags: vec![],
-            },
-        );
-    }
-
-    #[tokio::test]
     async fn status_updates_track_single_thread() {
         let manager = ThreadWatchManager::new();
         manager
@@ -516,53 +387,6 @@ mod tests {
             },
         );
 
-        let permission_guard = manager
-            .note_permission_requested(INTERACTIVE_THREAD_ID)
-            .await;
-        assert_eq!(
-            manager
-                .loaded_status_for_thread(INTERACTIVE_THREAD_ID)
-                .await,
-            ThreadStatus::Active {
-                active_flags: vec![ThreadActiveFlag::WaitingOnApproval],
-            },
-        );
-
-        let user_input_guard = manager
-            .note_user_input_requested(INTERACTIVE_THREAD_ID)
-            .await;
-        assert_eq!(
-            manager
-                .loaded_status_for_thread(INTERACTIVE_THREAD_ID)
-                .await,
-            ThreadStatus::Active {
-                active_flags: vec![
-                    ThreadActiveFlag::WaitingOnApproval,
-                    ThreadActiveFlag::WaitingOnUserInput,
-                ],
-            },
-        );
-
-        drop(permission_guard);
-        wait_for_status(
-            &manager,
-            INTERACTIVE_THREAD_ID,
-            ThreadStatus::Active {
-                active_flags: vec![ThreadActiveFlag::WaitingOnUserInput],
-            },
-        )
-        .await;
-
-        drop(user_input_guard);
-        wait_for_status(
-            &manager,
-            INTERACTIVE_THREAD_ID,
-            ThreadStatus::Active {
-                active_flags: vec![],
-            },
-        )
-        .await;
-
         manager
             .note_turn_completed(INTERACTIVE_THREAD_ID, false)
             .await;
@@ -576,7 +400,7 @@ mod tests {
 
     #[test]
     fn resolves_in_progress_turn_to_active_status() {
-        let status = resolve_thread_status(ThreadStatus::Idle, /*has_in_progress_turn*/ true);
+        let status = resolve_thread_status(ThreadStatus::Idle, true);
         assert_eq!(
             status,
             ThreadStatus::Active {
@@ -584,8 +408,7 @@ mod tests {
             }
         );
 
-        let status =
-            resolve_thread_status(ThreadStatus::NotLoaded, /*has_in_progress_turn*/ true);
+        let status = resolve_thread_status(ThreadStatus::NotLoaded, true);
         assert_eq!(
             status,
             ThreadStatus::Active {
@@ -597,14 +420,11 @@ mod tests {
     #[test]
     fn keeps_status_when_no_in_progress_turn() {
         assert_eq!(
-            resolve_thread_status(ThreadStatus::Idle, /*has_in_progress_turn*/ false),
+            resolve_thread_status(ThreadStatus::Idle, false),
             ThreadStatus::Idle
         );
         assert_eq!(
-            resolve_thread_status(
-                ThreadStatus::SystemError,
-                /*has_in_progress_turn*/ false
-            ),
+            resolve_thread_status(ThreadStatus::SystemError, false),
             ThreadStatus::SystemError
         );
     }
@@ -703,11 +523,6 @@ mod tests {
 
         assert_eq!(manager.running_turn_count().await, 0);
 
-        let _permission_guard = manager
-            .note_permission_requested(INTERACTIVE_THREAD_ID)
-            .await;
-        assert_eq!(manager.running_turn_count().await, 0);
-
         manager.note_turn_started(INTERACTIVE_THREAD_ID).await;
         assert_eq!(manager.running_turn_count().await, 1);
 
@@ -722,7 +537,6 @@ mod tests {
         let (outgoing_tx, mut outgoing_rx) = mpsc::channel(8);
         let manager = ThreadWatchManager::new_with_outgoing(Arc::new(OutgoingMessageSender::new(
             outgoing_tx,
-            codex_analytics::AnalyticsEventsClient::disabled(),
         )));
 
         manager
@@ -765,7 +579,6 @@ mod tests {
         let (outgoing_tx, mut outgoing_rx) = mpsc::channel(8);
         let manager = ThreadWatchManager::new_with_outgoing(Arc::new(OutgoingMessageSender::new(
             outgoing_tx,
-            codex_analytics::AnalyticsEventsClient::disabled(),
         )));
 
         manager
@@ -798,73 +611,6 @@ mod tests {
                 },
             },
         );
-    }
-
-    #[tokio::test]
-    async fn status_watchers_receive_only_their_thread_updates() {
-        let manager = ThreadWatchManager::new();
-        manager
-            .upsert_thread(test_thread(
-                INTERACTIVE_THREAD_ID,
-                codex_app_server_protocol::SessionSource::Cli,
-            ))
-            .await;
-        manager
-            .upsert_thread(test_thread(
-                NON_INTERACTIVE_THREAD_ID,
-                codex_app_server_protocol::SessionSource::AppServer,
-            ))
-            .await;
-        let interactive_thread_id = ThreadId::from_string(INTERACTIVE_THREAD_ID)
-            .expect("interactive thread id should parse");
-        let non_interactive_thread_id = ThreadId::from_string(NON_INTERACTIVE_THREAD_ID)
-            .expect("non-interactive thread id should parse");
-        let mut interactive_rx = manager
-            .subscribe(interactive_thread_id)
-            .await
-            .expect("interactive status watcher should subscribe");
-        let mut non_interactive_rx = manager
-            .subscribe(non_interactive_thread_id)
-            .await
-            .expect("non-interactive status watcher should subscribe");
-
-        manager.note_turn_started(INTERACTIVE_THREAD_ID).await;
-
-        timeout(Duration::from_secs(1), interactive_rx.changed())
-            .await
-            .expect("timed out waiting for interactive status update")
-            .expect("interactive status watcher should remain open");
-        assert_eq!(
-            *interactive_rx.borrow(),
-            ThreadStatus::Active {
-                active_flags: vec![],
-            },
-        );
-        assert!(
-            timeout(Duration::from_millis(100), non_interactive_rx.changed())
-                .await
-                .is_err(),
-            "unrelated thread watcher should not receive an update"
-        );
-        assert_eq!(*non_interactive_rx.borrow(), ThreadStatus::Idle);
-    }
-
-    async fn wait_for_status(
-        manager: &ThreadWatchManager,
-        thread_id: &str,
-        expected_status: ThreadStatus,
-    ) {
-        timeout(Duration::from_secs(1), async {
-            loop {
-                let status = manager.loaded_status_for_thread(thread_id).await;
-                if status == expected_status {
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("timed out waiting for status");
     }
 
     async fn recv_status_changed_notification(
@@ -900,10 +646,7 @@ mod tests {
             path: None,
             cwd: test_path_buf("/tmp").abs(),
             cli_version: "test".to_string(),
-            agent_nickname: None,
-            agent_role: None,
             source,
-            thread_source: None,
             git_info: None,
             name: None,
             turns: Vec::new(),

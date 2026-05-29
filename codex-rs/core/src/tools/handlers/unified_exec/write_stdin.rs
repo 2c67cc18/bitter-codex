@@ -4,7 +4,6 @@ use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::registry::CoreToolRuntime;
-use crate::tools::registry::PostToolUsePayload;
 use crate::tools::registry::ToolExecutor;
 use crate::unified_exec::WriteStdinRequest;
 use codex_protocol::protocol::EventMsg;
@@ -14,11 +13,9 @@ use codex_tools::ToolSpec;
 use serde::Deserialize;
 
 use super::super::shell_spec::create_write_stdin_tool;
-use super::post_unified_exec_tool_use_payload;
 
 #[derive(Debug, Deserialize)]
 struct WriteStdinArgs {
-    // The model is trained on `session_id`.
     session_id: i32,
     #[serde(default)]
     chars: String,
@@ -76,10 +73,6 @@ impl ToolExecutor<ToolInvocation> for WriteStdinHandler {
                 FunctionCallError::RespondToModel(format!("write_stdin failed: {err}"))
             })?;
 
-        // Empty stdin is a background poll, so emit it only while there is
-        // still a live process for the UI to wait on. Non-empty stdin is a real
-        // terminal interaction and should remain visible even if it completes
-        // the process before the response returns.
         if !args.chars.is_empty() || response.process_id.is_some() {
             let process_id = response.process_id.unwrap_or(args.session_id);
             let interaction = TerminalInteractionEvent {
@@ -99,13 +92,5 @@ impl ToolExecutor<ToolInvocation> for WriteStdinHandler {
 impl CoreToolRuntime for WriteStdinHandler {
     fn matches_kind(&self, payload: &ToolPayload) -> bool {
         matches!(payload, ToolPayload::Function { .. })
-    }
-
-    fn post_tool_use_payload(
-        &self,
-        invocation: &ToolInvocation,
-        result: &dyn crate::tools::context::ToolOutput,
-    ) -> Option<PostToolUsePayload> {
-        post_unified_exec_tool_use_payload(invocation, result)
     }
 }

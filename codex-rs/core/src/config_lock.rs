@@ -6,7 +6,6 @@ use codex_config::config_toml::ConfigLockfileToml;
 use codex_config::config_toml::ConfigToml;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use serde::Serialize;
-use serde::de::DeserializeOwned;
 use similar::TextDiff;
 
 pub(crate) const CONFIG_LOCK_VERSION: u32 = 1;
@@ -84,7 +83,6 @@ pub(crate) fn lock_layer_from_config(
     Ok(ConfigLayerEntry::new(
         ConfigLayerSource::User {
             file: lock_path.clone(),
-            profile: None,
         },
         value,
     ))
@@ -156,21 +154,4 @@ fn compact_diff<T: Serialize>(root: &str, expected: &T, actual: &T) -> io::Resul
 fn toml_value<T: Serialize>(value: &T, label: &str) -> io::Result<toml::Value> {
     toml::Value::try_from(value)
         .map_err(|err| config_lock_error(format!("failed to serialize {label}: {err}")))
-}
-
-pub(crate) fn toml_round_trip<T>(value: &impl Serialize, label: &'static str) -> io::Result<T>
-where
-    T: DeserializeOwned + Serialize,
-{
-    let value = toml_value(value, label)?;
-    let toml = value.clone().try_into().map_err(|err| {
-        config_lock_error(format!("failed to convert {label} to TOML shape: {err}"))
-    })?;
-    let represented_value = toml_value(&toml, label)?;
-    if represented_value != value {
-        return Err(config_lock_error(format!(
-            "resolved {label} cannot be fully represented as TOML"
-        )));
-    }
-    Ok(toml)
 }

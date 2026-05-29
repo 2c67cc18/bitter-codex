@@ -69,6 +69,8 @@ coverage/
 
 # personal files
 personal/
+.removal/
+.worktrees/
 
 # os
 .DS_Store

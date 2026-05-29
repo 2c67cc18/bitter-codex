@@ -8,7 +8,6 @@ use codex_app_server_protocol::ServerRequest;
 use serde::Serialize;
 use tokio::sync::oneshot;
 
-/// Stable identifier for a transport connection.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct ConnectionId(pub u64);
 
@@ -18,13 +17,11 @@ impl fmt::Display for ConnectionId {
     }
 }
 
-/// Outgoing message from the server to the client.
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum OutgoingMessage {
     Request(ServerRequest),
-    /// AppServerNotification is specific to the case where this is run as an
-    /// "app server" as opposed to an MCP server.
+
     AppServerNotification(ServerNotification),
     Response(OutgoingResponse),
     Error(OutgoingError),

@@ -12,7 +12,6 @@ pub fn build_cli_overrides_layer(cli_overrides: &[(String, TomlValue)]) -> TomlV
     root
 }
 
-/// Apply a single dotted-path override onto a TOML value.
 fn apply_toml_override(root: &mut TomlValue, path: &str, value: TomlValue) {
     use toml::value::Table;
 

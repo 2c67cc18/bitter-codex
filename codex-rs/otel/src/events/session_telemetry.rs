@@ -1,5 +1,4 @@
 use crate::TelemetryAuthMode;
-use crate::ToolDecisionSource;
 use crate::events::shared::log_and_trace_event;
 use crate::events::shared::log_event;
 use crate::events::shared::trace_event;
@@ -8,8 +7,6 @@ use crate::metrics::API_CALL_DURATION_METRIC;
 use crate::metrics::MetricsClient;
 use crate::metrics::MetricsConfig;
 use crate::metrics::MetricsError;
-use crate::metrics::PLUGIN_INSTALL_ELICITATION_SENT_METRIC;
-use crate::metrics::PLUGIN_INSTALL_SUGGESTION_METRIC;
 use crate::metrics::RESPONSES_API_ENGINE_IAPI_TBT_DURATION_METRIC;
 use crate::metrics::RESPONSES_API_ENGINE_IAPI_TTFT_DURATION_METRIC;
 use crate::metrics::RESPONSES_API_ENGINE_SERVICE_TBT_DURATION_METRIC;
@@ -38,9 +35,6 @@ use codex_protocol::ThreadId;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort;
-use codex_protocol::protocol::AskForApproval;
-use codex_protocol::protocol::ReviewDecision;
-use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::user_input::UserInput;
 use eventsource_stream::Event as StreamEvent;
@@ -65,12 +59,6 @@ const RESPONSES_API_ENGINE_IAPI_TTFT_FIELD: &str = "engine_iapi_ttft_total_ms";
 const RESPONSES_API_ENGINE_SERVICE_TTFT_FIELD: &str = "engine_service_ttft_total_ms";
 const RESPONSES_API_ENGINE_IAPI_TBT_FIELD: &str = "engine_iapi_tbt_across_engine_calls_ms";
 const RESPONSES_API_ENGINE_SERVICE_TBT_FIELD: &str = "engine_service_tbt_across_engine_calls_ms";
-
-fn trace_field_value<'a>(fields: &'a [(&str, &str)], key: &str) -> Option<&'a str> {
-    fields
-        .iter()
-        .find_map(|(field_key, value)| (*field_key == key).then_some(*value))
-}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AuthEnvTelemetryMetadata {
@@ -192,7 +180,6 @@ impl SessionTelemetry {
         }
     }
 
-    /// Records a coarse startup phase for production latency breakdowns.
     pub fn record_startup_phase(
         &self,
         phase: &'static str,
@@ -217,7 +204,6 @@ impl SessionTelemetry {
         );
     }
 
-    /// Records time to first token as both a metric and a production telemetry event.
     pub fn record_turn_ttft(&self, duration: Duration) {
         self.record_duration(TURN_TTFT_DURATION_METRIC, duration, &[]);
         log_and_trace_event!(
@@ -225,67 +211,6 @@ impl SessionTelemetry {
             common: {
                 event.name = "codex.turn_ttft",
                 duration_ms = %duration.as_millis(),
-            },
-            log: {},
-            trace: {},
-        );
-    }
-
-    /// Records the moment a plugin or connector install elicitation is dispatched.
-    pub fn record_plugin_install_elicitation_sent(
-        &self,
-        tool_type: &str,
-        tool_id: &str,
-        tool_name: &str,
-    ) {
-        self.counter(
-            PLUGIN_INSTALL_ELICITATION_SENT_METRIC,
-            /*inc*/ 1,
-            &[("tool_type", tool_type)],
-        );
-        log_and_trace_event!(
-            self,
-            common: {
-                event.name = "codex.plugin_install_elicitation_sent",
-                plugin_install.tool_type = tool_type,
-                plugin_install.tool_id = tool_id,
-                plugin_install.tool_name = tool_name,
-            },
-            log: {},
-            trace: {},
-        );
-    }
-
-    /// Records the outcome of a surfaced plugin or connector install suggestion.
-    pub fn record_plugin_install_suggestion(
-        &self,
-        tool_type: &str,
-        tool_id: &str,
-        tool_name: &str,
-        response_action: &str,
-        user_confirmed: bool,
-        completed: bool,
-    ) {
-        let completed_tag = if completed { "true" } else { "false" };
-        self.counter(
-            PLUGIN_INSTALL_SUGGESTION_METRIC,
-            /*inc*/ 1,
-            &[
-                ("tool_type", tool_type),
-                ("response_action", response_action),
-                ("completed", completed_tag),
-            ],
-        );
-        log_and_trace_event!(
-            self,
-            common: {
-                event.name = "codex.plugin_install_suggestion",
-                plugin_install.tool_type = tool_type,
-                plugin_install.tool_id = tool_id,
-                plugin_install.tool_name = tool_name,
-                plugin_install.response_action = response_action,
-                plugin_install.user_confirmed = user_confirmed,
-                plugin_install.completed = completed,
             },
             log: {},
             trace: {},
@@ -314,7 +239,6 @@ impl SessionTelemetry {
         metrics.snapshot()
     }
 
-    /// Collect and discard a runtime metrics snapshot to reset delta accumulators.
     pub fn reset_runtime_metrics(&self) {
         if self.metrics.is_none() {
             return;
@@ -324,7 +248,6 @@ impl SessionTelemetry {
         }
     }
 
-    /// Collect a runtime metrics summary if debug snapshots are available.
     pub fn runtime_metrics_summary(&self) -> Option<RuntimeMetricsSummary> {
         let snapshot = match self.snapshot_metrics() {
             Ok(snapshot) => snapshot,
@@ -443,9 +366,6 @@ impl SessionTelemetry {
         reasoning_summary: ReasoningSummary,
         context_window: Option<i64>,
         auto_compact_token_limit: Option<i64>,
-        approval_policy: AskForApproval,
-        sandbox_policy: SandboxPolicy,
-        mcp_servers: Vec<&str>,
     ) {
         log_and_trace_event!(
             self,
@@ -462,15 +382,9 @@ impl SessionTelemetry {
                 reasoning_summary = %reasoning_summary,
                 context_window = context_window,
                 auto_compact_token_limit = auto_compact_token_limit,
-                approval_policy = %approval_policy,
-                sandbox_policy = %sandbox_policy,
             },
-            log: {
-                mcp_servers = mcp_servers.join(", "),
-            },
-            trace: {
-                mcp_server_count = mcp_servers.len() as i64,
-            },
+            log: {},
+            trace: {},
         );
     }
 
@@ -492,16 +406,12 @@ impl SessionTelemetry {
             status,
             error.as_deref(),
             duration,
-            /*auth_header_attached*/ false,
-            /*auth_header_name*/ None,
-            /*retry_after_unauthorized*/ false,
-            /*recovery_mode*/ None,
-            /*recovery_phase*/ None,
+            false,
+            None,
+            false,
+            None,
+            None,
             "unknown",
-            /*request_id*/ None,
-            /*cf_ray*/ None,
-            /*auth_error*/ None,
-            /*auth_error_code*/ None,
         );
 
         response
@@ -520,10 +430,6 @@ impl SessionTelemetry {
         recovery_mode: Option<&str>,
         recovery_phase: Option<&str>,
         endpoint: &str,
-        request_id: Option<&str>,
-        cf_ray: Option<&str>,
-        auth_error: Option<&str>,
-        auth_error_code: Option<&str>,
     ) {
         let success = status.is_some_and(|code| (200..=299).contains(&code)) && error.is_none();
         let success_str = if success { "true" } else { "false" };
@@ -532,7 +438,7 @@ impl SessionTelemetry {
             .unwrap_or_else(|| "none".to_string());
         self.counter(
             API_CALL_COUNT_METRIC,
-            /*inc*/ 1,
+            1,
             &[("status", status_str.as_str()), ("success", success_str)],
         );
         self.record_duration(
@@ -560,10 +466,6 @@ impl SessionTelemetry {
                 auth.env_provider_key_name = self.metadata.auth_env.provider_env_key_name.as_deref(),
                 auth.env_provider_key_present = self.metadata.auth_env.provider_env_key_present,
                 auth.env_refresh_token_url_override_present = self.metadata.auth_env.refresh_token_url_override_present,
-                auth.request_id = request_id,
-                auth.cf_ray = cf_ray,
-                auth.error = auth_error,
-                auth.error_code = auth_error_code,
             },
             log: {},
             trace: {},
@@ -583,10 +485,6 @@ impl SessionTelemetry {
         recovery_phase: Option<&str>,
         endpoint: &str,
         connection_reused: bool,
-        request_id: Option<&str>,
-        cf_ray: Option<&str>,
-        auth_error: Option<&str>,
-        auth_error_code: Option<&str>,
     ) {
         let success = error.is_none()
             && status
@@ -614,10 +512,6 @@ impl SessionTelemetry {
                 auth.env_provider_key_present = self.metadata.auth_env.provider_env_key_present,
                 auth.env_refresh_token_url_override_present = self.metadata.auth_env.refresh_token_url_override_present,
                 auth.connection_reused = connection_reused,
-                auth.request_id = request_id,
-                auth.cf_ray = cf_ray,
-                auth.error = auth_error,
-                auth.error_code = auth_error_code,
             },
             log: {},
             trace: {},
@@ -633,7 +527,7 @@ impl SessionTelemetry {
         let success_str = if error.is_none() { "true" } else { "false" };
         self.counter(
             WEBSOCKET_REQUEST_COUNT_METRIC,
-            /*inc*/ 1,
+            1,
             &[("success", success_str)],
         );
         self.record_duration(
@@ -667,10 +561,6 @@ impl SessionTelemetry {
         mode: &str,
         step: &str,
         outcome: &str,
-        request_id: Option<&str>,
-        cf_ray: Option<&str>,
-        auth_error: Option<&str>,
-        auth_error_code: Option<&str>,
         recovery_reason: Option<&str>,
         auth_state_changed: Option<bool>,
     ) {
@@ -681,10 +571,6 @@ impl SessionTelemetry {
                 auth.mode = mode,
                 auth.step = step,
                 auth.outcome = outcome,
-                auth.request_id = request_id,
-                auth.cf_ray = cf_ray,
-                auth.error = auth_error,
-                auth.error_code = auth_error_code,
                 auth.recovery_reason = recovery_reason,
                 auth.state_changed = auth_state_changed,
             },
@@ -773,7 +659,7 @@ impl SessionTelemetry {
         let kind_str = kind.as_deref().unwrap_or(WEBSOCKET_UNKNOWN_KIND);
         let success_str = if success { "true" } else { "false" };
         let tags = [("kind", kind_str), ("success", success_str)];
-        self.counter(WEBSOCKET_EVENT_COUNT_METRIC, /*inc*/ 1, &tags);
+        self.counter(WEBSOCKET_EVENT_COUNT_METRIC, 1, &tags);
         self.record_duration(WEBSOCKET_EVENT_DURATION_METRIC, duration, &tags);
         log_and_trace_event!(
             self,
@@ -827,15 +713,11 @@ impl SessionTelemetry {
                 }
             }
             Ok(Some(Err(error))) => {
-                self.sse_event_failed(/*kind*/ None, duration, error);
+                self.sse_event_failed(None, duration, error);
             }
             Ok(None) => {}
             Err(_) => {
-                self.sse_event_failed(
-                    /*kind*/ None,
-                    duration,
-                    &"idle timeout waiting for SSE",
-                );
+                self.sse_event_failed(None, duration, &"idle timeout waiting for SSE");
             }
         }
     }
@@ -843,7 +725,7 @@ impl SessionTelemetry {
     fn sse_event(&self, kind: &str, duration: Duration) {
         self.counter(
             SSE_EVENT_COUNT_METRIC,
-            /*inc*/ 1,
+            1,
             &[("kind", kind), ("success", "true")],
         );
         self.record_duration(
@@ -866,7 +748,7 @@ impl SessionTelemetry {
         let kind_str = kind.map_or(SSE_UNKNOWN_KIND, String::as_str);
         self.counter(
             SSE_EVENT_COUNT_METRIC,
-            /*inc*/ 1,
+            1,
             &[("kind", kind_str), ("success", "false")],
         );
         self.record_duration(
@@ -981,23 +863,6 @@ impl SessionTelemetry {
         );
     }
 
-    pub fn tool_decision(
-        &self,
-        tool_name: &str,
-        call_id: &str,
-        decision: &ReviewDecision,
-        source: ToolDecisionSource,
-    ) {
-        log_event!(
-            self,
-            event.name = "codex.tool_decision",
-            tool_name = %tool_name,
-            call_id = %call_id,
-            decision = %decision.clone().to_string().to_lowercase(),
-            source = %source.to_string(),
-        );
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub async fn log_tool_result_with_tags<F, Fut, E>(
         &self,
@@ -1005,7 +870,6 @@ impl SessionTelemetry {
         call_id: &str,
         arguments: &str,
         extra_tags: &[(&str, &str)],
-        extra_trace_fields: &[(&str, &str)],
         f: F,
     ) -> Result<(String, bool), E>
     where
@@ -1030,7 +894,6 @@ impl SessionTelemetry {
             success,
             output.as_ref(),
             extra_tags,
-            extra_trace_fields,
         );
 
         result
@@ -1044,8 +907,6 @@ impl SessionTelemetry {
             duration_ms = %Duration::ZERO.as_millis(),
             success = %false,
             output = %error,
-            mcp_server = "",
-            mcp_server_origin = "",
         );
         trace_event!(
             self,
@@ -1070,18 +931,14 @@ impl SessionTelemetry {
         success: bool,
         output: &str,
         extra_tags: &[(&str, &str)],
-        extra_trace_fields: &[(&str, &str)],
     ) {
         let success_str = if success { "true" } else { "false" };
         let mut tags = Vec::with_capacity(2 + extra_tags.len());
         tags.push(("tool", tool_name));
         tags.push(("success", success_str));
         tags.extend_from_slice(extra_tags);
-        self.counter(TOOL_CALL_COUNT_METRIC, /*inc*/ 1, &tags);
+        self.counter(TOOL_CALL_COUNT_METRIC, 1, &tags);
         self.record_duration(TOOL_CALL_DURATION_METRIC, duration, &tags);
-        let mcp_server = trace_field_value(extra_trace_fields, "mcp_server").unwrap_or("");
-        let mcp_server_origin =
-            trace_field_value(extra_trace_fields, "mcp_server_origin").unwrap_or("");
         log_event!(
             self,
             event.name = "codex.tool_result",
@@ -1091,8 +948,6 @@ impl SessionTelemetry {
             duration_ms = %duration.as_millis(),
             success = %success_str,
             output = %output,
-            mcp_server = %mcp_server,
-            mcp_server_origin = %mcp_server_origin,
         );
         trace_event!(
             self,
@@ -1104,8 +959,7 @@ impl SessionTelemetry {
             arguments_length = arguments.len() as i64,
             output_length = output.len() as i64,
             output_line_count = output.lines().count() as i64,
-            tool_origin = if mcp_server.is_empty() { "builtin" } else { "mcp" },
-            mcp_tool = !mcp_server.is_empty(),
+            tool_origin = %"builtin",
         );
     }
 
@@ -1189,9 +1043,7 @@ impl SessionTelemetry {
             ResponseItem::Reasoning { .. } => "reasoning".into(),
             ResponseItem::LocalShellCall { .. } => "local_shell_call".into(),
             ResponseItem::FunctionCall { .. } => "function_call".into(),
-            ResponseItem::ToolSearchCall { .. } => "tool_search_call".into(),
             ResponseItem::FunctionCallOutput { .. } => "function_call_output".into(),
-            ResponseItem::ToolSearchOutput { .. } => "tool_search_output".into(),
             ResponseItem::CustomToolCall { .. } => "custom_tool_call".into(),
             ResponseItem::CustomToolCallOutput { .. } => "custom_tool_call_output".into(),
             ResponseItem::WebSearchCall { .. } => "web_search_call".into(),

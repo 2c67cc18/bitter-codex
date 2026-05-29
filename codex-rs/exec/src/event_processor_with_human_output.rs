@@ -2,8 +2,6 @@ use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use codex_app_server_protocol::CommandExecutionStatus;
-use codex_app_server_protocol::McpToolCallStatus;
-use codex_app_server_protocol::PatchApplyStatus;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadTokenUsage;
@@ -12,7 +10,6 @@ use codex_core::config::Config;
 use codex_model_provider_info::WireApi;
 use codex_protocol::num_format::format_with_separators;
 use codex_protocol::protocol::SessionConfiguredEvent;
-use codex_utils_sandbox_summary::summarize_permission_profile;
 use owo_colors::OwoColorize;
 use owo_colors::Style;
 
@@ -74,22 +71,8 @@ impl EventProcessorWithHumanOutput {
                     cwd.display()
                 );
             }
-            ThreadItem::McpToolCall { server, tool, .. } => {
-                eprintln!(
-                    "{} {} {}",
-                    "mcp:".style(self.bold),
-                    format!("{server}/{tool}").style(self.cyan),
-                    "started".style(self.dimmed)
-                );
-            }
             ThreadItem::WebSearch { query, .. } => {
                 eprintln!("{} {}", "web search:".style(self.bold), query);
-            }
-            ThreadItem::FileChange { .. } => {
-                eprintln!("{}", "apply patch".style(self.bold));
-            }
-            ThreadItem::CollabAgentToolCall { tool, .. } => {
-                eprintln!("{} {:?}", "collab:".style(self.bold), tool);
             }
             _ => {}
         }
@@ -100,7 +83,7 @@ impl EventProcessorWithHumanOutput {
             ThreadItem::AgentMessage { text, .. } => {
                 eprintln!(
                     "{}\n{}",
-                    "codex".style(self.italic).style(self.magenta),
+                    "bitter-codex".style(self.italic).style(self.magenta),
                     text
                 );
                 self.final_message = Some(text);
@@ -161,42 +144,6 @@ impl EventProcessorWithHumanOutput {
                     eprintln!("{output}");
                 }
             }
-            ThreadItem::FileChange {
-                changes, status, ..
-            } => {
-                let status_text = match status {
-                    PatchApplyStatus::Completed => "completed",
-                    PatchApplyStatus::Failed => "failed",
-                    PatchApplyStatus::Declined => "declined",
-                    PatchApplyStatus::InProgress => "in_progress",
-                };
-                eprintln!("{} {}", "patch:".style(self.bold), status_text);
-                for change in changes {
-                    eprintln!("{}", change.path.style(self.dimmed));
-                }
-            }
-            ThreadItem::McpToolCall {
-                server,
-                tool,
-                status,
-                error,
-                ..
-            } => {
-                let status_text = match status {
-                    McpToolCallStatus::Completed => "completed".style(self.green),
-                    McpToolCallStatus::Failed => "failed".style(self.red),
-                    McpToolCallStatus::InProgress => "in_progress".style(self.dimmed),
-                };
-                eprintln!(
-                    "{} {} {}",
-                    "mcp:".style(self.bold),
-                    format!("{server}/{tool}").style(self.cyan),
-                    format!("({status_text})").style(self.dimmed)
-                );
-                if let Some(error) = error {
-                    eprintln!("{}", error.message.style(self.red));
-                }
-            }
             ThreadItem::WebSearch { query, .. } => {
                 eprintln!("{} {}", "web search:".style(self.bold), query);
             }
@@ -216,7 +163,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
         session_configured_event: &SessionConfiguredEvent,
     ) {
         const VERSION: &str = env!("CARGO_PKG_VERSION");
-        eprintln!("OpenAI Codex v{VERSION}\n--------");
+        eprintln!("Bitter Codex v{VERSION}\n--------");
         for (key, value) in config_summary_entries(config, session_configured_event) {
             eprintln!("{} {}", format!("{key}:").style(self.bold), value);
         }
@@ -256,23 +203,6 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 if let Some(details) = notification.details {
                     eprintln!("{}", details.style(self.dimmed));
                 }
-                CodexStatus::Running
-            }
-            ServerNotification::HookStarted(notification) => {
-                eprintln!(
-                    "{} {}",
-                    "hook:".style(self.bold),
-                    format!("{:?}", notification.run.event_name).style(self.dimmed)
-                );
-                CodexStatus::Running
-            }
-            ServerNotification::HookCompleted(notification) => {
-                eprintln!(
-                    "{} {} {:?}",
-                    "hook:".style(self.bold),
-                    format!("{:?}", notification.run.event_name).style(self.dimmed),
-                    notification.run.status
-                );
                 CodexStatus::Running
             }
             ServerNotification::ItemStarted(notification) => {
@@ -331,35 +261,6 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 }
                 TurnStatus::InProgress => CodexStatus::Running,
             },
-            ServerNotification::TurnDiffUpdated(notification) => {
-                if !notification.diff.trim().is_empty() {
-                    eprintln!("{}", notification.diff);
-                }
-                CodexStatus::Running
-            }
-            ServerNotification::TurnPlanUpdated(notification) => {
-                if let Some(explanation) = notification.explanation {
-                    eprintln!("{}", explanation.style(self.italic));
-                }
-                for step in notification.plan {
-                    match step.status {
-                        codex_app_server_protocol::TurnPlanStepStatus::Completed => {
-                            eprintln!("  {} {}", "✓".style(self.green), step.step);
-                        }
-                        codex_app_server_protocol::TurnPlanStepStatus::InProgress => {
-                            eprintln!("  {} {}", "→".style(self.cyan), step.step);
-                        }
-                        codex_app_server_protocol::TurnPlanStepStatus::Pending => {
-                            eprintln!(
-                                "  {} {}",
-                                "•".style(self.dimmed),
-                                step.step.style(self.dimmed)
-                            );
-                        }
-                    }
-                }
-                CodexStatus::Running
-            }
             ServerNotification::TurnStarted(_) => CodexStatus::Running,
             _ => CodexStatus::Running,
         }
@@ -409,7 +310,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
         {
             eprintln!(
                 "{}\n{}",
-                "codex".style(self.italic).style(self.magenta),
+                "bitter-codex".style(self.italic).style(self.magenta),
                 message
             );
         }
@@ -420,25 +321,12 @@ fn config_summary_entries(
     config: &Config,
     session_configured_event: &SessionConfiguredEvent,
 ) -> Vec<(&'static str, String)> {
-    let permission_profile = config.permissions.effective_permission_profile();
     let mut entries = vec![
         ("workdir", config.cwd.display().to_string()),
         ("model", session_configured_event.model.clone()),
         (
             "provider",
             session_configured_event.model_provider_id.clone(),
-        ),
-        (
-            "approval",
-            config.permissions.approval_policy.value().to_string(),
-        ),
-        (
-            "sandbox",
-            summarize_permission_profile(
-                &permission_profile,
-                &config.cwd,
-                config.effective_workspace_roots().as_slice(),
-            ),
         ),
     ];
     if config.model_provider.wire_api == WireApi::Responses {
@@ -482,19 +370,10 @@ fn reasoning_text(
 }
 
 fn final_message_from_turn_items(items: &[ThreadItem]) -> Option<String> {
-    items
-        .iter()
-        .rev()
-        .find_map(|item| match item {
-            ThreadItem::AgentMessage { text, .. } => Some(text.clone()),
-            _ => None,
-        })
-        .or_else(|| {
-            items.iter().rev().find_map(|item| match item {
-                ThreadItem::Plan { text, .. } => Some(text.clone()),
-                _ => None,
-            })
-        })
+    items.iter().rev().find_map(|item| match item {
+        ThreadItem::AgentMessage { text, .. } => Some(text.clone()),
+        _ => None,
+    })
 }
 
 fn blended_total(usage: &ThreadTokenUsage) -> i64 {

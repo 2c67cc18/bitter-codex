@@ -1,23 +1,14 @@
-//! Test-only helpers exposed for cross-crate integration tests.
-//!
-//! Production code should not depend on this module.
-//! We prefer this to using a crate feature to avoid building multiple
-//! permutations of the crate.
-
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use codex_exec_server::EnvironmentManager;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_model_provider::create_model_provider;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_models_manager::bundled_models_response;
-use codex_models_manager::collaboration_mode_presets;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_models_manager::test_support::construct_model_info_offline_for_tests;
 use codex_models_manager::test_support::get_model_offline_for_tests;
-use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelPreset;
 use once_cell::sync::Lazy;
@@ -63,29 +54,18 @@ pub fn thread_manager_with_models_provider_and_home(
     auth: CodexAuth,
     provider: ModelProviderInfo,
     codex_home: PathBuf,
-    environment_manager: Arc<EnvironmentManager>,
 ) -> ThreadManager {
-    ThreadManager::with_models_provider_and_home_for_tests(
-        auth,
-        provider,
-        codex_home,
-        environment_manager,
-    )
+    ThreadManager::with_models_provider_and_home_for_tests(auth, provider, codex_home)
 }
 
 pub fn thread_manager_with_models_provider_home_and_state(
     auth: CodexAuth,
     provider: ModelProviderInfo,
     codex_home: PathBuf,
-    environment_manager: Arc<EnvironmentManager>,
     state_db: Option<crate::StateDbHandle>,
 ) -> ThreadManager {
     ThreadManager::with_models_provider_home_and_state_for_tests(
-        auth,
-        provider,
-        codex_home,
-        environment_manager,
-        state_db,
+        auth, provider, codex_home, state_db,
     )
 }
 
@@ -122,7 +102,7 @@ pub fn models_manager_with_provider(
     provider: ModelProviderInfo,
 ) -> SharedModelsManager {
     let provider = create_model_provider(provider, Some(auth_manager));
-    provider.models_manager(codex_home, /*config_model_catalog*/ None)
+    provider.models_manager(codex_home, None)
 }
 
 pub fn get_model_offline(model: Option<&str>) -> String {
@@ -135,8 +115,4 @@ pub fn construct_model_info_offline(model: &str, config: &Config) -> ModelInfo {
 
 pub fn all_model_presets() -> &'static Vec<ModelPreset> {
     &TEST_MODEL_PRESETS
-}
-
-pub fn builtin_collaboration_mode_presets() -> Vec<CollaborationModeMask> {
-    collaboration_mode_presets::builtin_collaboration_mode_presets()
 }

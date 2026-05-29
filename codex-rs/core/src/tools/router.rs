@@ -1,25 +1,17 @@
 use crate::function_tool::FunctionCallError;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
-use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
 use crate::tools::registry::AnyToolResult;
-use crate::tools::registry::ToolArgumentDiffConsumer;
 use crate::tools::registry::ToolRegistry;
 use crate::tools::spec_plan::build_tool_router;
-use codex_mcp::ToolInfo;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::models::ResponseItem;
-use codex_protocol::models::SearchToolCallParams;
-use codex_tools::DiscoverableTool;
-use codex_tools::ToolCall as ExtensionToolCall;
-use codex_tools::ToolExecutor;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use tokio_util::sync::CancellationToken;
 use tracing::instrument;
 
 pub use crate::tools::context::ToolCallSource;
@@ -37,10 +29,6 @@ pub struct ToolRouter {
 }
 
 pub(crate) struct ToolRouterParams<'a> {
-    pub(crate) mcp_tools: Option<Vec<ToolInfo>>,
-    pub(crate) deferred_mcp_tools: Option<Vec<ToolInfo>>,
-    pub(crate) discoverable_tools: Option<Vec<DiscoverableTool>>,
-    pub(crate) extension_tool_executors: Vec<Arc<dyn ToolExecutor<ExtensionToolCall>>>,
     pub(crate) dynamic_tools: &'a [DynamicToolSpec],
 }
 
@@ -58,26 +46,6 @@ impl ToolRouter {
 
     pub fn model_visible_specs(&self) -> Vec<ToolSpec> {
         self.model_visible_specs.clone()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn registered_tool_names_for_test(&self) -> Vec<ToolName> {
-        self.registry.tool_names_for_test()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn tool_exposure_for_test(
-        &self,
-        name: &ToolName,
-    ) -> Option<crate::tools::registry::ToolExposure> {
-        self.registry.tool_exposure(name)
-    }
-
-    pub(crate) fn create_diff_consumer(
-        &self,
-        tool_name: &ToolName,
-    ) -> Option<Box<dyn ToolArgumentDiffConsumer>> {
-        self.registry.create_diff_consumer(tool_name)
     }
 
     pub fn tool_supports_parallel(&self, call: &ToolCall) -> bool {
@@ -103,60 +71,21 @@ impl ToolRouter {
                     payload: ToolPayload::Function { arguments },
                 }))
             }
-            ResponseItem::ToolSearchCall {
-                call_id: Some(call_id),
-                execution,
-                arguments,
-                ..
-            } if execution == "client" => {
-                let arguments: SearchToolCallParams =
-                    serde_json::from_value(arguments).map_err(|err| {
-                        FunctionCallError::RespondToModel(format!(
-                            "failed to parse tool_search arguments: {err}"
-                        ))
-                    })?;
-                Ok(Some(ToolCall {
-                    tool_name: ToolName::plain("tool_search"),
-                    call_id,
-                    payload: ToolPayload::ToolSearch { arguments },
-                }))
-            }
-            ResponseItem::ToolSearchCall { .. } => Ok(None),
             ResponseItem::CustomToolCall {
                 name,
                 input,
                 call_id,
                 ..
-            } => Ok(Some(ToolCall {
-                tool_name: ToolName::plain(name),
-                call_id,
-                payload: ToolPayload::Custom { input },
-            })),
+            } => {
+                let tool_name = ToolName::new(None, name);
+                Ok(Some(ToolCall {
+                    tool_name,
+                    call_id,
+                    payload: ToolPayload::Function { arguments: input },
+                }))
+            }
             _ => Ok(None),
         }
-    }
-
-    #[allow(dead_code)]
-    #[instrument(level = "trace", skip_all, err)]
-    pub async fn dispatch_tool_call_with_code_mode_result(
-        &self,
-        session: Arc<Session>,
-        turn: Arc<TurnContext>,
-        cancellation_token: CancellationToken,
-        tracker: SharedTurnDiffTracker,
-        call: ToolCall,
-        source: ToolCallSource,
-    ) -> Result<AnyToolResult, FunctionCallError> {
-        self.dispatch_tool_call_with_code_mode_result_inner(
-            session,
-            turn,
-            cancellation_token,
-            tracker,
-            call,
-            source,
-            /*terminal_outcome_reached*/ None,
-        )
-        .await
     }
 
     #[instrument(level = "trace", skip_all, err)]
@@ -165,33 +94,24 @@ impl ToolRouter {
         &self,
         session: Arc<Session>,
         turn: Arc<TurnContext>,
-        cancellation_token: CancellationToken,
-        tracker: SharedTurnDiffTracker,
         call: ToolCall,
-        source: ToolCallSource,
         terminal_outcome_reached: Arc<AtomicBool>,
     ) -> Result<AnyToolResult, FunctionCallError> {
-        self.dispatch_tool_call_with_code_mode_result_inner(
+        self.dispatch_tool_call_inner(
             session,
             turn,
-            cancellation_token,
-            tracker,
             call,
-            source,
             Some(terminal_outcome_reached),
         )
         .await
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn dispatch_tool_call_with_code_mode_result_inner(
+    async fn dispatch_tool_call_inner(
         &self,
         session: Arc<Session>,
         turn: Arc<TurnContext>,
-        cancellation_token: CancellationToken,
-        tracker: SharedTurnDiffTracker,
         call: ToolCall,
-        source: ToolCallSource,
         terminal_outcome_reached: Option<Arc<AtomicBool>>,
     ) -> Result<AnyToolResult, FunctionCallError> {
         let ToolCall {
@@ -203,11 +123,8 @@ impl ToolRouter {
         let invocation = ToolInvocation {
             session,
             turn,
-            cancellation_token,
-            tracker,
             call_id,
             tool_name,
-            source,
             payload,
         };
 
@@ -216,24 +133,3 @@ impl ToolRouter {
             .await
     }
 }
-
-pub(crate) fn extension_tool_executors(
-    session: &Session,
-) -> Vec<Arc<dyn ToolExecutor<ExtensionToolCall>>> {
-    session
-        .services
-        .extensions
-        .tool_contributors()
-        .iter()
-        .flat_map(|contributor| {
-            contributor.tools(
-                &session.services.session_extension_data,
-                &session.services.thread_extension_data,
-            )
-        })
-        .collect()
-}
-
-#[cfg(test)]
-#[path = "router_tests.rs"]
-mod tests;

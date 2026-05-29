@@ -8,10 +8,6 @@ use std::collections::HashMap;
 use std::time::Duration;
 use url::Url;
 
-/// High-level retry configuration for a provider.
-///
-/// This is converted into a `RetryPolicy` used by `codex-client` to drive
-/// transport-level retries for both unary and streaming calls.
 #[derive(Debug, Clone)]
 pub struct RetryConfig {
     pub max_attempts: u64,
@@ -35,10 +31,6 @@ impl RetryConfig {
     }
 }
 
-/// HTTP endpoint configuration used to talk to a concrete API deployment.
-///
-/// Encapsulates base URL, default headers, query params, retry policy, and
-/// stream idle timeout, plus helper methods for building requests.
 #[derive(Debug, Clone)]
 pub struct Provider {
     pub name: String,

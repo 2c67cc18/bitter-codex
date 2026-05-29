@@ -7,22 +7,13 @@ use codex_otel::Result;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
 
-// Ensures counters/histograms render with default + per-call tags.
 #[test]
 fn send_builds_payload_with_tags_and_histograms() -> Result<()> {
     let (metrics, exporter) =
         build_metrics_with_defaults(&[("service", "codex-cli"), ("env", "prod")])?;
 
-    metrics.counter(
-        "codex.turns",
-        /*inc*/ 1,
-        &[("model", "gpt-5.1"), ("env", "dev")],
-    )?;
-    metrics.histogram(
-        "codex.tool_latency",
-        /*value*/ 25,
-        &[("tool", "shell")],
-    )?;
+    metrics.counter("codex.turns", 1, &[("model", "gpt-5.1"), ("env", "dev")])?;
+    metrics.histogram("codex.tool_latency", 25, &[("tool", "shell")])?;
     metrics.shutdown()?;
 
     let resource_metrics = latest_metrics(&exporter);
@@ -81,7 +72,6 @@ fn send_builds_payload_with_tags_and_histograms() -> Result<()> {
     Ok(())
 }
 
-// Ensures defaults merge per line and overrides take precedence.
 #[test]
 fn send_merges_default_tags_per_line() -> Result<()> {
     let (metrics, exporter) = build_metrics_with_defaults(&[
@@ -90,14 +80,10 @@ fn send_merges_default_tags_per_line() -> Result<()> {
         ("region", "us"),
     ])?;
 
-    metrics.counter(
-        "codex.alpha",
-        /*inc*/ 1,
-        &[("env", "dev"), ("component", "alpha")],
-    )?;
+    metrics.counter("codex.alpha", 1, &[("env", "dev"), ("component", "alpha")])?;
     metrics.counter(
         "codex.beta",
-        /*inc*/ 2,
+        2,
         &[("service", "worker"), ("component", "beta")],
     )?;
     metrics.shutdown()?;
@@ -152,12 +138,11 @@ fn send_merges_default_tags_per_line() -> Result<()> {
     Ok(())
 }
 
-// Verifies enqueued metrics are delivered by the background worker.
 #[test]
 fn client_sends_enqueued_metric() -> Result<()> {
     let (metrics, exporter) = build_metrics_with_defaults(&[])?;
 
-    metrics.counter("codex.turns", /*inc*/ 1, &[("model", "gpt-5.1")])?;
+    metrics.counter("codex.turns", 1, &[("model", "gpt-5.1")])?;
     metrics.shutdown()?;
 
     let resource_metrics = latest_metrics(&exporter);
@@ -180,12 +165,11 @@ fn client_sends_enqueued_metric() -> Result<()> {
     Ok(())
 }
 
-// Ensures shutdown flushes successfully with in-memory exporters.
 #[test]
 fn shutdown_flushes_in_memory_exporter() -> Result<()> {
     let (metrics, exporter) = build_metrics_with_defaults(&[])?;
 
-    metrics.counter("codex.turns", /*inc*/ 1, &[])?;
+    metrics.counter("codex.turns", 1, &[])?;
     metrics.shutdown()?;
 
     let resource_metrics = latest_metrics(&exporter);
@@ -204,7 +188,6 @@ fn shutdown_flushes_in_memory_exporter() -> Result<()> {
     Ok(())
 }
 
-// Ensures shutting down without recording metrics does not export anything.
 #[test]
 fn shutdown_without_metrics_exports_nothing() -> Result<()> {
     let (metrics, exporter) = build_metrics_with_defaults(&[])?;

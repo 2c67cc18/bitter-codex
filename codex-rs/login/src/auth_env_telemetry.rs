@@ -63,9 +63,6 @@ mod tests {
             base_url: None,
             env_key: Some("sk-should-not-leak".to_string()),
             env_key_instructions: None,
-            experimental_bearer_token: None,
-            auth: None,
-            aws: None,
             wire_api: WireApi::Responses,
             query_params: None,
             http_headers: None,
@@ -78,8 +75,7 @@ mod tests {
             supports_websockets: false,
         };
 
-        let telemetry =
-            collect_auth_env_telemetry(&provider, /*codex_api_key_env_enabled*/ false);
+        let telemetry = collect_auth_env_telemetry(&provider, false);
 
         assert_eq!(
             telemetry.provider_env_key_name,

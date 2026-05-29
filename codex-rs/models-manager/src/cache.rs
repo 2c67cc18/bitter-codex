@@ -11,7 +11,6 @@ use tokio::fs;
 use tracing::error;
 use tracing::info;
 
-/// Manages loading and saving of models cache to disk.
 #[derive(Debug)]
 pub(crate) struct ModelsCacheManager {
     cache_path: PathBuf,
@@ -19,7 +18,6 @@ pub(crate) struct ModelsCacheManager {
 }
 
 impl ModelsCacheManager {
-    /// Create a new cache manager with the given path and TTL.
     pub(crate) fn new(cache_path: PathBuf, cache_ttl: Duration) -> Self {
         Self {
             cache_path,
@@ -27,7 +25,6 @@ impl ModelsCacheManager {
         }
     }
 
-    /// Attempt to load a fresh cache entry. Returns `None` if the cache doesn't exist or is stale.
     pub(crate) async fn load_fresh(&self, expected_version: &str) -> Option<ModelsCache> {
         info!(
                 cache_path = %self.cache_path.display(),
@@ -73,7 +70,6 @@ impl ModelsCacheManager {
         Some(cache)
     }
 
-    /// Persist the cache to disk, creating parent directories as needed.
     pub(crate) async fn persist_cache(
         &self,
         models: &[ModelInfo],
@@ -91,7 +87,6 @@ impl ModelsCacheManager {
         }
     }
 
-    /// Renew the cache TTL by updating the fetched_at timestamp to now.
     pub(crate) async fn renew_cache_ttl(&self) -> io::Result<()> {
         let mut cache = match self.load().await? {
             Some(cache) => cache,
@@ -123,13 +118,13 @@ impl ModelsCacheManager {
     }
 
     #[cfg(test)]
-    /// Set the cache TTL.
+
     pub(crate) fn set_ttl(&mut self, ttl: Duration) {
         self.cache_ttl = ttl;
     }
 
     #[cfg(test)]
-    /// Manipulate cache file for testing. Allows setting a custom fetched_at timestamp.
+
     pub(crate) async fn manipulate_cache_for_test<F>(&self, f: F) -> io::Result<()>
     where
         F: FnOnce(&mut DateTime<Utc>),
@@ -143,7 +138,7 @@ impl ModelsCacheManager {
     }
 
     #[cfg(test)]
-    /// Mutate the full cache contents for testing.
+
     pub(crate) async fn mutate_cache_for_test<F>(&self, f: F) -> io::Result<()>
     where
         F: FnOnce(&mut ModelsCache),
@@ -157,7 +152,6 @@ impl ModelsCacheManager {
     }
 }
 
-/// Serialized snapshot of models and metadata cached on disk.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ModelsCache {
     pub(crate) fetched_at: DateTime<Utc>,
@@ -169,7 +163,6 @@ pub(crate) struct ModelsCache {
 }
 
 impl ModelsCache {
-    /// Returns `true` when the cache entry has not exceeded the configured TTL.
     fn is_fresh(&self, ttl: Duration) -> bool {
         if ttl.is_zero() {
             return false;

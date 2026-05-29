@@ -8,8 +8,6 @@ use sha1::Sha1;
 use tokio::sync::Mutex;
 use tokio::sync::MutexGuard;
 
-/// A minimal LRU cache protected by a Tokio mutex.
-/// Calls outside a Tokio runtime are no-ops.
 pub struct BlockingLruCache<K, V> {
     inner: Mutex<LruCache<K, V>>,
 }
@@ -18,7 +16,6 @@ impl<K, V> BlockingLruCache<K, V>
 where
     K: Eq + Hash,
 {
-    /// Creates a cache with the provided non-zero capacity.
     #[must_use]
     pub fn new(capacity: NonZeroUsize) -> Self {
         Self {
@@ -26,7 +23,6 @@ where
         }
     }
 
-    /// Returns a clone of the cached value for `key`, or computes and inserts it.
     pub fn get_or_insert_with(&self, key: K, value: impl FnOnce() -> V) -> V
     where
         V: Clone,
@@ -36,14 +32,13 @@ where
                 return v.clone();
             }
             let v = value();
-            // Insert and return a clone to keep ownership in the cache.
+
             guard.put(key, v.clone());
             return v;
         }
         value()
     }
 
-    /// Like `get_or_insert_with`, but the value factory may fail.
     pub fn get_or_try_insert_with<E>(
         &self,
         key: K,
@@ -63,13 +58,11 @@ where
         value()
     }
 
-    /// Builds a cache if `capacity` is non-zero, returning `None` otherwise.
     #[must_use]
     pub fn try_with_capacity(capacity: usize) -> Option<Self> {
         NonZeroUsize::new(capacity).map(Self::new)
     }
 
-    /// Returns a clone of the cached value corresponding to `key`, if present.
     pub fn get<Q>(&self, key: &Q) -> Option<V>
     where
         K: Borrow<Q>,
@@ -80,13 +73,11 @@ where
         guard.get(key).cloned()
     }
 
-    /// Inserts `value` for `key`, returning the previous entry if it existed.
     pub fn insert(&self, key: K, value: V) -> Option<V> {
         let mut guard = lock_if_runtime(&self.inner)?;
         guard.put(key, value)
     }
 
-    /// Removes the entry for `key` if it exists, returning it.
     pub fn remove<Q>(&self, key: &Q) -> Option<V>
     where
         K: Borrow<Q>,
@@ -96,14 +87,12 @@ where
         guard.pop(key)
     }
 
-    /// Clears all entries from the cache.
     pub fn clear(&self) {
         if let Some(mut guard) = lock_if_runtime(&self.inner) {
             guard.clear();
         }
     }
 
-    /// Executes `callback` with a mutable reference to the underlying cache.
     pub fn with_mut<R>(&self, callback: impl FnOnce(&mut LruCache<K, V>) -> R) -> R {
         if let Some(mut guard) = lock_if_runtime(&self.inner) {
             callback(&mut guard)
@@ -113,7 +102,6 @@ where
         }
     }
 
-    /// Provides direct access to the cache guard when a Tokio runtime is available.
     pub fn blocking_lock(&self) -> Option<MutexGuard<'_, LruCache<K, V>>> {
         lock_if_runtime(&self.inner)
     }
@@ -127,10 +115,6 @@ where
     Some(tokio::task::block_in_place(|| m.blocking_lock()))
 }
 
-/// Computes the SHA-1 digest of `bytes`.
-///
-/// Useful for content-based cache keys when you want to avoid staleness
-/// caused by path-only keys.
 #[must_use]
 pub fn sha1_digest(bytes: &[u8]) -> [u8; 20] {
     let mut hasher = Sha1::new();
@@ -151,18 +135,18 @@ mod tests {
         let cache = BlockingLruCache::new(NonZeroUsize::new(2).expect("capacity"));
 
         assert!(cache.get(&"first").is_none());
-        cache.insert("first", /*value*/ 1);
+        cache.insert("first", 1);
         assert_eq!(cache.get(&"first"), Some(1));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn evicts_least_recently_used() {
         let cache = BlockingLruCache::new(NonZeroUsize::new(2).expect("capacity"));
-        cache.insert("a", /*value*/ 1);
-        cache.insert("b", /*value*/ 2);
+        cache.insert("a", 1);
+        cache.insert("b", 2);
         assert_eq!(cache.get(&"a"), Some(1));
 
-        cache.insert("c", /*value*/ 3);
+        cache.insert("c", 3);
 
         assert!(cache.get(&"b").is_none());
         assert_eq!(cache.get(&"a"), Some(1));
@@ -172,7 +156,7 @@ mod tests {
     #[test]
     fn disabled_without_runtime() {
         let cache = BlockingLruCache::new(NonZeroUsize::new(2).expect("capacity"));
-        cache.insert("first", /*value*/ 1);
+        cache.insert("first", 1);
         assert!(cache.get(&"first").is_none());
 
         assert_eq!(cache.get_or_insert_with("first", || 2), 2);

@@ -6,7 +6,6 @@ use codex_otel::Result;
 use pretty_assertions::assert_eq;
 use std::time::Duration;
 
-// Ensures duration recording maps to histogram output.
 #[test]
 fn record_duration_records_histogram() -> Result<()> {
     let (metrics, exporter) = build_metrics_with_defaults(&[])?;
@@ -33,7 +32,6 @@ fn record_duration_records_histogram() -> Result<()> {
     Ok(())
 }
 
-// Ensures time_result returns the closure output and records timing.
 #[test]
 fn timer_result_records_success() -> Result<()> {
     let (metrics, exporter) = build_metrics_with_defaults(&[])?;

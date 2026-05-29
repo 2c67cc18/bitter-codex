@@ -1,5 +1,3 @@
-//! Strict config validation built on top of serde's ignored-field tracking.
-
 use crate::diagnostics::ConfigDiagnosticSource;
 use crate::diagnostics::ConfigError;
 use crate::diagnostics::config_error_from_toml_for_source;
@@ -32,19 +30,6 @@ pub(crate) fn config_error_from_ignored_toml_value_fields<T: DeserializeOwned>(
 ) -> Option<ConfigError> {
     config_error_from_ignored_toml_value_fields_for_source::<T>(
         ConfigDiagnosticSource::Path(path.as_ref()),
-        contents,
-        value,
-    )
-}
-
-#[cfg(any(target_os = "macos", test))]
-pub(crate) fn config_error_from_ignored_toml_value_fields_for_source_name<T: DeserializeOwned>(
-    source_name: &str,
-    contents: &str,
-    value: TomlValue,
-) -> Option<ConfigError> {
-    config_error_from_ignored_toml_value_fields_for_source::<T>(
-        ConfigDiagnosticSource::DisplayName(source_name),
         contents,
         value,
     )
@@ -134,16 +119,6 @@ fn unknown_feature_toml_value_path(value: &TomlValue) -> Vec<Vec<String>> {
 
     let mut paths = Vec::new();
     push_unknown_feature_paths(&mut paths, &["features"], root.get("features"));
-
-    if let Some(profiles) = root.get("profiles").and_then(TomlValue::as_table) {
-        for (profile_name, profile) in profiles {
-            let prefix = ["profiles", profile_name.as_str(), "features"];
-            let features = profile
-                .as_table()
-                .and_then(|profile| profile.get("features"));
-            push_unknown_feature_paths(&mut paths, &prefix, features);
-        }
-    }
 
     paths
 }

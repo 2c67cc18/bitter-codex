@@ -4,7 +4,6 @@ use std::collections::HashSet;
 use codex_install_context::InstallContext;
 use codex_protocol::ThreadId;
 use codex_rollout::RolloutConfig;
-use codex_rollout::find_thread_names_by_ids;
 use codex_rollout::first_rollout_content_match_snippet;
 use codex_rollout::parse_cursor;
 use codex_rollout::search_rollout_paths;
@@ -61,7 +60,6 @@ pub(super) async fn search_threads(
         sqlite_home: store.config.sqlite_home.clone(),
         cwd: store.config.codex_home.clone(),
         model_provider_id: store.config.default_model_provider_id.clone(),
-        generate_memories: false,
     };
     let rg_command = InstallContext::current().rg_command();
     let matching_paths = search_rollout_paths(
@@ -199,14 +197,6 @@ async fn set_thread_search_result_names(
             if let Some(title) = distinct_thread_metadata_title(&metadata) {
                 names.insert(thread_id, title);
             }
-        }
-    }
-    if names.len() < thread_ids.len()
-        && let Ok(legacy_names) =
-            find_thread_names_by_ids(store.config.codex_home.as_path(), &thread_ids).await
-    {
-        for (thread_id, title) in legacy_names {
-            names.entry(thread_id).or_insert(title);
         }
     }
     for item in items {

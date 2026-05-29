@@ -1,14 +1,11 @@
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use ts_rs::TS;
 
 use crate::auth::KnownPlan;
 use crate::auth::PlanType as AuthPlanType;
 
-#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, JsonSchema, TS, Default)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
-#[ts(rename_all = "lowercase")]
 pub enum PlanType {
     #[default]
     Free,
@@ -18,11 +15,9 @@ pub enum PlanType {
     ProLite,
     Team,
     #[serde(rename = "self_serve_business_usage_based")]
-    #[ts(rename = "self_serve_business_usage_based")]
     SelfServeBusinessUsageBased,
     Business,
     #[serde(rename = "enterprise_cbp_usage_based")]
-    #[ts(rename = "enterprise_cbp_usage_based")]
     EnterpriseCbpUsageBased,
     Enterprise,
     Edu,
@@ -30,12 +25,10 @@ pub enum PlanType {
     Unknown,
 }
 
-/// Account state returned by a model provider before it is adapted to an app-facing wire type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderAccount {
     ApiKey,
     Chatgpt { email: String, plan_type: PlanType },
-    AmazonBedrock,
 }
 
 impl PlanType {

@@ -12,20 +12,9 @@ use tokio::task::JoinHandle;
 use tokio::time::Duration;
 use tokio_util::sync::CancellationToken;
 
-use crate::exec::is_likely_sandbox_denied;
-use codex_exec_server::ExecProcess;
-use codex_exec_server::ReadResponse as ExecReadResponse;
-use codex_exec_server::StartedExecProcess;
-use codex_exec_server::WriteStatus;
-use codex_protocol::exec_output::ExecToolCallOutput;
-use codex_protocol::exec_output::StreamOutput;
-use codex_protocol::protocol::TruncationPolicy;
-use codex_sandboxing::SandboxType;
-use codex_utils_output_truncation::formatted_truncate_text;
 use codex_utils_pty::ExecCommandSession;
 use codex_utils_pty::SpawnedPty;
 
-use super::UNIFIED_EXEC_OUTPUT_MAX_TOKENS;
 use super::UnifiedExecError;
 use super::head_tail_buffer::HeadTailBuffer;
 use super::process_state::ProcessState;
@@ -33,11 +22,6 @@ use super::process_state::ProcessState;
 const EARLY_EXIT_GRACE_PERIOD: Duration = Duration::from_millis(150);
 
 pub(crate) trait SpawnLifecycle: std::fmt::Debug + Send + Sync {
-    /// Returns file descriptors that must stay open across the child `exec()`.
-    ///
-    /// The returned descriptors must already be valid in the parent process and
-    /// stay valid until `after_spawn()` runs, which is the first point where
-    /// the parent may release its copies.
     fn inherited_fds(&self) -> Vec<i32> {
         Vec::new()
     }
@@ -48,13 +32,13 @@ pub(crate) trait SpawnLifecycle: std::fmt::Debug + Send + Sync {
 pub(crate) type SpawnLifecycleHandle = Box<dyn SpawnLifecycle>;
 
 #[derive(Debug, Default)]
-/// Spawn lifecycle that performs no extra setup around process launch.
+
 pub(crate) struct NoopSpawnLifecycle;
 
 impl SpawnLifecycle for NoopSpawnLifecycle {}
 
 pub(crate) type OutputBuffer = Arc<Mutex<HeadTailBuffer>>;
-/// Shared output state exposed to polling and streaming consumers.
+
 pub(crate) struct OutputHandles {
     pub(crate) output_buffer: OutputBuffer,
     pub(crate) output_notify: Arc<Notify>,
@@ -63,16 +47,8 @@ pub(crate) struct OutputHandles {
     pub(crate) cancellation_token: CancellationToken,
 }
 
-/// Transport-specific process handle used by unified exec.
-enum ProcessHandle {
-    Local(Box<ExecCommandSession>),
-    ExecServer(Arc<dyn ExecProcess>),
-}
-
-/// Unified wrapper over directly spawned PTY sessions and exec-server-backed
-/// processes.
 pub(crate) struct UnifiedExecProcess {
-    process_handle: ProcessHandle,
+    process_handle: Box<ExecCommandSession>,
     output_tx: broadcast::Sender<Vec<u8>>,
     output_buffer: OutputBuffer,
     output_notify: Arc<Notify>,
@@ -83,7 +59,6 @@ pub(crate) struct UnifiedExecProcess {
     state_tx: watch::Sender<ProcessState>,
     state_rx: watch::Receiver<ProcessState>,
     output_task: Option<JoinHandle<()>>,
-    sandbox_type: SandboxType,
     _spawn_lifecycle: Option<SpawnLifecycleHandle>,
 }
 
@@ -92,15 +67,13 @@ impl std::fmt::Debug for UnifiedExecProcess {
         f.debug_struct("UnifiedExecProcess")
             .field("has_exited", &self.has_exited())
             .field("exit_code", &self.exit_code())
-            .field("sandbox_type", &self.sandbox_type)
             .finish_non_exhaustive()
     }
 }
 
 impl UnifiedExecProcess {
     fn new(
-        process_handle: ProcessHandle,
-        sandbox_type: SandboxType,
+        process_handle: Box<ExecCommandSession>,
         spawn_lifecycle: Option<SpawnLifecycleHandle>,
     ) -> Self {
         let output_buffer = Arc::new(Mutex::new(HeadTailBuffer::default()));
@@ -124,34 +97,16 @@ impl UnifiedExecProcess {
             state_tx,
             state_rx,
             output_task: None,
-            sandbox_type,
             _spawn_lifecycle: spawn_lifecycle,
         }
     }
 
     pub(super) async fn write(&self, data: &[u8]) -> Result<(), UnifiedExecError> {
-        match &self.process_handle {
-            ProcessHandle::Local(process_handle) => process_handle
-                .writer_sender()
-                .send(data.to_vec())
-                .await
-                .map_err(|_| UnifiedExecError::WriteToStdin),
-            ProcessHandle::ExecServer(process_handle) => {
-                match process_handle.write(data.to_vec()).await {
-                    Ok(response) => match response.status {
-                        WriteStatus::Accepted => Ok(()),
-                        WriteStatus::UnknownProcess | WriteStatus::StdinClosed => {
-                            let state = self.state_rx.borrow().clone();
-                            let _ = self.state_tx.send_replace(state.exited(state.exit_code));
-                            self.cancellation_token.cancel();
-                            Err(UnifiedExecError::WriteToStdin)
-                        }
-                        WriteStatus::Starting => Err(UnifiedExecError::WriteToStdin),
-                    },
-                    Err(err) => Err(UnifiedExecError::process_failed(err.to_string())),
-                }
-            }
-        }
+        self.process_handle
+            .writer_sender()
+            .send(data.to_vec())
+            .await
+            .map_err(|_| UnifiedExecError::WriteToStdin)
     }
 
     pub(super) fn output_handles(&self) -> OutputHandles {
@@ -178,111 +133,30 @@ impl UnifiedExecProcess {
 
     pub(super) fn has_exited(&self) -> bool {
         let state = self.state_rx.borrow().clone();
-        match &self.process_handle {
-            ProcessHandle::Local(process_handle) => state.has_exited || process_handle.has_exited(),
-            ProcessHandle::ExecServer(_) => state.has_exited,
-        }
+        state.has_exited || self.process_handle.has_exited()
     }
 
     pub(super) fn exit_code(&self) -> Option<i32> {
         let state = self.state_rx.borrow().clone();
-        match &self.process_handle {
-            ProcessHandle::Local(process_handle) => {
-                state.exit_code.or_else(|| process_handle.exit_code())
-            }
-            ProcessHandle::ExecServer(_) => state.exit_code,
-        }
+        state.exit_code.or_else(|| self.process_handle.exit_code())
     }
 
     pub(super) fn terminate(&self) {
         self.output_closed.store(true, Ordering::Release);
         self.output_closed_notify.notify_waiters();
-        match &self.process_handle {
-            ProcessHandle::Local(process_handle) => process_handle.terminate(),
-            ProcessHandle::ExecServer(process_handle) => {
-                let process_handle = Arc::clone(process_handle);
-                tokio::spawn(async move {
-                    let _ = process_handle.terminate().await;
-                });
-            }
-        }
+        self.process_handle.terminate();
         self.cancellation_token.cancel();
         if let Some(output_task) = &self.output_task {
             output_task.abort();
         }
     }
 
-    pub(super) fn fail_and_terminate(&self, message: String) {
-        let state = self.state_rx.borrow().clone();
-        if state.failure_message.is_none() {
-            let _ = self.state_tx.send_replace(state.failed(message));
-        }
-        self.terminate();
-    }
-
-    async fn snapshot_output(&self) -> Vec<Vec<u8>> {
-        let guard = self.output_buffer.lock().await;
-        guard.snapshot_chunks()
-    }
-
-    pub(crate) fn sandbox_type(&self) -> SandboxType {
-        self.sandbox_type
-    }
 
     pub(super) fn failure_message(&self) -> Option<String> {
         self.state_rx.borrow().failure_message.clone()
     }
-
-    pub(super) async fn check_for_sandbox_denial(&self) -> Result<(), UnifiedExecError> {
-        let _ =
-            tokio::time::timeout(Duration::from_millis(20), self.output_notify.notified()).await;
-
-        let collected_chunks = self.snapshot_output().await;
-        let mut aggregated: Vec<u8> = Vec::new();
-        for chunk in collected_chunks {
-            aggregated.extend_from_slice(&chunk);
-        }
-        let aggregated_text = String::from_utf8_lossy(&aggregated).to_string();
-        self.check_for_sandbox_denial_with_text(&aggregated_text)
-            .await?;
-
-        Ok(())
-    }
-
-    pub(super) async fn check_for_sandbox_denial_with_text(
-        &self,
-        text: &str,
-    ) -> Result<(), UnifiedExecError> {
-        let sandbox_type = self.sandbox_type();
-        if sandbox_type == SandboxType::None || !self.has_exited() {
-            return Ok(());
-        }
-
-        let exit_code = self.exit_code().unwrap_or(-1);
-        let exec_output = ExecToolCallOutput {
-            exit_code,
-            stderr: StreamOutput::new(text.to_string()),
-            aggregated_output: StreamOutput::new(text.to_string()),
-            ..Default::default()
-        };
-        if is_likely_sandbox_denied(sandbox_type, &exec_output) {
-            let snippet = formatted_truncate_text(
-                text,
-                TruncationPolicy::Tokens(UNIFIED_EXEC_OUTPUT_MAX_TOKENS),
-            );
-            let message = if snippet.is_empty() {
-                format!("Process exited with code {exit_code}")
-            } else {
-                snippet
-            };
-            return Err(UnifiedExecError::sandbox_denied(message, exec_output));
-        }
-        Ok(())
-    }
-
     pub(super) async fn from_spawned(
         spawned: SpawnedPty,
-        sandbox_type: SandboxType,
         spawn_lifecycle: SpawnLifecycleHandle,
     ) -> Result<Self, UnifiedExecError> {
         let SpawnedPty {
@@ -292,11 +166,7 @@ impl UnifiedExecProcess {
             mut exit_rx,
         } = spawned;
         let output_rx = codex_utils_pty::combine_output_receivers(stdout_rx, stderr_rx);
-        let mut managed = Self::new(
-            ProcessHandle::Local(Box::new(process_handle)),
-            sandbox_type,
-            Some(spawn_lifecycle),
-        );
+        let mut managed = Self::new(Box::new(process_handle), Some(spawn_lifecycle));
         managed.output_task = Some(Self::spawn_local_output_task(
             output_rx,
             Arc::clone(&managed.output_buffer),
@@ -309,12 +179,10 @@ impl UnifiedExecProcess {
         match exit_rx.try_recv() {
             Ok(exit_code) => {
                 managed.signal_exit(Some(exit_code));
-                managed.check_for_sandbox_denial().await?;
                 return Ok(managed);
             }
             Err(TryRecvError::Closed) => {
-                managed.signal_exit(/*exit_code*/ None);
-                managed.check_for_sandbox_denial().await?;
+                managed.signal_exit(None);
                 return Ok(managed);
             }
             Err(TryRecvError::Empty) => {}
@@ -322,7 +190,6 @@ impl UnifiedExecProcess {
 
         if let Ok(exit_result) = tokio::time::timeout(EARLY_EXIT_GRACE_PERIOD, &mut exit_rx).await {
             managed.signal_exit(exit_result.ok());
-            managed.check_for_sandbox_denial().await?;
             return Ok(managed);
         }
 
@@ -338,130 +205,6 @@ impl UnifiedExecProcess {
         });
 
         Ok(managed)
-    }
-
-    pub(super) async fn from_exec_server_started(
-        started: StartedExecProcess,
-        sandbox_type: SandboxType,
-    ) -> Result<Self, UnifiedExecError> {
-        let process_handle = ProcessHandle::ExecServer(Arc::clone(&started.process));
-        let mut managed = Self::new(process_handle, sandbox_type, /*spawn_lifecycle*/ None);
-        let output_handles = managed.output_handles();
-        managed.output_task = Some(Self::spawn_exec_server_output_task(
-            started,
-            output_handles,
-            managed.output_tx.clone(),
-            managed.state_tx.clone(),
-        ));
-
-        let mut state_rx = managed.state_rx.clone();
-        if tokio::time::timeout(EARLY_EXIT_GRACE_PERIOD, async {
-            loop {
-                let state = state_rx.borrow().clone();
-                if state.has_exited || state.failure_message.is_some() {
-                    break;
-                }
-                if state_rx.changed().await.is_err() {
-                    break;
-                }
-            }
-        })
-        .await
-        .is_ok()
-        {
-            managed.check_for_sandbox_denial().await?;
-        }
-
-        Ok(managed)
-    }
-
-    fn spawn_exec_server_output_task(
-        started: StartedExecProcess,
-        output_handles: OutputHandles,
-        output_tx: broadcast::Sender<Vec<u8>>,
-        state_tx: watch::Sender<ProcessState>,
-    ) -> JoinHandle<()> {
-        let OutputHandles {
-            output_buffer,
-            output_notify,
-            output_closed,
-            output_closed_notify,
-            cancellation_token,
-        } = output_handles;
-        let process = started.process;
-        let mut wake_rx = process.subscribe_wake();
-        tokio::spawn(async move {
-            let mut after_seq = None;
-            loop {
-                match process
-                    .read(after_seq, /*max_bytes*/ None, /*wait_ms*/ Some(0))
-                    .await
-                {
-                    Ok(response) => {
-                        let ExecReadResponse {
-                            chunks,
-                            next_seq,
-                            exited,
-                            exit_code,
-                            closed,
-                            failure,
-                        } = response;
-
-                        for chunk in chunks {
-                            let bytes = chunk.chunk.into_inner();
-                            let mut guard = output_buffer.lock().await;
-                            guard.push_chunk(bytes.clone());
-                            drop(guard);
-                            let _ = output_tx.send(bytes);
-                            output_notify.notify_waiters();
-                        }
-
-                        if let Some(message) = failure {
-                            let state = state_tx.borrow().clone();
-                            let _ = state_tx.send_replace(state.failed(message));
-                            output_closed.store(true, Ordering::Release);
-                            output_closed_notify.notify_waiters();
-                            cancellation_token.cancel();
-                            break;
-                        }
-
-                        if exited {
-                            let state = state_tx.borrow().clone();
-                            let _ = state_tx.send_replace(state.exited(exit_code));
-                        }
-
-                        if closed {
-                            output_closed.store(true, Ordering::Release);
-                            output_closed_notify.notify_waiters();
-                            cancellation_token.cancel();
-                        }
-
-                        after_seq = next_seq.checked_sub(1);
-                        if output_closed.load(Ordering::Acquire) {
-                            break;
-                        }
-                    }
-                    Err(err) => {
-                        let state = state_tx.borrow().clone();
-                        let _ = state_tx.send_replace(state.failed(err.to_string()));
-                        output_closed.store(true, Ordering::Release);
-                        output_closed_notify.notify_waiters();
-                        cancellation_token.cancel();
-                        break;
-                    }
-                }
-
-                if wake_rx.changed().await.is_err() {
-                    let state = state_tx.borrow().clone();
-                    let _ = state_tx
-                        .send_replace(state.failed("exec-server wake channel closed".to_string()));
-                    output_closed.store(true, Ordering::Release);
-                    output_closed_notify.notify_waiters();
-                    cancellation_token.cancel();
-                    break;
-                }
-            }
-        })
     }
 
     fn spawn_local_output_task(

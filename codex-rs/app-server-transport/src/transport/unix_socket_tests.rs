@@ -221,13 +221,6 @@ async fn connect_to_socket(socket_path: &Path) -> IoResult<UnixStream> {
     UnixStream::connect(socket_path).await
 }
 
-#[cfg(unix)]
 fn assert_socket_path_removed(socket_path: &Path) {
     assert!(!socket_path.exists());
-}
-
-#[cfg(windows)]
-fn assert_socket_path_removed(_socket_path: &Path) {
-    // uds_windows uses a regular filesystem path as its rendezvous point,
-    // but there is no Unix socket filesystem node to assert on.
 }

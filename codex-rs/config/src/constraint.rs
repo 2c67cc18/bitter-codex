@@ -1,29 +1,19 @@
 use std::fmt;
 use std::sync::Arc;
 
-use crate::config_requirements::RequirementSource;
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ConstraintError {
-    #[error(
-        "invalid value for `{field_name}`: `{candidate}` is not in the allowed set {allowed} (set by {requirement_source})"
-    )]
+    #[error("invalid value for `{field_name}`: `{candidate}` is not in the allowed set {allowed}")]
     InvalidValue {
         field_name: &'static str,
         candidate: String,
         allowed: String,
-        requirement_source: RequirementSource,
     },
 
     #[error("field `{field_name}` cannot be empty")]
     EmptyField { field_name: String },
-
-    #[error("invalid rules in requirements (set by {requirement_source}): {reason}")]
-    ExecPolicyParse {
-        requirement_source: RequirementSource,
-        reason: String,
-    },
 }
 
 impl ConstraintError {
@@ -43,8 +33,7 @@ impl From<ConstraintError> for std::io::Error {
 }
 
 type ConstraintValidator<T> = dyn Fn(&T) -> ConstraintResult<()> + Send + Sync;
-/// A ConstraintNormalizer is a function which transforms a value into another of the same type.
-/// `Constrained` uses normalizers to transform values to satisfy constraints or enforce values.
+
 type ConstraintNormalizer<T> = dyn Fn(T) -> T + Send + Sync;
 
 #[derive(Clone)]
@@ -68,7 +57,6 @@ impl<T: Send + Sync> Constrained<T> {
         })
     }
 
-    /// normalized creates a `Constrained` value with a normalizer function and a validator that allows any value.
     pub fn normalized(
         initial_value: T,
         normalizer: impl Fn(T) -> T + Send + Sync + 'static,
@@ -107,7 +95,6 @@ impl<T: Send + Sync> Constrained<T> {
                         field_name: "<unknown>",
                         candidate: format!("{candidate:?}"),
                         allowed: format!("[{allowed_value:?}]"),
-                        requirement_source: RequirementSource::Unknown,
                     })
                 }
             }),
@@ -115,7 +102,6 @@ impl<T: Send + Sync> Constrained<T> {
         }
     }
 
-    /// Allow any value of T, using T's Default as the initial value.
     pub fn allow_any_from_default() -> Self
     where
         T: Default,
@@ -138,9 +124,6 @@ impl<T: Send + Sync> Constrained<T> {
         (self.validator)(candidate)
     }
 
-    /// Composes an additional validator onto the current constraint.
-    ///
-    /// The existing value must satisfy the combined validator before it is installed.
     pub fn add_validator(
         &mut self,
         validator: impl Fn(&T) -> ConstraintResult<()> + Send + Sync + 'static,
@@ -203,16 +186,13 @@ mod tests {
             field_name: "<unknown>",
             candidate: candidate.into(),
             allowed: allowed.into(),
-            requirement_source: RequirementSource::Unknown,
         }
     }
 
     #[test]
     fn constrained_allow_any_accepts_any_value() {
-        let mut constrained = Constrained::allow_any(/*initial_value*/ 5);
-        constrained
-            .set(/*value*/ -10)
-            .expect("allow any accepts all values");
+        let mut constrained = Constrained::allow_any(5);
+        constrained.set(-10).expect("allow any accepts all values");
         assert_eq!(constrained.value(), -10);
     }
 
@@ -224,13 +204,13 @@ mod tests {
 
     #[test]
     fn constrained_allow_only_rejects_different_values() {
-        let mut constrained = Constrained::allow_only(/*only_value*/ 5);
+        let mut constrained = Constrained::allow_only(5);
         constrained
-            .set(/*value*/ 5)
+            .set(5)
             .expect("allowed value should be accepted");
 
         let err = constrained
-            .set(/*value*/ 6)
+            .set(6)
             .expect_err("different value should be rejected");
         assert_eq!(err, invalid_value("6", "[5]"));
         assert_eq!(constrained.value(), 5);
@@ -238,19 +218,18 @@ mod tests {
 
     #[test]
     fn constrained_normalizer_applies_on_init_and_set() -> anyhow::Result<()> {
-        let mut constrained =
-            Constrained::normalized(/*initial_value*/ -1, |value| value.max(0))?;
+        let mut constrained = Constrained::normalized(-1, |value| value.max(0))?;
         assert_eq!(constrained.value(), 0);
-        constrained.set(/*value*/ -5)?;
+        constrained.set(-5)?;
         assert_eq!(constrained.value(), 0);
-        constrained.set(/*value*/ 10)?;
+        constrained.set(10)?;
         assert_eq!(constrained.value(), 10);
         Ok(())
     }
 
     #[test]
     fn constrained_add_validator_composes_with_existing_validator() -> anyhow::Result<()> {
-        let mut constrained = Constrained::new(/*initial_value*/ 5, |value: &i32| {
+        let mut constrained = Constrained::new(5, |value: &i32| {
             if *value >= 0 {
                 Ok(())
             } else {
@@ -280,7 +259,7 @@ mod tests {
 
     #[test]
     fn constrained_new_rejects_invalid_initial_value() {
-        let result = Constrained::new(/*initial_value*/ 0, |value| {
+        let result = Constrained::new(0, |value| {
             if *value > 0 {
                 Ok(())
             } else {
@@ -293,7 +272,7 @@ mod tests {
 
     #[test]
     fn constrained_set_rejects_invalid_value_and_leaves_previous() {
-        let mut constrained = Constrained::new(/*initial_value*/ 1, |value| {
+        let mut constrained = Constrained::new(1, |value| {
             if *value > 0 {
                 Ok(())
             } else {
@@ -303,7 +282,7 @@ mod tests {
         .expect("initial value should be accepted");
 
         let err = constrained
-            .set(/*value*/ -5)
+            .set(-5)
             .expect_err("negative values should be rejected");
         assert_eq!(err, invalid_value("-5", "positive values"));
         assert_eq!(constrained.value(), 1);
@@ -311,7 +290,7 @@ mod tests {
 
     #[test]
     fn constrained_can_set_allows_probe_without_setting() {
-        let constrained = Constrained::new(/*initial_value*/ 1, |value| {
+        let constrained = Constrained::new(1, |value| {
             if *value > 0 {
                 Ok(())
             } else {

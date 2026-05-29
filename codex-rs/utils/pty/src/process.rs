@@ -70,11 +70,8 @@ impl fmt::Debug for PtyHandles {
     }
 }
 
-/// Callback used by driver-backed sessions to resize a PTY-like backend when
-/// there is no local `PtyHandles` instance to resize directly.
 type ResizeFn = Box<dyn FnMut(TerminalSize) -> anyhow::Result<()> + Send>;
 
-/// Handle for driving an interactive process (PTY or pipe).
 pub struct ProcessHandle {
     writer_tx: StdMutex<Option<mpsc::Sender<Vec<u8>>>>,
     killer: StdMutex<Option<Box<dyn ChildTerminator>>>,
@@ -84,11 +81,9 @@ pub struct ProcessHandle {
     wait_handle: StdMutex<Option<JoinHandle<()>>>,
     exit_status: Arc<AtomicBool>,
     exit_code: Arc<StdMutex<Option<i32>>>,
-    // PtyHandles must be preserved because the process will receive Control+C if the
-    // slave is closed
+
     _pty_handles: StdMutex<Option<PtyHandles>>,
-    // Optional resize hook for driver-backed sessions that proxy PTY control to
-    // another backend instead of owning local PTY handles.
+
     resizer: StdMutex<Option<ResizeFn>>,
 }
 
@@ -126,7 +121,6 @@ impl ProcessHandle {
         }
     }
 
-    /// Returns a channel sender for writing raw bytes to the child stdin.
     pub fn writer_sender(&self) -> mpsc::Sender<Vec<u8>> {
         if let Ok(writer_tx) = self.writer_tx.lock()
             && let Some(writer_tx) = writer_tx.as_ref()
@@ -139,17 +133,14 @@ impl ProcessHandle {
         writer_tx
     }
 
-    /// True if the child process has exited.
     pub fn has_exited(&self) -> bool {
         self.exit_status.load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    /// Returns the exit code if known.
     pub fn exit_code(&self) -> Option<i32> {
         self.exit_code.lock().ok().and_then(|guard| *guard)
     }
 
-    /// Resize the PTY in character cells.
     pub fn resize(&self, size: TerminalSize) -> anyhow::Result<()> {
         {
             let handles = self
@@ -176,15 +167,12 @@ impl ProcessHandle {
         }
     }
 
-    /// Close the child's stdin channel.
     pub fn close_stdin(&self) {
         if let Ok(mut writer_tx) = self.writer_tx.lock() {
             writer_tx.take();
         }
     }
 
-    /// Attempts to kill the child while leaving the reader/writer tasks alive
-    /// so callers can still drain output until EOF.
     pub fn request_terminate(&self) {
         if let Ok(mut killer_opt) = self.killer.lock()
             && let Some(mut killer) = killer_opt.take()
@@ -193,7 +181,6 @@ impl ProcessHandle {
         }
     }
 
-    /// Attempts to kill the child and abort helper tasks.
     pub fn terminate(&self) {
         self.request_terminate();
 
@@ -226,7 +213,6 @@ impl Drop for ProcessHandle {
     }
 }
 
-/// Adapts a closure into a `ChildTerminator` implementation.
 struct ClosureTerminator {
     inner: Option<Box<dyn FnMut() + Send + Sync>>,
 }
@@ -255,7 +241,6 @@ fn resize_raw_pty(raw_fd: RawFd, size: TerminalSize) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Combine split stdout/stderr receivers into a single broadcast receiver.
 pub fn combine_output_receivers(
     mut stdout_rx: mpsc::Receiver<Vec<u8>>,
     mut stderr_rx: mpsc::Receiver<Vec<u8>>,
@@ -290,7 +275,6 @@ pub fn combine_output_receivers(
     combined_rx
 }
 
-/// Return value from PTY or pipe spawn helpers.
 #[derive(Debug)]
 pub struct SpawnedProcess {
     pub session: ProcessHandle,
@@ -299,7 +283,6 @@ pub struct SpawnedProcess {
     pub exit_rx: oneshot::Receiver<i32>,
 }
 
-/// Driver-backed process handles for non-standard spawn backends.
 pub struct ProcessDriver {
     pub writer_tx: mpsc::Sender<Vec<u8>>,
     pub stdout_rx: broadcast::Receiver<Vec<u8>>,
@@ -310,7 +293,6 @@ pub struct ProcessDriver {
     pub resizer: Option<ResizeFn>,
 }
 
-/// Build a `SpawnedProcess` from a driver that supplies stdin/output/exit channels.
 pub fn spawn_from_driver(driver: ProcessDriver) -> SpawnedProcess {
     let ProcessDriver {
         writer_tx,
@@ -332,14 +314,6 @@ pub fn spawn_from_driver(driver: ProcessDriver) -> SpawnedProcess {
             tokio::spawn(async move {
                 loop {
                     let recv_result = if *exit_seen_rx.borrow() {
-                        // Once exit has been observed, we no longer want a timer here. Some
-                        // backends publish the exit code before their final stdout/stderr bytes
-                        // have been forwarded through the broadcast channel, so a fixed grace
-                        // period can still drop the tail of the stream under load.
-                        //
-                        // Instead, keep waiting until the driver closes the broadcast sender.
-                        // That makes the shutdown contract explicit: the backend is responsible
-                        // for dropping its sender when it has truly finished forwarding output.
                         output_rx.recv().await
                     } else {
                         tokio::select! {
@@ -395,7 +369,7 @@ pub fn spawn_from_driver(driver: ProcessDriver) -> SpawnedProcess {
         wait_handle,
         exit_status,
         exit_code,
-        /*pty_handles*/ None,
+        None,
         resizer,
     );
 

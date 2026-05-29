@@ -1,8 +1,6 @@
 use crate::JsonSchema;
 use crate::ToolDefinition;
-use crate::ToolName;
 use crate::parse_dynamic_tool;
-use crate::parse_mcp_tool;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
 use serde::Deserialize;
 use serde::Serialize;
@@ -26,9 +24,7 @@ pub struct FreeformToolFormat {
 pub struct ResponsesApiTool {
     pub name: String,
     pub description: String,
-    /// TODO: Validation. When strict is set to true, the JSON schema,
-    /// `required` and `additional_properties` must be present. All fields in
-    /// `properties` must be present in `required`.
+
     pub strict: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub defer_loading: Option<bool>,
@@ -102,26 +98,6 @@ pub fn coalesce_loadable_tool_specs(
         }
     }
     coalesced_specs
-}
-
-pub fn mcp_tool_to_responses_api_tool(
-    tool_name: &ToolName,
-    tool: &rmcp::model::Tool,
-) -> Result<ResponsesApiTool, serde_json::Error> {
-    Ok(tool_definition_to_responses_api_tool(
-        parse_mcp_tool(tool)?.renamed(tool_name.name.clone()),
-    ))
-}
-
-pub fn mcp_tool_to_deferred_responses_api_tool(
-    tool_name: &ToolName,
-    tool: &rmcp::model::Tool,
-) -> Result<ResponsesApiTool, serde_json::Error> {
-    Ok(tool_definition_to_responses_api_tool(
-        parse_mcp_tool(tool)?
-            .renamed(tool_name.name.clone())
-            .into_deferred(),
-    ))
 }
 
 pub fn tool_definition_to_responses_api_tool(tool_definition: ToolDefinition) -> ResponsesApiTool {

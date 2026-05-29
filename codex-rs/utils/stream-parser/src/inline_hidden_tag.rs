@@ -1,14 +1,12 @@
 use crate::StreamTextChunk;
 use crate::StreamTextParser;
 
-/// One hidden inline tag extracted by [`InlineHiddenTagParser`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtractedInlineTag<T> {
     pub tag: T,
     pub content: String,
 }
 
-/// Literal tag specification used by [`InlineHiddenTagParser`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InlineTagSpec<T> {
     pub tag: T,
@@ -23,15 +21,6 @@ struct ActiveTag<T> {
     content: String,
 }
 
-/// Generic streaming parser that hides configured inline tags and extracts their contents.
-///
-/// Example:
-/// - input: `hello <oai-mem-citation>doc A</oai-mem-citation> world`
-/// - visible output: `hello  world`
-/// - extracted: `["doc A"]`
-///
-/// Matching is literal and non-nested. If EOF is reached while a tag is still open, the parser
-/// auto-closes it and returns the buffered content as extracted data.
 #[derive(Debug)]
 pub struct InlineHiddenTagParser<T>
 where
@@ -46,7 +35,6 @@ impl<T> InlineHiddenTagParser<T>
 where
     T: Clone + Eq,
 {
-    /// Create a parser for one or more hidden inline tags.
     pub fn new(specs: Vec<InlineTagSpec<T>>) -> Self {
         assert!(
             !specs.is_empty(),

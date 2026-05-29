@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::RolloutItem;
-use codex_protocol::protocol::ThreadMemoryMode;
 use codex_rollout::EventPersistenceMode;
 use codex_rollout::persisted_rollout_items;
 use tokio::sync::Mutex;
@@ -24,11 +23,6 @@ use crate::ThreadStoreResult;
 use crate::UpdateThreadMetadataParams;
 use crate::thread_metadata_sync::ThreadMetadataSync;
 
-/// Handle for an active thread's persistence lifecycle.
-///
-/// `LiveThread` keeps lifecycle decisions with the caller while delegating storage details to
-/// [`ThreadStore`]. Local stores may use a rollout file internally and remote stores may use a
-/// service, but session code should only need this handle for the active thread.
 #[derive(Clone)]
 pub struct LiveThread {
     thread_id: ThreadId,
@@ -37,11 +31,6 @@ pub struct LiveThread {
     metadata_sync: Arc<Mutex<ThreadMetadataSync>>,
 }
 
-/// Owns a live thread while session initialization is still fallible.
-///
-/// If initialization returns early after persistence has been opened, dropping this guard discards
-/// the live writer without forcing lazy in-memory state to become durable. Call [`commit`] once the
-/// session owns the live thread for normal operation.
 pub struct LiveThreadInitGuard {
     live_thread: Option<LiveThread>,
 }
@@ -215,25 +204,6 @@ impl LiveThread {
             .await
     }
 
-    pub async fn update_memory_mode(
-        &self,
-        mode: ThreadMemoryMode,
-        include_archived: bool,
-    ) -> ThreadStoreResult<()> {
-        self.flush_pending_metadata_update().await?;
-        self.thread_store
-            .update_thread_metadata(UpdateThreadMetadataParams {
-                thread_id: self.thread_id,
-                patch: ThreadMetadataPatch {
-                    memory_mode: Some(mode),
-                    ..Default::default()
-                },
-                include_archived,
-            })
-            .await?;
-        Ok(())
-    }
-
     pub async fn update_metadata(
         &self,
         patch: ThreadMetadataPatch,
@@ -249,9 +219,6 @@ impl LiveThread {
             .await
     }
 
-    /// Returns the live local rollout path for legacy local-only callers.
-    ///
-    /// Remote stores do not expose rollout files, so they return `Ok(None)`.
     pub async fn local_rollout_path(&self) -> ThreadStoreResult<Option<PathBuf>> {
         let Some(local_store) = self
             .thread_store

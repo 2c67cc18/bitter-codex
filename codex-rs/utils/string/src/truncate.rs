@@ -1,17 +1,9 @@
-//! Utilities for truncating large chunks of output while preserving a prefix
-//! and suffix on UTF-8 boundaries.
-
 const APPROX_BYTES_PER_TOKEN: usize = 4;
 
-/// Truncate a string to `max_bytes` using a character-count marker.
 pub fn truncate_middle_chars(s: &str, max_bytes: usize) -> String {
-    truncate_with_byte_estimate(s, max_bytes, /*use_tokens*/ false)
+    truncate_with_byte_estimate(s, max_bytes, false)
 }
 
-/// Truncate the middle of a UTF-8 string to at most `max_tokens` approximate
-/// tokens, preserving the beginning and the end. Returns the possibly
-/// truncated string and `Some(original_token_count)` if truncation occurred;
-/// otherwise returns the original string and `None`.
 pub fn truncate_middle_with_token_budget(s: &str, max_tokens: usize) -> (String, Option<u64>) {
     if s.is_empty() {
         return (String::new(), None);
@@ -21,11 +13,7 @@ pub fn truncate_middle_with_token_budget(s: &str, max_tokens: usize) -> (String,
         return (s.to_string(), None);
     }
 
-    let truncated = truncate_with_byte_estimate(
-        s,
-        approx_bytes_for_tokens(max_tokens),
-        /*use_tokens*/ true,
-    );
+    let truncated = truncate_with_byte_estimate(s, approx_bytes_for_tokens(max_tokens), true);
     let total_tokens = u64::try_from(approx_token_count(s)).unwrap_or(u64::MAX);
 
     if truncated == s {

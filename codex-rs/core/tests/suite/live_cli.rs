@@ -1,10 +1,5 @@
 #![expect(clippy::expect_used)]
 
-//! Optional smoke tests that hit the real OpenAI /v1/responses endpoint. They are `#[ignore]` by
-//! default so CI stays deterministic and free. Developers can run them locally with
-//! `just test -p codex-core --test all --run-ignored only live_cli` provided they set a valid
-//! `OPENAI_API_KEY`.
-
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
 use std::process::Command;
@@ -16,7 +11,6 @@ fn require_api_key() -> String {
         .expect("OPENAI_API_KEY env var not set — skip running live tests")
 }
 
-/// Helper that spawns the binary inside a TempDir with minimal flags. Returns (Assert, TempDir).
 fn run_live(prompt: &str) -> (assert_cmd::assert::Assert, TempDir) {
     #![expect(clippy::unwrap_used)]
     use std::io::Read;
@@ -25,33 +19,15 @@ fn run_live(prompt: &str) -> (assert_cmd::assert::Assert, TempDir) {
 
     let dir = TempDir::new().unwrap();
     let home = TempDir::new().unwrap();
-    let codex_home = home.path().join(".codex");
+    let codex_home = home.path().join(".bitter-codex");
     std::fs::create_dir_all(&codex_home).unwrap();
-
-    // Build a plain `std::process::Command` so we have full control over the underlying stdio
-    // handles. `assert_cmd`’s own `Command` wrapper always forces stdout/stderr to be piped
-    // internally which prevents us from streaming them live to the terminal (see its `spawn`
-    // implementation). Instead we configure the std `Command` ourselves, then later hand the
-    // resulting `Output` to `assert_cmd` for the familiar assertions.
 
     let mut cmd = Command::new(codex_utils_cargo_bin::cargo_bin("codex-rs").unwrap());
     cmd.current_dir(dir.path());
     cmd.env("OPENAI_API_KEY", require_api_key());
     cmd.env("HOME", home.path());
-    cmd.env("CODEX_HOME", &codex_home);
+    cmd.env("BITTER_CODEX_HOME", &codex_home);
 
-    // We want three things at once:
-    //   1. live streaming of the child’s stdout/stderr while the test is running
-    //   2. captured output so we can keep using assert_cmd’s `Assert` helpers
-    //   3. cross‑platform behavior (best effort)
-    //
-    // To get that we:
-    //   • set both stdout and stderr to `piped()` so we can read them programmatically
-    //   • spawn a thread for each stream that copies bytes into two sinks:
-    //       – the parent process’ stdout/stderr for live visibility
-    //       – an in‑memory buffer so we can pass it to `assert_cmd` later
-
-    // Pass the prompt through the `--` separator so the CLI knows when user input ends.
     cmd.arg("--allow-no-git-exec")
         .arg("-v")
         .arg("--")
@@ -63,7 +39,6 @@ fn run_live(prompt: &str) -> (assert_cmd::assert::Assert, TempDir) {
 
     let mut child = cmd.spawn().expect("failed to spawn codex-rs");
 
-    // Send the terminating newline so Session::run exits after the first turn.
     child
         .stdin
         .as_mut()
@@ -71,7 +46,6 @@ fn run_live(prompt: &str) -> (assert_cmd::assert::Assert, TempDir) {
         .write_all(b"\n")
         .expect("failed to write to child stdin");
 
-    // Helper that tees a ChildStdout/ChildStderr into both the parent’s stdio and a Vec<u8>.
     fn tee<R: Read + Send + 'static>(
         mut reader: R,
         mut writer: impl Write + Send + 'static,
@@ -125,7 +99,7 @@ fn live_create_file_hello_txt() {
     }
 
     let (assert, dir) = run_live(
-        "Use the shell tool with the apply_patch command to create a file named hello.txt containing the text 'hello'.",
+        "Use the shell tool to create a file named hello.txt containing the text 'hello'.",
     );
 
     assert.success();

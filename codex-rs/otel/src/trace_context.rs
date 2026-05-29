@@ -21,8 +21,6 @@ const TRACEPARENT_ENV_VAR: &str = "TRACEPARENT";
 const TRACESTATE_ENV_VAR: &str = "TRACESTATE";
 static TRACEPARENT_CONTEXT: OnceLock<Option<Context>> = OnceLock::new();
 
-// Trace context propagation can happen outside the provider object, so configured
-// tracestate lives beside the process-global tracer provider.
 static TRACESTATE_ENTRIES: OnceLock<RwLock<BTreeMap<String, BTreeMap<String, String>>>> =
     OnceLock::new();
 
@@ -146,8 +144,6 @@ fn merge_tracestate_entries(
         })
         .unwrap_or_default();
 
-    // TraceState::insert places members at the front. Reverse iteration keeps
-    // deterministic map order while upserting fields inside configured members.
     for (key, fields) in configured_entries.iter().rev() {
         let value = merge_tracestate_member_fields(trace_state.get(key), fields);
         trace_state = match trace_state.insert(key.clone(), value) {
@@ -163,14 +159,9 @@ fn merge_tracestate_entries(
     (!tracestate.is_empty()).then_some(tracestate)
 }
 
-/// Validates configured tracestate members before they are propagated in W3C trace context.
 pub fn validate_tracestate_entries(
     entries: &BTreeMap<String, BTreeMap<String, String>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Reject malformed entries before installing them so propagated trace
-    // context remains acceptable to other W3C Trace Context extractors. The
-    // SDK validates member keys and list structure, but configured member
-    // fields are joined into header values here and need stricter validation.
     let entries = entries
         .iter()
         .map(|(key, fields)| encode_tracestate_member_fields(key, fields))
@@ -189,7 +180,6 @@ pub fn validate_tracestate_entries(
     Ok(())
 }
 
-/// Validates one configured tracestate member and its encoded field value.
 pub fn validate_tracestate_member(
     member_key: &str,
     fields: &BTreeMap<String, String>,
@@ -208,10 +198,6 @@ fn encode_tracestate_member_fields(
     member_key: &str,
     fields: &BTreeMap<String, String>,
 ) -> Result<(String, String), Box<dyn std::error::Error>> {
-    // Configured fields are encoded into one opaque tracestate member value.
-    // Validate both the field grammar and the final header value so malformed
-    // config cannot produce propagated trace context that downstream W3C
-    // extractors reject.
     let mut encoded = Vec::with_capacity(fields.len());
     for (field_key, value) in fields {
         if !is_configured_tracestate_field_key(field_key) {
@@ -269,9 +255,6 @@ fn merge_tracestate_member_fields(
     existing: Option<&str>,
     configured_fields: &BTreeMap<String, String>,
 ) -> String {
-    // W3C TraceState treats member values as opaque strings. The config models
-    // values as semicolon-separated key:value fields so selected fields can be
-    // upserted without replacing unrelated fields in the same member.
     let mut fields = Vec::new();
     let mut seen = BTreeSet::new();
 
@@ -337,9 +320,7 @@ mod tests {
 
     #[test]
     fn invalid_traceparent_returns_none() {
-        assert!(
-            context_from_trace_headers(Some("not-a-traceparent"), /*tracestate*/ None).is_none()
-        );
+        assert!(context_from_trace_headers(Some("not-a-traceparent"), None).is_none());
     }
 
     #[test]

@@ -4,14 +4,12 @@ use chrono::Utc;
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
 
-/// Persisted lifecycle state for rollout metadata backfill.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackfillState {
-    /// Current lifecycle status.
     pub status: BackfillStatus,
-    /// Last processed rollout watermark.
+
     pub last_watermark: Option<String>,
-    /// Last successful completion time.
+
     pub last_success_at: Option<DateTime<Utc>>,
 }
 
@@ -40,7 +38,6 @@ impl BackfillState {
     }
 }
 
-/// Backfill lifecycle status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackfillStatus {
     Pending,

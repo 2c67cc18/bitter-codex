@@ -25,8 +25,6 @@ use crate::process::SpawnedProcess;
 use libc;
 
 struct PipeChildTerminator {
-    #[cfg(windows)]
-    pid: u32,
     #[cfg(unix)]
     process_group_id: u32,
 }
@@ -38,33 +36,10 @@ impl ChildTerminator for PipeChildTerminator {
             crate::process_group::kill_process_group(self.process_group_id)
         }
 
-        #[cfg(windows)]
-        {
-            kill_process(self.pid)
-        }
-
-        #[cfg(not(any(unix, windows)))]
+        #[cfg(not(unix))]
         {
             Ok(())
         }
-    }
-}
-
-#[cfg(windows)]
-fn kill_process(pid: u32) -> io::Result<()> {
-    unsafe {
-        let handle = winapi::um::processthreadsapi::OpenProcess(
-            winapi::um::winnt::PROCESS_TERMINATE,
-            0,
-            pid,
-        );
-        if handle.is_null() {
-            return Err(io::Error::last_os_error());
-        }
-        let success = winapi::um::processthreadsapi::TerminateProcess(handle, 1);
-        let err = io::Error::last_os_error();
-        winapi::um::handleapi::CloseHandle(handle);
-        if success == 0 { Err(err) } else { Ok(()) }
     }
 }
 
@@ -222,8 +197,6 @@ async fn spawn_process_with_stdin_mode(
     let handle = ProcessHandle::new(
         writer_tx,
         Box::new(PipeChildTerminator {
-            #[cfg(windows)]
-            pid,
             #[cfg(unix)]
             process_group_id,
         }),
@@ -233,8 +206,8 @@ async fn spawn_process_with_stdin_mode(
         wait_handle,
         exit_status,
         exit_code,
-        /*pty_handles*/ None,
-        /*resizer*/ None,
+        None,
+        None,
     );
 
     Ok(SpawnedProcess {
@@ -245,7 +218,6 @@ async fn spawn_process_with_stdin_mode(
     })
 }
 
-/// Spawn a process using regular pipes (no PTY), returning handles for stdin, split output, and exit.
 pub async fn spawn_process(
     program: &str,
     args: &[String],
@@ -256,7 +228,6 @@ pub async fn spawn_process(
     spawn_process_with_stdin_mode(program, args, cwd, env, arg0, PipeStdinMode::Piped, &[]).await
 }
 
-/// Spawn a process using regular pipes, but close stdin immediately.
 pub async fn spawn_process_no_stdin(
     program: &str,
     args: &[String],
@@ -267,8 +238,6 @@ pub async fn spawn_process_no_stdin(
     spawn_process_no_stdin_with_inherited_fds(program, args, cwd, env, arg0, &[]).await
 }
 
-/// Spawn a process using regular pipes, close stdin immediately, and preserve
-/// selected inherited file descriptors across exec on Unix.
 pub async fn spawn_process_no_stdin_with_inherited_fds(
     program: &str,
     args: &[String],

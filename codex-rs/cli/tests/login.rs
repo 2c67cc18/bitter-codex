@@ -7,8 +7,8 @@ use serde_json::Value;
 use tempfile::TempDir;
 
 fn codex_command(codex_home: &Path) -> Result<assert_cmd::Command> {
-    let mut cmd = assert_cmd::Command::new(codex_utils_cargo_bin::cargo_bin("codex")?);
-    cmd.env("CODEX_HOME", codex_home);
+    let mut cmd = assert_cmd::Command::new(codex_utils_cargo_bin::cargo_bin("bitter-codex")?);
+    cmd.env("BITTER_CODEX_HOME", codex_home);
     Ok(cmd)
 }
 
@@ -45,22 +45,6 @@ fn login_with_api_key_reads_stdin_and_writes_auth_json() -> Result<()> {
     let auth = read_auth_json(codex_home.path())?;
     assert_eq!(auth["OPENAI_API_KEY"], "sk-test");
     assert!(auth.get("tokens").is_none());
-    assert!(auth.get("agent_identity").is_none());
-
-    Ok(())
-}
-
-#[test]
-fn login_with_access_token_rejects_invalid_jwt() -> Result<()> {
-    let codex_home = TempDir::new()?;
-    write_file_auth_config(codex_home.path())?;
-
-    let mut cmd = codex_command(codex_home.path())?;
-    cmd.args(["login", "--with-access-token"])
-        .write_stdin("not-a-jwt\n")
-        .assert()
-        .failure()
-        .stderr(contains("Error logging in with access token"));
 
     Ok(())
 }

@@ -179,12 +179,10 @@ impl MetricsClientInner {
     }
 }
 
-/// OpenTelemetry metrics client used by Codex.
 #[derive(Clone, Debug)]
 pub struct MetricsClient(std::sync::Arc<MetricsClientInner>);
 
 impl MetricsClient {
-    /// Build a metrics client from configuration and validate defaults.
     pub fn new(config: MetricsConfig) -> Result<Self> {
         let MetricsConfig {
             environment,
@@ -240,17 +238,14 @@ impl MetricsClient {
         })))
     }
 
-    /// Send a single counter increment.
     pub fn counter(&self, name: &str, inc: i64, tags: &[(&str, &str)]) -> Result<()> {
         self.0.counter(name, inc, tags)
     }
 
-    /// Send a single histogram sample.
     pub fn histogram(&self, name: &str, value: i64, tags: &[(&str, &str)]) -> Result<()> {
         self.0.histogram(name, value, tags)
     }
 
-    /// Record a duration in milliseconds using a histogram.
     pub fn record_duration(
         &self,
         name: &str,
@@ -272,7 +267,6 @@ impl MetricsClient {
         Ok(Timer::new(name, tags, self))
     }
 
-    /// Collect a runtime metrics snapshot without shutting down the provider.
     pub fn snapshot(&self) -> Result<ResourceMetrics> {
         let Some(reader) = &self.0.runtime_reader else {
             return Err(MetricsError::RuntimeSnapshotUnavailable);
@@ -284,7 +278,6 @@ impl MetricsClient {
         Ok(snapshot)
     }
 
-    /// Flush metrics and stop the underlying OTEL meter provider.
     pub fn shutdown(&self) -> Result<()> {
         self.0.shutdown()
     }

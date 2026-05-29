@@ -1,7 +1,6 @@
 use serde_json::Value as JsonValue;
 use toml::Value as TomlValue;
 
-/// Convert a `serde_json::Value` into a semantically equivalent `toml::Value`.
 pub fn json_to_toml(v: JsonValue) -> TomlValue {
     match v {
         JsonValue::Null => TomlValue::String(String::new()),
