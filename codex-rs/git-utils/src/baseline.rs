@@ -630,7 +630,7 @@ mod tests {
         reset_git_repository(&root).await.expect("reset repo");
 
         fs::write(root.join("NOTE.md"), "new").expect("update note");
-        fs::write(root.join("memory_summary.md"), "summary").expect("write summary");
+        fs::write(root.join("added_summary.md"), "summary").expect("write summary");
         fs::remove_file(root.join("rollout_summaries/deleted.md")).expect("delete summary");
 
         let diff = diff_since_latest_init(&root).await.expect("diff");
@@ -643,7 +643,7 @@ mod tests {
                 },
                 GitBaselineChange {
                     status: GitBaselineChangeStatus::Added,
-                    path: "memory_summary.md".to_string(),
+                    path: "added_summary.md".to_string(),
                 },
                 GitBaselineChange {
                     status: GitBaselineChangeStatus::Deleted,
@@ -656,7 +656,7 @@ mod tests {
         assert!(diff.unified_diff.contains("+new"));
         assert!(
             diff.unified_diff
-                .contains("diff --git a/memory_summary.md b/memory_summary.md")
+                .contains("diff --git a/added_summary.md b/added_summary.md")
         );
         assert!(diff.unified_diff.contains("+summary"));
         assert!(
