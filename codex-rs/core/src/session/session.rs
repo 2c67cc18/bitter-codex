@@ -58,7 +58,6 @@ pub(crate) struct SessionConfiguration {
 }
 
 impl SessionConfiguration {
-
     pub(super) fn thread_config_snapshot(&self) -> ThreadConfigSnapshot {
         ThreadConfigSnapshot {
             model: self.model.as_str().to_string(),
@@ -145,7 +144,6 @@ pub(crate) struct SessionSettingsUpdate {
     pub(crate) app_server_client_name: Option<String>,
     pub(crate) app_server_client_version: Option<String>,
 }
-
 
 impl Session {
     pub(crate) fn thread_id(&self) -> ThreadId {
@@ -333,7 +331,7 @@ impl Session {
             config.features.emit_metrics(&session_telemetry);
             session_telemetry.counter(
                 THREAD_STARTED_METRIC,
-                 1,
+                1,
                 &[(
                     "is_git",
                     if get_git_repo_root(&session_configuration.cwd).is_some() {
@@ -354,24 +352,10 @@ impl Session {
                 config.model_auto_compact_token_limit,
             );
 
-            let use_zsh_fork_shell = config.features.enabled(Feature::ShellZshFork);
             let mut default_shell = if let Some(user_shell_override) =
                 session_configuration.user_shell_override.clone()
             {
                 user_shell_override
-            } else if use_zsh_fork_shell {
-                let zsh_path = config.zsh_path.as_ref().ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "zsh fork feature enabled, but `zsh_path` is not configured; set `zsh_path` in config.toml"
-                    )
-                })?;
-                let zsh_path = zsh_path.to_path_buf();
-                shell::get_shell(shell::ShellType::Zsh, Some(&zsh_path)).ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "zsh fork feature enabled, but zsh_path `{}` is not usable; set `zsh_path` to a valid zsh executable",
-                        zsh_path.display()
-                    )
-                })?
             } else {
                 shell::default_user_shell()
             };
@@ -410,13 +394,6 @@ impl Session {
             let session_id = parent_session_id.unwrap_or_else(|| SessionId::from(thread_id));
 
             let services = SessionServices {
-
-
-
-
-
-
-
                 unified_exec_manager: UnifiedExecProcessManager::new(
                     config.background_terminal_max_timeout,
                 ),
@@ -438,7 +415,6 @@ impl Session {
                     session_configuration.provider.clone(),
                     session_configuration.session_source.clone(),
                     config.model_verbosity,
-                    config.features.enabled(Feature::EnableRequestCompression),
                     config.features.enabled(Feature::RuntimeMetrics),
                 ),
             };
@@ -455,7 +431,6 @@ impl Session {
                 services,
                 next_internal_sub_id: AtomicU64::new(0),
             });
-
 
             let initial_messages = initial_history.get_event_msgs();
             let events = std::iter::once(Event {
