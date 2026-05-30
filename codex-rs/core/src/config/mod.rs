@@ -394,7 +394,6 @@ impl ConfigBuilder {
         )
         .await
     }
-
 }
 
 impl Config {
@@ -712,9 +711,7 @@ fn resolve_web_search_config(config_toml: &ConfigToml) -> Option<WebSearchConfig
         .map(Into::into)
 }
 
-
 impl Config {
-
     pub(crate) async fn load_config_with_layer_stack(
         cfg: ConfigToml,
         overrides: ConfigOverrides,
@@ -890,9 +887,7 @@ impl Config {
         };
         let service_tier = service_tier.and_then(|service_tier| {
             match ServiceTier::from_request_value(&service_tier) {
-                Some(ServiceTier::Fast) => features
-                    .enabled(Feature::FastMode)
-                    .then(|| ServiceTier::Fast.request_value().to_string()),
+                Some(ServiceTier::Fast) => Some(ServiceTier::Fast.request_value().to_string()),
                 Some(ServiceTier::Flex) => Some(ServiceTier::Flex.request_value().to_string()),
                 None => Some(service_tier),
             }

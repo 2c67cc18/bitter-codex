@@ -147,7 +147,6 @@ struct ModelClientState {
     provider: SharedModelProvider,
     session_source: SessionSource,
     model_verbosity: Option<VerbosityConfig>,
-    enable_request_compression: bool,
     include_timing_metrics: bool,
     disable_websockets: AtomicBool,
     cached_websocket_session: StdMutex<WebsocketSession>,
@@ -229,7 +228,6 @@ impl ModelClient {
         provider_info: ModelProviderInfo,
         session_source: SessionSource,
         model_verbosity: Option<VerbosityConfig>,
-        enable_request_compression: bool,
         include_timing_metrics: bool,
     ) -> Self {
         let model_provider = create_model_provider(provider_info, auth_manager);
@@ -242,7 +240,6 @@ impl ModelClient {
                 provider: model_provider,
                 session_source,
                 model_verbosity,
-                enable_request_compression,
                 include_timing_metrics,
                 disable_websockets: AtomicBool::new(false),
                 cached_websocket_session: StdMutex::new(WebsocketSession::default()),
@@ -257,7 +254,6 @@ impl ModelClient {
             turn_state: Arc::new(OnceLock::new()),
         }
     }
-
 
     pub(crate) fn set_window_generation(&self, window_generation: u64) {
         self.state
@@ -856,8 +852,7 @@ impl ModelClientSession {
     }
 
     fn responses_request_compression(&self, auth: Option<&CodexAuth>) -> Compression {
-        if self.client.state.enable_request_compression
-            && auth.is_some_and(CodexAuth::uses_codex_backend)
+        if auth.is_some_and(CodexAuth::uses_codex_backend)
             && self.client.state.provider.info().is_openai()
         {
             Compression::Zstd
@@ -898,10 +893,8 @@ impl ModelClientSession {
         loop {
             let client_setup = self.client.current_client_setup().await?;
             let transport = ReqwestTransport::new(build_reqwest_client());
-            let request_auth_context = AuthRequestTelemetryContext::new(
-                client_setup.api_auth.as_ref(),
-                pending_retry,
-            );
+            let request_auth_context =
+                AuthRequestTelemetryContext::new(client_setup.api_auth.as_ref(), pending_retry);
             let (request_telemetry, sse_telemetry) = Self::build_streaming_telemetry(
                 session_telemetry,
                 request_auth_context,
@@ -997,10 +990,8 @@ impl ModelClientSession {
         let mut pending_retry = PendingUnauthorizedRetry::default();
         loop {
             let client_setup = self.client.current_client_setup().await?;
-            let request_auth_context = AuthRequestTelemetryContext::new(
-                client_setup.api_auth.as_ref(),
-                pending_retry,
-            );
+            let request_auth_context =
+                AuthRequestTelemetryContext::new(client_setup.api_auth.as_ref(), pending_retry);
             let compression = self.responses_request_compression(client_setup.auth.as_ref());
 
             let options = self
@@ -1466,10 +1457,7 @@ struct AuthRequestTelemetryContext {
 }
 
 impl AuthRequestTelemetryContext {
-    fn new(
-        api_auth: &dyn AuthProvider,
-        retry: PendingUnauthorizedRetry,
-    ) -> Self {
+    fn new(api_auth: &dyn AuthProvider, retry: PendingUnauthorizedRetry) -> Self {
         let auth_telemetry = auth_header_telemetry(api_auth);
         Self {
             auth_header_attached: auth_telemetry.attached,

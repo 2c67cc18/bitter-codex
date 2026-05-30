@@ -261,11 +261,7 @@ impl Session {
         let provider_for_context = create_model_provider(provider, auth_manager);
         let session_telemetry_for_context = session_telemetry;
         let mut per_turn_config = per_turn_config;
-        per_turn_config.service_tier = get_service_tier(
-            per_turn_config.service_tier,
-            per_turn_config.features.enabled(Feature::FastMode),
-            &model_info,
-        );
+        per_turn_config.service_tier = get_service_tier(per_turn_config.service_tier, &model_info);
         let per_turn_config = Arc::new(per_turn_config);
         let turn_metadata_state = Arc::new(TurnMetadataState::new(
             session_id.to_string(),
