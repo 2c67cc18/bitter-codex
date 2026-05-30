@@ -70,7 +70,6 @@ pub(crate) fn typed_request_span(
 
 fn transport_name(transport: &AppServerTransport) -> &'static str {
     match transport {
-        AppServerTransport::Stdio => "stdio",
         AppServerTransport::UnixSocket { .. } => "unix_socket",
         AppServerTransport::Off => "off",
     }

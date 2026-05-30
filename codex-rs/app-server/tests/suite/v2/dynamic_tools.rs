@@ -1,6 +1,6 @@
 use anyhow::Context;
 use anyhow::Result;
-use app_test_support::McpProcess;
+use app_test_support::AppServerProcess;
 use app_test_support::create_final_assistant_message_sse_response;
 use app_test_support::create_mock_responses_server_sequence_unchecked;
 use app_test_support::to_response;
@@ -37,8 +37,8 @@ async fn thread_start_injects_dynamic_tools_into_model_requests() -> Result<()> 
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path(), &server.uri())?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
     // Use a minimal JSON schema so we can assert the tool payload round-trips.
     let input_schema = json!({
@@ -58,7 +58,7 @@ async fn thread_start_injects_dynamic_tools_into_model_requests() -> Result<()> 
     };
 
     // Thread start injects dynamic tools into the thread's tool registry.
-    let thread_req = mcp
+    let thread_req = app_server
         .send_thread_start_request(ThreadStartParams {
             dynamic_tools: Some(vec![dynamic_tool.clone()]),
             ..Default::default()
@@ -66,13 +66,13 @@ async fn thread_start_injects_dynamic_tools_into_model_requests() -> Result<()> 
         .await?;
     let thread_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(thread_req)),
+        app_server.read_stream_until_response_message(RequestId::Integer(thread_req)),
     )
     .await??;
     let ThreadStartResponse { thread, .. } = to_response::<ThreadStartResponse>(thread_resp)?;
 
     // Start a turn so a model request is issued.
-    let turn_req = mcp
+    let turn_req = app_server
         .send_turn_start_request(TurnStartParams {
             thread_id: thread.id.clone(),
             input: vec![V2UserInput::Text {
@@ -84,14 +84,14 @@ async fn thread_start_injects_dynamic_tools_into_model_requests() -> Result<()> 
         .await?;
     let turn_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(turn_req)),
+        app_server.read_stream_until_response_message(RequestId::Integer(turn_req)),
     )
     .await??;
     let _turn: TurnStartResponse = to_response::<TurnStartResponse>(turn_resp)?;
 
     timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
+        app_server.read_stream_until_notification_message("turn/completed"),
     )
     .await??;
 
@@ -120,8 +120,8 @@ async fn thread_start_keeps_hidden_dynamic_tools_out_of_model_requests() -> Resu
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path(), &server.uri())?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
     let dynamic_tool = DynamicToolSpec {
         namespace: Some("codex_app".to_string()),
@@ -138,7 +138,7 @@ async fn thread_start_keeps_hidden_dynamic_tools_out_of_model_requests() -> Resu
         defer_loading: true,
     };
 
-    let thread_req = mcp
+    let thread_req = app_server
         .send_thread_start_request(ThreadStartParams {
             dynamic_tools: Some(vec![dynamic_tool.clone()]),
             ..Default::default()
@@ -146,12 +146,12 @@ async fn thread_start_keeps_hidden_dynamic_tools_out_of_model_requests() -> Resu
         .await?;
     let thread_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(thread_req)),
+        app_server.read_stream_until_response_message(RequestId::Integer(thread_req)),
     )
     .await??;
     let ThreadStartResponse { thread, .. } = to_response::<ThreadStartResponse>(thread_resp)?;
 
-    let turn_req = mcp
+    let turn_req = app_server
         .send_turn_start_request(TurnStartParams {
             thread_id: thread.id,
             input: vec![V2UserInput::Text {
@@ -163,14 +163,14 @@ async fn thread_start_keeps_hidden_dynamic_tools_out_of_model_requests() -> Resu
         .await?;
     let turn_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(turn_req)),
+        app_server.read_stream_until_response_message(RequestId::Integer(turn_req)),
     )
     .await??;
     let _turn: TurnStartResponse = to_response::<TurnStartResponse>(turn_resp)?;
 
     timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
+        app_server.read_stream_until_notification_message("turn/completed"),
     )
     .await??;
 

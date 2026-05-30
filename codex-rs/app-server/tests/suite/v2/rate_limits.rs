@@ -1,6 +1,6 @@
 use anyhow::Result;
+use app_test_support::AppServerProcess;
 use app_test_support::ChatGptAuthFixture;
-use app_test_support::McpProcess;
 use app_test_support::to_response;
 use app_test_support::write_chatgpt_auth;
 use codex_app_server_protocol::AddCreditsNudgeCreditType;
@@ -37,14 +37,15 @@ const INTERNAL_ERROR_CODE: i64 = -32603;
 async fn get_account_rate_limits_requires_auth() -> Result<()> {
     let codex_home = TempDir::new()?;
 
-    let mut mcp = McpProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server =
+        AppServerProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = mcp.send_get_account_rate_limits_request().await?;
+    let request_id = app_server.send_get_account_rate_limits_request().await?;
 
     let error: JSONRPCError = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_error_message(RequestId::Integer(request_id)),
     )
     .await??;
 
@@ -62,16 +63,16 @@ async fn get_account_rate_limits_requires_auth() -> Result<()> {
 async fn get_account_rate_limits_requires_chatgpt_auth() -> Result<()> {
     let codex_home = TempDir::new()?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    login_with_api_key(&mut mcp, "sk-test-key").await?;
+    login_with_api_key(&mut app_server, "sk-test-key").await?;
 
-    let request_id = mcp.send_get_account_rate_limits_request().await?;
+    let request_id = app_server.send_get_account_rate_limits_request().await?;
 
     let error: JSONRPCError = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_error_message(RequestId::Integer(request_id)),
     )
     .await??;
 
@@ -153,14 +154,15 @@ async fn get_account_rate_limits_returns_snapshot() -> Result<()> {
         .mount(&server)
         .await;
 
-    let mut mcp = McpProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server =
+        AppServerProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = mcp.send_get_account_rate_limits_request().await?;
+    let request_id = app_server.send_get_account_rate_limits_request().await?;
 
     let response: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
 
@@ -238,10 +240,11 @@ async fn get_account_rate_limits_returns_snapshot() -> Result<()> {
 async fn send_add_credits_nudge_email_requires_auth() -> Result<()> {
     let codex_home = TempDir::new()?;
 
-    let mut mcp = McpProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server =
+        AppServerProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = mcp
+    let request_id = app_server
         .send_add_credits_nudge_email_request(SendAddCreditsNudgeEmailParams {
             credit_type: AddCreditsNudgeCreditType::Credits,
         })
@@ -249,7 +252,7 @@ async fn send_add_credits_nudge_email_requires_auth() -> Result<()> {
 
     let error: JSONRPCError = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_error_message(RequestId::Integer(request_id)),
     )
     .await??;
 
@@ -267,12 +270,12 @@ async fn send_add_credits_nudge_email_requires_auth() -> Result<()> {
 async fn send_add_credits_nudge_email_requires_chatgpt_auth() -> Result<()> {
     let codex_home = TempDir::new()?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    login_with_api_key(&mut mcp, "sk-test-key").await?;
+    login_with_api_key(&mut app_server, "sk-test-key").await?;
 
-    let request_id = mcp
+    let request_id = app_server
         .send_add_credits_nudge_email_request(SendAddCreditsNudgeEmailParams {
             credit_type: AddCreditsNudgeCreditType::UsageLimit,
         })
@@ -280,7 +283,7 @@ async fn send_add_credits_nudge_email_requires_chatgpt_auth() -> Result<()> {
 
     let error: JSONRPCError = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_error_message(RequestId::Integer(request_id)),
     )
     .await??;
 
@@ -321,10 +324,11 @@ async fn send_add_credits_nudge_email_posts_expected_body() -> Result<()> {
         .mount(&server)
         .await;
 
-    let mut mcp = McpProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server =
+        AppServerProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = mcp
+    let request_id = app_server
         .send_add_credits_nudge_email_request(SendAddCreditsNudgeEmailParams {
             credit_type: AddCreditsNudgeCreditType::UsageLimit,
         })
@@ -332,7 +336,7 @@ async fn send_add_credits_nudge_email_posts_expected_body() -> Result<()> {
 
     let response: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
     let received: SendAddCreditsNudgeEmailResponse = to_response(response)?;
@@ -364,10 +368,11 @@ async fn send_add_credits_nudge_email_maps_cooldown() -> Result<()> {
         .mount(&server)
         .await;
 
-    let mut mcp = McpProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server =
+        AppServerProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = mcp
+    let request_id = app_server
         .send_add_credits_nudge_email_request(SendAddCreditsNudgeEmailParams {
             credit_type: AddCreditsNudgeCreditType::Credits,
         })
@@ -375,7 +380,7 @@ async fn send_add_credits_nudge_email_maps_cooldown() -> Result<()> {
 
     let response: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
     let received: SendAddCreditsNudgeEmailResponse = to_response(response)?;
@@ -407,10 +412,11 @@ async fn send_add_credits_nudge_email_surfaces_backend_failure() -> Result<()> {
         .mount(&server)
         .await;
 
-    let mut mcp = McpProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server =
+        AppServerProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = mcp
+    let request_id = app_server
         .send_add_credits_nudge_email_request(SendAddCreditsNudgeEmailParams {
             credit_type: AddCreditsNudgeCreditType::Credits,
         })
@@ -418,7 +424,7 @@ async fn send_add_credits_nudge_email_surfaces_backend_failure() -> Result<()> {
 
     let error: JSONRPCError = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_error_message(RequestId::Integer(request_id)),
     )
     .await??;
 
@@ -437,11 +443,13 @@ async fn send_add_credits_nudge_email_surfaces_backend_failure() -> Result<()> {
     Ok(())
 }
 
-async fn login_with_api_key(mcp: &mut McpProcess, api_key: &str) -> Result<()> {
-    let request_id = mcp.send_login_account_api_key_request(api_key).await?;
+async fn login_with_api_key(app_server: &mut AppServerProcess, api_key: &str) -> Result<()> {
+    let request_id = app_server
+        .send_login_account_api_key_request(api_key)
+        .await?;
     let response: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
     let login: LoginAccountResponse = to_response(response)?;

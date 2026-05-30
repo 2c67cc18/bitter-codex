@@ -1,6 +1,6 @@
 use anyhow::Result;
 use anyhow::bail;
-use app_test_support::McpProcess;
+use app_test_support::AppServerProcess;
 use app_test_support::to_response;
 
 use app_test_support::ChatGptAuthFixture;
@@ -201,20 +201,21 @@ async fn logout_account_removes_auth_and_notifies() -> Result<()> {
     )?;
     assert!(codex_home.path().join("auth.json").exists());
 
-    let mut mcp = McpProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server =
+        AppServerProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let id = mcp.send_logout_account_request().await?;
+    let id = app_server.send_logout_account_request().await?;
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(id)),
     )
     .await??;
     let _ok: LogoutAccountResponse = to_response(resp)?;
 
     let note = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("account/updated"),
+        app_server.read_stream_until_notification_message("account/updated"),
     )
     .await??;
     let parsed: ServerNotification = note.try_into()?;
@@ -232,14 +233,14 @@ async fn logout_account_removes_auth_and_notifies() -> Result<()> {
         "auth.json should be deleted"
     );
 
-    let get_id = mcp
+    let get_id = app_server
         .send_get_account_request(GetAccountParams {
             refresh_token: false,
         })
         .await?;
     let get_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(get_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(get_id)),
     )
     .await??;
     let account: GetAccountResponse = to_response(get_resp)?;
@@ -268,10 +269,11 @@ async fn set_auth_token_updates_account_and_notifies() -> Result<()> {
             .chatgpt_account_id(WORKSPACE_ID_EMBEDDED),
     )?;
 
-    let mut mcp = McpProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server =
+        AppServerProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let set_id = mcp
+    let set_id = app_server
         .send_chatgpt_auth_tokens_login_request(
             access_token,
             WORKSPACE_ID_EMBEDDED.to_string(),
@@ -280,7 +282,7 @@ async fn set_auth_token_updates_account_and_notifies() -> Result<()> {
         .await?;
     let set_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(set_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(set_id)),
     )
     .await??;
     let response: LoginAccountResponse = to_response(set_resp)?;
@@ -288,7 +290,7 @@ async fn set_auth_token_updates_account_and_notifies() -> Result<()> {
 
     let note = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("account/updated"),
+        app_server.read_stream_until_notification_message("account/updated"),
     )
     .await??;
     let parsed: ServerNotification = note.try_into()?;
@@ -298,14 +300,14 @@ async fn set_auth_token_updates_account_and_notifies() -> Result<()> {
     assert_eq!(payload.auth_mode, Some(AuthMode::ChatgptAuthTokens));
     assert_eq!(payload.plan_type, Some(AccountPlanType::Pro));
 
-    let get_id = mcp
+    let get_id = app_server
         .send_get_account_request(GetAccountParams {
             refresh_token: false,
         })
         .await?;
     let get_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(get_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(get_id)),
     )
     .await??;
     let account: GetAccountResponse = to_response(get_resp)?;
@@ -342,10 +344,11 @@ async fn account_read_refresh_token_is_noop_in_external_mode() -> Result<()> {
             .chatgpt_account_id(WORKSPACE_ID_EMBEDDED),
     )?;
 
-    let mut mcp = McpProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server =
+        AppServerProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let set_id = mcp
+    let set_id = app_server
         .send_chatgpt_auth_tokens_login_request(
             access_token,
             WORKSPACE_ID_EMBEDDED.to_string(),
@@ -354,25 +357,25 @@ async fn account_read_refresh_token_is_noop_in_external_mode() -> Result<()> {
         .await?;
     let set_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(set_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(set_id)),
     )
     .await??;
     let response: LoginAccountResponse = to_response(set_resp)?;
     assert_eq!(response, LoginAccountResponse::ChatgptAuthTokens {});
     let _updated = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("account/updated"),
+        app_server.read_stream_until_notification_message("account/updated"),
     )
     .await??;
 
-    let get_id = mcp
+    let get_id = app_server
         .send_get_account_request(GetAccountParams {
             refresh_token: true,
         })
         .await?;
     let get_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(get_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(get_id)),
     )
     .await??;
     let account: GetAccountResponse = to_response(get_resp)?;
@@ -389,7 +392,7 @@ async fn account_read_refresh_token_is_noop_in_external_mode() -> Result<()> {
 
     let refresh_request = timeout(
         Duration::from_millis(250),
-        mcp.read_stream_until_request_message(),
+        app_server.read_stream_until_request_message(),
     )
     .await;
     assert!(
@@ -401,14 +404,14 @@ async fn account_read_refresh_token_is_noop_in_external_mode() -> Result<()> {
 }
 
 async fn respond_to_refresh_request(
-    mcp: &mut McpProcess,
+    app_server: &mut AppServerProcess,
     access_token: &str,
     chatgpt_account_id: &str,
     chatgpt_plan_type: Option<&str>,
 ) -> Result<()> {
     let refresh_req: ServerRequest = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_request_message(),
+        app_server.read_stream_until_request_message(),
     )
     .await??;
     let ServerRequest::ChatgptAuthTokensRefresh { request_id, params } = refresh_req else {
@@ -420,7 +423,8 @@ async fn respond_to_refresh_request(
         chatgpt_account_id: chatgpt_account_id.to_string(),
         chatgpt_plan_type: chatgpt_plan_type.map(str::to_string),
     };
-    mcp.send_response(request_id, serde_json::to_value(response)?)
+    app_server
+        .send_response(request_id, serde_json::to_value(response)?)
         .await?;
     Ok(())
 }
@@ -467,10 +471,11 @@ async fn external_auth_refreshes_on_unauthorized() -> Result<()> {
             .chatgpt_account_id(WORKSPACE_ID_REFRESHED),
     )?;
 
-    let mut mcp = McpProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server =
+        AppServerProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let set_id = mcp
+    let set_id = app_server
         .send_chatgpt_auth_tokens_login_request(
             initial_access_token.clone(),
             WORKSPACE_ID_INITIAL.to_string(),
@@ -479,18 +484,18 @@ async fn external_auth_refreshes_on_unauthorized() -> Result<()> {
         .await?;
     let set_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(set_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(set_id)),
     )
     .await??;
     let response: LoginAccountResponse = to_response(set_resp)?;
     assert_eq!(response, LoginAccountResponse::ChatgptAuthTokens {});
     let _updated = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("account/updated"),
+        app_server.read_stream_until_notification_message("account/updated"),
     )
     .await??;
 
-    let thread_req = mcp
+    let thread_req = app_server
         .send_thread_start_request(codex_app_server_protocol::ThreadStartParams {
             model: Some("mock-model".to_string()),
             ..Default::default()
@@ -498,12 +503,12 @@ async fn external_auth_refreshes_on_unauthorized() -> Result<()> {
         .await?;
     let thread_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(thread_req)),
+        app_server.read_stream_until_response_message(RequestId::Integer(thread_req)),
     )
     .await??;
     let thread = to_response::<codex_app_server_protocol::ThreadStartResponse>(thread_resp)?;
 
-    let turn_req = mcp
+    let turn_req = app_server
         .send_turn_start_request(codex_app_server_protocol::TurnStartParams {
             thread_id: thread.thread.id,
             input: vec![codex_app_server_protocol::UserInput::Text {
@@ -514,7 +519,7 @@ async fn external_auth_refreshes_on_unauthorized() -> Result<()> {
         })
         .await?;
     respond_to_refresh_request(
-        &mut mcp,
+        &mut app_server,
         &refreshed_access_token,
         WORKSPACE_ID_REFRESHED,
         Some("pro"),
@@ -522,12 +527,12 @@ async fn external_auth_refreshes_on_unauthorized() -> Result<()> {
     .await?;
     let _turn_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(turn_req)),
+        app_server.read_stream_until_response_message(RequestId::Integer(turn_req)),
     )
     .await??;
     let _turn_completed = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
+        app_server.read_stream_until_notification_message("turn/completed"),
     )
     .await??;
 
@@ -573,10 +578,11 @@ async fn external_auth_refresh_error_fails_turn() -> Result<()> {
             .chatgpt_account_id(WORKSPACE_ID_INITIAL),
     )?;
 
-    let mut mcp = McpProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server =
+        AppServerProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let set_id = mcp
+    let set_id = app_server
         .send_chatgpt_auth_tokens_login_request(
             initial_access_token,
             WORKSPACE_ID_INITIAL.to_string(),
@@ -585,18 +591,18 @@ async fn external_auth_refresh_error_fails_turn() -> Result<()> {
         .await?;
     let set_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(set_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(set_id)),
     )
     .await??;
     let response: LoginAccountResponse = to_response(set_resp)?;
     assert_eq!(response, LoginAccountResponse::ChatgptAuthTokens {});
     let _updated = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("account/updated"),
+        app_server.read_stream_until_notification_message("account/updated"),
     )
     .await??;
 
-    let thread_req = mcp
+    let thread_req = app_server
         .send_thread_start_request(codex_app_server_protocol::ThreadStartParams {
             model: Some("mock-model".to_string()),
             ..Default::default()
@@ -604,12 +610,12 @@ async fn external_auth_refresh_error_fails_turn() -> Result<()> {
         .await?;
     let thread_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(thread_req)),
+        app_server.read_stream_until_response_message(RequestId::Integer(thread_req)),
     )
     .await??;
     let thread = to_response::<codex_app_server_protocol::ThreadStartResponse>(thread_resp)?;
 
-    let turn_req = mcp
+    let turn_req = app_server
         .send_turn_start_request(codex_app_server_protocol::TurnStartParams {
             thread_id: thread.thread.id.clone(),
             input: vec![codex_app_server_protocol::UserInput::Text {
@@ -622,31 +628,32 @@ async fn external_auth_refresh_error_fails_turn() -> Result<()> {
 
     let refresh_req: ServerRequest = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_request_message(),
+        app_server.read_stream_until_request_message(),
     )
     .await??;
     let ServerRequest::ChatgptAuthTokensRefresh { request_id, .. } = refresh_req else {
         bail!("expected account/chatgptAuthTokens/refresh request, got {refresh_req:?}");
     };
 
-    mcp.send_error(
-        request_id,
-        JSONRPCErrorError {
-            code: -32_000,
-            message: "refresh failed".to_string(),
-            data: None,
-        },
-    )
-    .await?;
+    app_server
+        .send_error(
+            request_id,
+            JSONRPCErrorError {
+                code: -32_000,
+                message: "refresh failed".to_string(),
+                data: None,
+            },
+        )
+        .await?;
 
     let _turn_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(turn_req)),
+        app_server.read_stream_until_response_message(RequestId::Integer(turn_req)),
     )
     .await??;
     let completed_notif: JSONRPCNotification = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
+        app_server.read_stream_until_notification_message("turn/completed"),
     )
     .await??;
     let completed: TurnCompletedNotification = serde_json::from_value(
@@ -695,10 +702,11 @@ async fn external_auth_refresh_mismatched_workspace_fails_turn() -> Result<()> {
             .chatgpt_account_id(WORKSPACE_ID_DISALLOWED),
     )?;
 
-    let mut mcp = McpProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server =
+        AppServerProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let set_id = mcp
+    let set_id = app_server
         .send_chatgpt_auth_tokens_login_request(
             initial_access_token,
             WORKSPACE_ID_ALLOWED.to_string(),
@@ -707,18 +715,18 @@ async fn external_auth_refresh_mismatched_workspace_fails_turn() -> Result<()> {
         .await?;
     let set_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(set_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(set_id)),
     )
     .await??;
     let response: LoginAccountResponse = to_response(set_resp)?;
     assert_eq!(response, LoginAccountResponse::ChatgptAuthTokens {});
     let _updated = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("account/updated"),
+        app_server.read_stream_until_notification_message("account/updated"),
     )
     .await??;
 
-    let thread_req = mcp
+    let thread_req = app_server
         .send_thread_start_request(codex_app_server_protocol::ThreadStartParams {
             model: Some("mock-model".to_string()),
             ..Default::default()
@@ -726,12 +734,12 @@ async fn external_auth_refresh_mismatched_workspace_fails_turn() -> Result<()> {
         .await?;
     let thread_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(thread_req)),
+        app_server.read_stream_until_response_message(RequestId::Integer(thread_req)),
     )
     .await??;
     let thread = to_response::<codex_app_server_protocol::ThreadStartResponse>(thread_resp)?;
 
-    let turn_req = mcp
+    let turn_req = app_server
         .send_turn_start_request(codex_app_server_protocol::TurnStartParams {
             thread_id: thread.thread.id.clone(),
             input: vec![codex_app_server_protocol::UserInput::Text {
@@ -744,31 +752,32 @@ async fn external_auth_refresh_mismatched_workspace_fails_turn() -> Result<()> {
 
     let refresh_req: ServerRequest = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_request_message(),
+        app_server.read_stream_until_request_message(),
     )
     .await??;
     let ServerRequest::ChatgptAuthTokensRefresh { request_id, .. } = refresh_req else {
         bail!("expected account/chatgptAuthTokens/refresh request, got {refresh_req:?}");
     };
 
-    mcp.send_response(
-        request_id,
-        serde_json::to_value(ChatgptAuthTokensRefreshResponse {
-            access_token: refreshed_access_token,
-            chatgpt_account_id: WORKSPACE_ID_DISALLOWED.to_string(),
-            chatgpt_plan_type: Some("pro".to_string()),
-        })?,
-    )
-    .await?;
+    app_server
+        .send_response(
+            request_id,
+            serde_json::to_value(ChatgptAuthTokensRefreshResponse {
+                access_token: refreshed_access_token,
+                chatgpt_account_id: WORKSPACE_ID_DISALLOWED.to_string(),
+                chatgpt_plan_type: Some("pro".to_string()),
+            })?,
+        )
+        .await?;
 
     let _turn_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(turn_req)),
+        app_server.read_stream_until_response_message(RequestId::Integer(turn_req)),
     )
     .await??;
     let completed_notif: JSONRPCNotification = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
+        app_server.read_stream_until_notification_message("turn/completed"),
     )
     .await??;
     let completed: TurnCompletedNotification = serde_json::from_value(
@@ -810,10 +819,11 @@ async fn external_auth_refresh_invalid_access_token_fails_turn() -> Result<()> {
             .chatgpt_account_id(WORKSPACE_ID_INITIAL),
     )?;
 
-    let mut mcp = McpProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server =
+        AppServerProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let set_id = mcp
+    let set_id = app_server
         .send_chatgpt_auth_tokens_login_request(
             initial_access_token,
             WORKSPACE_ID_INITIAL.to_string(),
@@ -822,18 +832,18 @@ async fn external_auth_refresh_invalid_access_token_fails_turn() -> Result<()> {
         .await?;
     let set_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(set_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(set_id)),
     )
     .await??;
     let response: LoginAccountResponse = to_response(set_resp)?;
     assert_eq!(response, LoginAccountResponse::ChatgptAuthTokens {});
     let _updated = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("account/updated"),
+        app_server.read_stream_until_notification_message("account/updated"),
     )
     .await??;
 
-    let thread_req = mcp
+    let thread_req = app_server
         .send_thread_start_request(codex_app_server_protocol::ThreadStartParams {
             model: Some("mock-model".to_string()),
             ..Default::default()
@@ -841,12 +851,12 @@ async fn external_auth_refresh_invalid_access_token_fails_turn() -> Result<()> {
         .await?;
     let thread_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(thread_req)),
+        app_server.read_stream_until_response_message(RequestId::Integer(thread_req)),
     )
     .await??;
     let thread = to_response::<codex_app_server_protocol::ThreadStartResponse>(thread_resp)?;
 
-    let turn_req = mcp
+    let turn_req = app_server
         .send_turn_start_request(codex_app_server_protocol::TurnStartParams {
             thread_id: thread.thread.id.clone(),
             input: vec![codex_app_server_protocol::UserInput::Text {
@@ -859,31 +869,32 @@ async fn external_auth_refresh_invalid_access_token_fails_turn() -> Result<()> {
 
     let refresh_req: ServerRequest = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_request_message(),
+        app_server.read_stream_until_request_message(),
     )
     .await??;
     let ServerRequest::ChatgptAuthTokensRefresh { request_id, .. } = refresh_req else {
         bail!("expected account/chatgptAuthTokens/refresh request, got {refresh_req:?}");
     };
 
-    mcp.send_response(
-        request_id,
-        serde_json::to_value(ChatgptAuthTokensRefreshResponse {
-            access_token: "not-a-jwt".to_string(),
-            chatgpt_account_id: WORKSPACE_ID_INITIAL.to_string(),
-            chatgpt_plan_type: Some("pro".to_string()),
-        })?,
-    )
-    .await?;
+    app_server
+        .send_response(
+            request_id,
+            serde_json::to_value(ChatgptAuthTokensRefreshResponse {
+                access_token: "not-a-jwt".to_string(),
+                chatgpt_account_id: WORKSPACE_ID_INITIAL.to_string(),
+                chatgpt_plan_type: Some("pro".to_string()),
+            })?,
+        )
+        .await?;
 
     let _turn_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(turn_req)),
+        app_server.read_stream_until_response_message(RequestId::Integer(turn_req)),
     )
     .await??;
     let completed_notif: JSONRPCNotification = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
+        app_server.read_stream_until_notification_message("turn/completed"),
     )
     .await??;
     let completed: TurnCompletedNotification = serde_json::from_value(
@@ -902,15 +913,15 @@ async fn login_account_api_key_succeeds_and_notifies() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path(), CreateConfigTomlParams::default())?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let req_id = mcp
+    let req_id = app_server
         .send_login_account_api_key_request("sk-test-key")
         .await?;
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(req_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(req_id)),
     )
     .await??;
     let login: LoginAccountResponse = to_response(resp)?;
@@ -918,7 +929,7 @@ async fn login_account_api_key_succeeds_and_notifies() -> Result<()> {
 
     let note = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("account/login/completed"),
+        app_server.read_stream_until_notification_message("account/login/completed"),
     )
     .await??;
     let parsed: ServerNotification = note.try_into()?;
@@ -931,7 +942,7 @@ async fn login_account_api_key_succeeds_and_notifies() -> Result<()> {
 
     let note = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("account/updated"),
+        app_server.read_stream_until_notification_message("account/updated"),
     )
     .await??;
     let parsed: ServerNotification = note.try_into()?;
@@ -956,15 +967,15 @@ async fn login_account_api_key_rejected_when_forced_chatgpt() -> Result<()> {
         },
     )?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = mcp
+    let request_id = app_server
         .send_login_account_api_key_request("sk-test-key")
         .await?;
     let err: JSONRPCError = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_error_message(RequestId::Integer(request_id)),
     )
     .await??;
 
@@ -986,13 +997,13 @@ async fn login_account_chatgpt_rejected_when_forced_api() -> Result<()> {
         },
     )?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = mcp.send_login_account_chatgpt_request().await?;
+    let request_id = app_server.send_login_account_chatgpt_request().await?;
     let err: JSONRPCError = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_error_message(RequestId::Integer(request_id)),
     )
     .await??;
 
@@ -1019,7 +1030,7 @@ async fn login_account_chatgpt_device_code_returns_error_when_disabled() -> Resu
     mock_device_code_usercode_failure(&mock_server, /*status*/ 404).await;
 
     let issuer = mock_server.uri();
-    let mut mcp = McpProcess::new_with_env(
+    let mut app_server = AppServerProcess::new_with_env(
         codex_home.path(),
         &[
             ("OPENAI_API_KEY", None),
@@ -1027,12 +1038,14 @@ async fn login_account_chatgpt_device_code_returns_error_when_disabled() -> Resu
         ],
     )
     .await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = mcp.send_login_account_chatgpt_device_code_request().await?;
+    let request_id = app_server
+        .send_login_account_chatgpt_device_code_request()
+        .await?;
     let err: JSONRPCError = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_error_message(RequestId::Integer(request_id)),
     )
     .await??;
     assert!(
@@ -1045,7 +1058,7 @@ async fn login_account_chatgpt_device_code_returns_error_when_disabled() -> Resu
 
     let maybe_completed = timeout(
         Duration::from_millis(500),
-        mcp.read_stream_until_notification_message("account/login/completed"),
+        app_server.read_stream_until_notification_message("account/login/completed"),
     )
     .await;
     assert!(
@@ -1084,7 +1097,7 @@ async fn login_account_chatgpt_device_code_succeeds_and_notifies() -> Result<()>
     mock_device_code_oauth_token(&mock_server, &id_token).await;
 
     let issuer = mock_server.uri();
-    let mut mcp = McpProcess::new_with_env(
+    let mut app_server = AppServerProcess::new_with_env(
         codex_home.path(),
         &[
             ("OPENAI_API_KEY", None),
@@ -1092,12 +1105,14 @@ async fn login_account_chatgpt_device_code_succeeds_and_notifies() -> Result<()>
         ],
     )
     .await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = mcp.send_login_account_chatgpt_device_code_request().await?;
+    let request_id = app_server
+        .send_login_account_chatgpt_device_code_request()
+        .await?;
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
     let login: LoginAccountResponse = to_response(resp)?;
@@ -1114,7 +1129,7 @@ async fn login_account_chatgpt_device_code_succeeds_and_notifies() -> Result<()>
 
     let note = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("account/login/completed"),
+        app_server.read_stream_until_notification_message("account/login/completed"),
     )
     .await??;
     let parsed: ServerNotification = note.try_into()?;
@@ -1127,7 +1142,7 @@ async fn login_account_chatgpt_device_code_succeeds_and_notifies() -> Result<()>
 
     let note = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("account/updated"),
+        app_server.read_stream_until_notification_message("account/updated"),
     )
     .await??;
     let parsed: ServerNotification = note.try_into()?;
@@ -1161,7 +1176,7 @@ async fn login_account_chatgpt_device_code_failure_notifies_without_account_upda
     mock_device_code_token_failure(&mock_server, /*status*/ 500).await;
 
     let issuer = mock_server.uri();
-    let mut mcp = McpProcess::new_with_env(
+    let mut app_server = AppServerProcess::new_with_env(
         codex_home.path(),
         &[
             ("OPENAI_API_KEY", None),
@@ -1169,12 +1184,14 @@ async fn login_account_chatgpt_device_code_failure_notifies_without_account_upda
         ],
     )
     .await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = mcp.send_login_account_chatgpt_device_code_request().await?;
+    let request_id = app_server
+        .send_login_account_chatgpt_device_code_request()
+        .await?;
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
     let login: LoginAccountResponse = to_response(resp)?;
@@ -1184,7 +1201,7 @@ async fn login_account_chatgpt_device_code_failure_notifies_without_account_upda
 
     let note = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("account/login/completed"),
+        app_server.read_stream_until_notification_message("account/login/completed"),
     )
     .await??;
     let parsed: ServerNotification = note.try_into()?;
@@ -1204,7 +1221,7 @@ async fn login_account_chatgpt_device_code_failure_notifies_without_account_upda
 
     let maybe_updated = timeout(
         Duration::from_millis(500),
-        mcp.read_stream_until_notification_message("account/updated"),
+        app_server.read_stream_until_notification_message("account/updated"),
     )
     .await;
     assert!(
@@ -1236,7 +1253,7 @@ async fn login_account_chatgpt_device_code_can_be_cancelled() -> Result<()> {
     mock_device_code_token_failure(&mock_server, /*status*/ 404).await;
 
     let issuer = mock_server.uri();
-    let mut mcp = McpProcess::new_with_env(
+    let mut app_server = AppServerProcess::new_with_env(
         codex_home.path(),
         &[
             ("OPENAI_API_KEY", None),
@@ -1244,12 +1261,14 @@ async fn login_account_chatgpt_device_code_can_be_cancelled() -> Result<()> {
         ],
     )
     .await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = mcp.send_login_account_chatgpt_device_code_request().await?;
+    let request_id = app_server
+        .send_login_account_chatgpt_device_code_request()
+        .await?;
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
     let login: LoginAccountResponse = to_response(resp)?;
@@ -1257,14 +1276,14 @@ async fn login_account_chatgpt_device_code_can_be_cancelled() -> Result<()> {
         bail!("unexpected login response: {login:?}");
     };
 
-    let cancel_id = mcp
+    let cancel_id = app_server
         .send_cancel_login_account_request(CancelLoginAccountParams {
             login_id: login_id.clone(),
         })
         .await?;
     let cancel_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(cancel_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(cancel_id)),
     )
     .await??;
     let cancel: CancelLoginAccountResponse = to_response(cancel_resp)?;
@@ -1272,7 +1291,7 @@ async fn login_account_chatgpt_device_code_can_be_cancelled() -> Result<()> {
 
     let note = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("account/login/completed"),
+        app_server.read_stream_until_notification_message("account/login/completed"),
     )
     .await??;
     let parsed: ServerNotification = note.try_into()?;
@@ -1288,7 +1307,7 @@ async fn login_account_chatgpt_device_code_can_be_cancelled() -> Result<()> {
 
     let maybe_updated = timeout(
         Duration::from_millis(500),
-        mcp.read_stream_until_notification_message("account/updated"),
+        app_server.read_stream_until_notification_message("account/updated"),
     )
     .await;
     assert!(
@@ -1309,13 +1328,13 @@ async fn login_account_chatgpt_start_can_be_cancelled() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path(), CreateConfigTomlParams::default())?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = mcp.send_login_account_chatgpt_request().await?;
+    let request_id = app_server.send_login_account_chatgpt_request().await?;
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
 
@@ -1328,21 +1347,21 @@ async fn login_account_chatgpt_start_can_be_cancelled() -> Result<()> {
         "auth_url should contain a redirect_uri to localhost"
     );
 
-    let cancel_id = mcp
+    let cancel_id = app_server
         .send_cancel_login_account_request(CancelLoginAccountParams {
             login_id: login_id.clone(),
         })
         .await?;
     let cancel_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(cancel_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(cancel_id)),
     )
     .await??;
     let _ok: CancelLoginAccountResponse = to_response(cancel_resp)?;
 
     let note = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("account/login/completed"),
+        app_server.read_stream_until_notification_message("account/login/completed"),
     )
     .await??;
     let parsed: ServerNotification = note.try_into()?;
@@ -1358,7 +1377,7 @@ async fn login_account_chatgpt_start_can_be_cancelled() -> Result<()> {
 
     let maybe_updated = timeout(
         Duration::from_millis(500),
-        mcp.read_stream_until_notification_message("account/updated"),
+        app_server.read_stream_until_notification_message("account/updated"),
     )
     .await;
     assert!(
@@ -1375,14 +1394,14 @@ async fn set_auth_token_cancels_active_chatgpt_login() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path(), CreateConfigTomlParams::default())?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
     // Initiate the ChatGPT login flow
-    let request_id = mcp.send_login_account_chatgpt_request().await?;
+    let request_id = app_server.send_login_account_chatgpt_request().await?;
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
 
@@ -1399,7 +1418,7 @@ async fn set_auth_token_cancels_active_chatgpt_login() -> Result<()> {
     )?;
     // Set an external auth token instead of completing the ChatGPT login flow.
     // This should cancel the active login attempt.
-    let set_id = mcp
+    let set_id = app_server
         .send_chatgpt_auth_tokens_login_request(
             access_token,
             WORKSPACE_ID_EMBEDDED.to_string(),
@@ -1408,27 +1427,27 @@ async fn set_auth_token_cancels_active_chatgpt_login() -> Result<()> {
         .await?;
     let set_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(set_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(set_id)),
     )
     .await??;
     let response: LoginAccountResponse = to_response(set_resp)?;
     assert_eq!(response, LoginAccountResponse::ChatgptAuthTokens {});
     let _updated = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("account/updated"),
+        app_server.read_stream_until_notification_message("account/updated"),
     )
     .await??;
 
     // Verify that the active login attempt was cancelled.
     // We check this by trying to cancel it and expecting a not found error.
-    let cancel_id = mcp
+    let cancel_id = app_server
         .send_cancel_login_account_request(CancelLoginAccountParams {
             login_id: login_id.clone(),
         })
         .await?;
     let cancel_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(cancel_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(cancel_id)),
     )
     .await??;
     let cancel: CancelLoginAccountResponse = to_response(cancel_resp)?;
@@ -1450,13 +1469,13 @@ async fn login_account_chatgpt_includes_forced_workspace_query_param() -> Result
         },
     )?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = mcp.send_login_account_chatgpt_request().await?;
+    let request_id = app_server.send_login_account_chatgpt_request().await?;
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
 
@@ -1487,13 +1506,13 @@ async fn login_account_chatgpt_includes_forced_workspace_allowlist_query_param()
         },
     )?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = mcp.send_login_account_chatgpt_request().await?;
+    let request_id = app_server.send_login_account_chatgpt_request().await?;
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
 
@@ -1526,17 +1545,18 @@ async fn get_account_no_auth() -> Result<()> {
         },
     )?;
 
-    let mut mcp = McpProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server =
+        AppServerProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
     let params = GetAccountParams {
         refresh_token: false,
     };
-    let request_id = mcp.send_get_account_request(params).await?;
+    let request_id = app_server.send_get_account_request(params).await?;
 
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
     let account: GetAccountResponse = to_response(resp)?;
@@ -1557,15 +1577,15 @@ async fn get_account_with_api_key() -> Result<()> {
         },
     )?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let req_id = mcp
+    let req_id = app_server
         .send_login_account_api_key_request("sk-test-key")
         .await?;
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(req_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(req_id)),
     )
     .await??;
     let _login_ok = to_response::<LoginAccountResponse>(resp)?;
@@ -1573,11 +1593,11 @@ async fn get_account_with_api_key() -> Result<()> {
     let params = GetAccountParams {
         refresh_token: false,
     };
-    let request_id = mcp.send_get_account_request(params).await?;
+    let request_id = app_server.send_get_account_request(params).await?;
 
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
     let received: GetAccountResponse = to_response(resp)?;
@@ -1601,17 +1621,17 @@ async fn get_account_when_auth_not_required() -> Result<()> {
         },
     )?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
     let params = GetAccountParams {
         refresh_token: false,
     };
-    let request_id = mcp.send_get_account_request(params).await?;
+    let request_id = app_server.send_get_account_request(params).await?;
 
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
     let received: GetAccountResponse = to_response(resp)?;
@@ -1642,17 +1662,18 @@ async fn get_account_with_chatgpt() -> Result<()> {
         AuthCredentialsStoreMode::File,
     )?;
 
-    let mut mcp = McpProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server =
+        AppServerProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
     let params = GetAccountParams {
         refresh_token: false,
     };
-    let request_id = mcp.send_get_account_request(params).await?;
+    let request_id = app_server.send_get_account_request(params).await?;
 
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
     let received: GetAccountResponse = to_response(resp)?;
@@ -1702,7 +1723,7 @@ async fn get_account_omits_chatgpt_after_permanent_refresh_failure() -> Result<(
         .await;
 
     let refresh_url = format!("{}/oauth/token", server.uri());
-    let mut mcp = McpProcess::new_with_env(
+    let mut app_server = AppServerProcess::new_with_env(
         codex_home.path(),
         &[
             ("OPENAI_API_KEY", None),
@@ -1713,9 +1734,9 @@ async fn get_account_omits_chatgpt_after_permanent_refresh_failure() -> Result<(
         ],
     )
     .await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let auth_status_request_id = mcp
+    let auth_status_request_id = app_server
         .send_get_auth_status_request(GetAuthStatusParams {
             include_token: Some(true),
             refresh_token: Some(true),
@@ -1723,12 +1744,12 @@ async fn get_account_omits_chatgpt_after_permanent_refresh_failure() -> Result<(
         .await?;
     let auth_status_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(auth_status_request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(auth_status_request_id)),
     )
     .await??;
     let _: GetAuthStatusResponse = to_response(auth_status_resp)?;
 
-    let request_id = mcp
+    let request_id = app_server
         .send_get_account_request(GetAccountParams {
             refresh_token: false,
         })
@@ -1736,7 +1757,7 @@ async fn get_account_omits_chatgpt_after_permanent_refresh_failure() -> Result<(
 
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
     let received: GetAccountResponse = to_response(resp)?;
@@ -1768,17 +1789,18 @@ async fn get_account_with_chatgpt_missing_plan_claim_returns_unknown() -> Result
         AuthCredentialsStoreMode::File,
     )?;
 
-    let mut mcp = McpProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server =
+        AppServerProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
     let params = GetAccountParams {
         refresh_token: false,
     };
-    let request_id = mcp.send_get_account_request(params).await?;
+    let request_id = app_server.send_get_account_request(params).await?;
 
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
     let received: GetAccountResponse = to_response(resp)?;
