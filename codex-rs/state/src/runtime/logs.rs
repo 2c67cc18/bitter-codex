@@ -310,7 +310,7 @@ WHERE id IN (
     }
 }
 
-fn push_log_filters<'a>(builder: &mut QueryBuilder<'a, Sqlite>, query: &'a LogQuery) {
+fn push_log_filters(builder: &mut QueryBuilder<Sqlite>, query: &LogQuery) {
     if !query.levels_upper.is_empty() {
         builder.push(" AND UPPER(level) IN (");
         {
@@ -358,11 +358,7 @@ fn push_log_filters<'a>(builder: &mut QueryBuilder<'a, Sqlite>, query: &'a LogQu
     }
 }
 
-fn push_like_filters<'a>(
-    builder: &mut QueryBuilder<'a, Sqlite>,
-    column: &str,
-    filters: &'a [String],
-) {
+fn push_like_filters(builder: &mut QueryBuilder<Sqlite>, column: &str, filters: &[String]) {
     if filters.is_empty() {
         return;
     }
