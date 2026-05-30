@@ -1985,21 +1985,16 @@ impl ThreadRequestProcessor {
                 )));
             }
             None
-        } else if let Ok(existing_thread_id) = ThreadId::from_string(&params.thread_id)
-            && let Ok(existing_thread) = self.thread_manager.get_thread(existing_thread_id).await
-        {
-            let source_thread = self
-                .read_stored_thread_for_resume(&params.thread_id, None, true)
-                .await?;
-            if source_thread.thread_id != existing_thread_id {
-                return Err(invalid_request(format!(
-                    "cannot resume running thread {existing_thread_id} from source thread {}",
-                    source_thread.thread_id
-                )));
-            }
-            Some((existing_thread_id, existing_thread, source_thread))
         } else {
-            None
+            let source_thread = self
+                .read_stored_thread_for_resume(&params.thread_id, params.path.as_ref(), true)
+                .await?;
+            let existing_thread_id = source_thread.thread_id;
+            if let Ok(existing_thread) = self.thread_manager.get_thread(existing_thread_id).await {
+                Some((existing_thread_id, existing_thread, source_thread))
+            } else {
+                None
+            }
         };
 
         if let Some((existing_thread_id, existing_thread, source_thread)) = running_thread {
@@ -2015,6 +2010,43 @@ impl ThreadRequestProcessor {
                     requested_path.display(),
                     active_path.display()
                 )));
+            }
+            let config_snapshot = existing_thread.config_snapshot().await;
+            let mismatch_details = collect_resume_override_mismatches(params, &config_snapshot);
+            if !mismatch_details.is_empty() {
+                let has_subscribers = !self
+                    .thread_state_manager
+                    .subscribed_connection_ids(existing_thread_id)
+                    .await
+                    .is_empty();
+                let loaded_status = self
+                    .thread_watch_manager
+                    .loaded_status_for_thread(&existing_thread_id.to_string())
+                    .await;
+
+                if !has_subscribers && matches!(loaded_status, ThreadStatus::Idle) {
+                    // Locally, ThreadStatus::Idle is only emitted when the
+                    // loaded runtime is not active and has no pending input.
+                    match wait_for_thread_shutdown(&existing_thread).await {
+                        ThreadShutdownResult::Complete => {
+                            self.thread_manager.remove_thread(&existing_thread_id).await;
+                            self.finalize_thread_teardown(existing_thread_id).await;
+                            return Ok(false);
+                        }
+                        ThreadShutdownResult::SubmitFailed => {
+                            warn!("failed to submit Shutdown to thread {existing_thread_id}");
+                        }
+                        ThreadShutdownResult::TimedOut => {
+                            warn!("thread {existing_thread_id} shutdown timed out");
+                        }
+                    }
+                }
+
+                tracing::warn!(
+                    "thread/resume overrides ignored for loaded thread {}: {}",
+                    existing_thread_id,
+                    mismatch_details.join("; ")
+                );
             }
             let history_items = source_thread
                 .history
@@ -2043,15 +2075,6 @@ impl ThreadRequestProcessor {
             )
             .await?;
 
-            let config_snapshot = existing_thread.config_snapshot().await;
-            let mismatch_details = collect_resume_override_mismatches(params, &config_snapshot);
-            if !mismatch_details.is_empty() {
-                tracing::warn!(
-                    "thread/resume overrides ignored for running thread {}: {}",
-                    existing_thread_id,
-                    mismatch_details.join("; ")
-                );
-            }
             let mut summary_source_thread = source_thread;
             summary_source_thread.history = None;
             let mut thread_summary = self.stored_thread_to_api_thread(
