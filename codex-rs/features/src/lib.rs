@@ -6,14 +6,11 @@ use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Feature {
-    ShellZshFork,
     WebSearchRequest,
     WebSearchCached,
     ShellSnapshot,
     RuntimeMetrics,
-    EnableRequestCompression,
     ImageGeneration,
-    FastMode,
     ResponsesWebsocketResponseProcessed,
 }
 
@@ -239,11 +236,6 @@ pub struct FeatureSpec {
 
 pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
-        id: Feature::ShellZshFork,
-        key: "shell_zsh_fork",
-        default_enabled: false,
-    },
-    FeatureSpec {
         id: Feature::ShellSnapshot,
         key: "shell_snapshot",
         default_enabled: true,
@@ -264,19 +256,9 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
-        id: Feature::EnableRequestCompression,
-        key: "enable_request_compression",
-        default_enabled: true,
-    },
-    FeatureSpec {
         id: Feature::ImageGeneration,
         key: "image_generation",
         default_enabled: false,
-    },
-    FeatureSpec {
-        id: Feature::FastMode,
-        key: "fast_mode",
-        default_enabled: true,
     },
     FeatureSpec {
         id: Feature::ResponsesWebsocketResponseProcessed,

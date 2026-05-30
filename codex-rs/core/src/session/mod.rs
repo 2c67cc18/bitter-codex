@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-use crate::context::ContextualUserFragment;
 use crate::config::ManagedFeatures;
+use crate::context::ContextualUserFragment;
 use crate::path_utils::normalize_for_native_workdir;
 use crate::turn_metadata::TurnMetadataState;
 use crate::turn_timing::now_unix_timestamp_ms;
@@ -295,11 +295,7 @@ impl Codex {
             .clone()
             .or_else(|| conversation_history.get_base_instructions().map(|s| s.text))
             .unwrap_or_else(|| model_info.get_model_instructions());
-        let service_tier = get_service_tier(
-            config.service_tier.clone(),
-            config.features.enabled(Feature::FastMode),
-            &model_info,
-        );
+        let service_tier = get_service_tier(config.service_tier.clone(), &model_info);
         let session_configuration = SessionConfiguration {
             provider: config.model_provider.clone(),
             model,
@@ -457,12 +453,8 @@ impl Codex {
 
 fn get_service_tier(
     configured_service_tier: Option<String>,
-    fast_mode_enabled: bool,
     model_info: &ModelInfo,
 ) -> Option<String> {
-    if !fast_mode_enabled {
-        return None;
-    }
     configured_service_tier.filter(|service_tier| {
         service_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE
             || model_info.supports_service_tier(service_tier)
@@ -503,7 +495,6 @@ async fn thread_title_from_thread_store(
 }
 
 impl Session {
-
     pub(crate) fn state_db(&self) -> Option<state_db::StateDbHandle> {
         self.services.state_db.clone()
     }
@@ -1217,7 +1208,6 @@ impl Session {
         .await;
     }
 
-
     async fn active_turn_context_and_cancellation_token(
         &self,
     ) -> Option<(Arc<TurnContext>, CancellationToken)> {
@@ -1371,6 +1361,4 @@ impl Session {
     pub(crate) fn user_shell(&self) -> Arc<shell::Shell> {
         Arc::clone(&self.services.user_shell)
     }
-
-
 }
