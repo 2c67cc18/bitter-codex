@@ -29,7 +29,7 @@ pub fn create_view_image_tool(options: ViewImageToolOptions) -> ToolSpec {
     }
     ToolSpec::Function(ResponsesApiTool {
         name: VIEW_IMAGE_TOOL_NAME.to_string(),
-        description: "View a local image from the filesystem (only use if given a full filepath by the user, and the image isn't already attached to the thread context within <image ...> tags)."
+        description: "View a local image file from the filesystem when visual inspection is needed. Use this for images already available on disk."
             .to_string(),
         strict: false,
         defer_loading: None,
@@ -55,4 +55,28 @@ fn view_image_output_schema() -> Value {
         "required": ["image_url", "detail"],
         "additionalProperties": false
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codex_tools::ToolSpec;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn view_image_description_uses_visual_inspection_wording() {
+        let tool = create_view_image_tool(ViewImageToolOptions {
+            can_request_original_image_detail: false,
+        });
+
+        match tool {
+            ToolSpec::Function(function) => {
+                assert_eq!(
+                    function.description,
+                    "View a local image file from the filesystem when visual inspection is needed. Use this for images already available on disk."
+                );
+            }
+            other => panic!("expected function tool spec but got {other:?}"),
+        }
+    }
 }
