@@ -608,8 +608,7 @@ ON CONFLICT(thread_id, position) DO NOTHING
     }
 }
 
-
-pub(super) fn push_thread_select_columns(builder: &mut QueryBuilder<'_, Sqlite>) {
+pub(super) fn push_thread_select_columns(builder: &mut QueryBuilder<Sqlite>) {
     builder.push(
         r#"
 SELECT
@@ -658,7 +657,7 @@ pub struct ThreadFilterOptions<'a> {
 }
 
 pub(super) fn push_thread_filters<'a>(
-    builder: &mut QueryBuilder<'a, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     options: ThreadFilterOptions<'a>,
 ) {
     let ThreadFilterOptions {
@@ -738,7 +737,7 @@ pub(super) fn push_thread_filters<'a>(
 }
 
 pub(super) fn push_thread_order_and_limit(
-    builder: &mut QueryBuilder<'_, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     sort_key: SortKey,
     sort_direction: SortDirection,
     limit: usize,
