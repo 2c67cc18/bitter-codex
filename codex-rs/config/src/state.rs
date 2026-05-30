@@ -43,6 +43,10 @@ impl LoaderOverrides {
         }
     }
 
+    pub fn without_system_config_for_tests() -> Self {
+        Self::for_tests()
+    }
+
     pub fn user_config_path(&self, codex_home: &Path) -> std::io::Result<AbsolutePathBuf> {
         match self.user_config_path.as_ref() {
             Some(path) => Ok(path.clone()),
