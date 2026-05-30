@@ -17,13 +17,11 @@ use tracing::warn;
 
 pub const CHANNEL_CAPACITY: usize = 128;
 
-mod stdio;
 mod unix_socket;
 #[cfg(test)]
 mod unix_socket_tests;
 mod websocket;
 
-pub use stdio::start_stdio_connection;
 pub use unix_socket::AppServerStartupLock;
 pub use unix_socket::acquire_app_server_startup_lock;
 pub use unix_socket::prepare_control_socket_path;
@@ -53,7 +51,6 @@ pub fn app_server_startup_lock_path(codex_home: &Path) -> std::io::Result<Absolu
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AppServerTransport {
-    Stdio,
     UnixSocket { socket_path: AbsolutePathBuf },
     Off,
 }
@@ -69,7 +66,7 @@ impl std::fmt::Display for AppServerTransportParseError {
         match self {
             AppServerTransportParseError::UnsupportedListenUrl(listen_url) => write!(
                 f,
-                "unsupported --listen URL `{listen_url}`; expected `stdio://`, `unix://`, `unix://PATH`, or `off`"
+                "unsupported --listen URL `{listen_url}`; expected `unix://`, `unix://PATH`, or `off`"
             ),
             AppServerTransportParseError::InvalidUnixSocketPath {
                 listen_url,
@@ -88,10 +85,6 @@ impl AppServerTransport {
     pub const DEFAULT_LISTEN_URL: &'static str = "unix://";
 
     pub fn from_listen_url(listen_url: &str) -> Result<Self, AppServerTransportParseError> {
-        if listen_url == "stdio://" {
-            return Ok(Self::Stdio);
-        }
-
         if let Some(raw_socket_path) = listen_url.strip_prefix("unix://") {
             let socket_path = if raw_socket_path.is_empty() {
                 let codex_home = find_codex_home().map_err(|err| {
@@ -154,7 +147,6 @@ pub enum TransportEvent {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionOrigin {
-    Stdio,
     InProcess,
     WebSocket,
 }

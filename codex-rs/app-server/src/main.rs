@@ -18,8 +18,8 @@ const DISABLE_MANAGED_CONFIG_ENV_VAR: &str = "CODEX_APP_SERVER_DISABLE_MANAGED_C
 #[derive(Debug, Parser)]
 #[command(version)]
 struct AppServerArgs {
-    /// Transport endpoint URL. Supported values: `stdio://`, `unix://` (default),
-    /// `unix://PATH`, `off`.
+    /// Transport endpoint URL. Supported values: `unix://` (default), `unix://PATH`,
+    /// `off`.
     #[arg(
         long = "listen",
         value_name = "URL",

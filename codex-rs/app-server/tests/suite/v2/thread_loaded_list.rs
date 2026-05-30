@@ -1,5 +1,5 @@
 use anyhow::Result;
-use app_test_support::McpProcess;
+use app_test_support::AppServerProcess;
 use app_test_support::create_mock_responses_server_repeating_assistant;
 use app_test_support::to_response;
 use codex_app_server_protocol::JSONRPCResponse;
@@ -21,17 +21,17 @@ async fn thread_loaded_list_returns_loaded_thread_ids() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path(), &server.uri())?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let thread_id = start_thread(&mut mcp).await?;
+    let thread_id = start_thread(&mut app_server).await?;
 
-    let list_id = mcp
+    let list_id = app_server
         .send_thread_loaded_list_request(ThreadLoadedListParams::default())
         .await?;
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(list_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(list_id)),
     )
     .await??;
     let ThreadLoadedListResponse {
@@ -51,16 +51,16 @@ async fn thread_loaded_list_paginates() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path(), &server.uri())?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let first = start_thread(&mut mcp).await?;
-    let second = start_thread(&mut mcp).await?;
+    let first = start_thread(&mut app_server).await?;
+    let second = start_thread(&mut app_server).await?;
 
     let mut expected = [first, second];
     expected.sort();
 
-    let list_id = mcp
+    let list_id = app_server
         .send_thread_loaded_list_request(ThreadLoadedListParams {
             cursor: None,
             limit: Some(1),
@@ -68,7 +68,7 @@ async fn thread_loaded_list_paginates() -> Result<()> {
         .await?;
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(list_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(list_id)),
     )
     .await??;
     let ThreadLoadedListResponse {
@@ -78,7 +78,7 @@ async fn thread_loaded_list_paginates() -> Result<()> {
     assert_eq!(first_page, vec![expected[0].clone()]);
     assert_eq!(next_cursor, Some(expected[0].clone()));
 
-    let list_id = mcp
+    let list_id = app_server
         .send_thread_loaded_list_request(ThreadLoadedListParams {
             cursor: next_cursor,
             limit: Some(1),
@@ -86,7 +86,7 @@ async fn thread_loaded_list_paginates() -> Result<()> {
         .await?;
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(list_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(list_id)),
     )
     .await??;
     let ThreadLoadedListResponse {
@@ -122,8 +122,8 @@ stream_max_retries = 0
     )
 }
 
-async fn start_thread(mcp: &mut McpProcess) -> Result<String> {
-    let req_id = mcp
+async fn start_thread(app_server: &mut AppServerProcess) -> Result<String> {
+    let req_id = app_server
         .send_thread_start_request(ThreadStartParams {
             model: Some("gpt-5.2".to_string()),
             ..Default::default()
@@ -131,7 +131,7 @@ async fn start_thread(mcp: &mut McpProcess) -> Result<String> {
         .await?;
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(req_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(req_id)),
     )
     .await??;
     let ThreadStartResponse { thread, .. } = to_response::<ThreadStartResponse>(resp)?;

@@ -211,7 +211,7 @@ async fn broadcast_does_not_block_on_slow_connection() {
 }
 
 #[tokio::test]
-async fn to_connection_stdio_waits_instead_of_disconnecting_when_writer_queue_is_full() {
+async fn to_connection_waits_instead_of_disconnecting_when_writer_queue_is_full() {
     let connection_id = ConnectionId(3);
     let (writer_tx, mut writer_rx) = mpsc::channel(1);
     writer_tx

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use app_test_support::McpProcess;
+use app_test_support::AppServerProcess;
 use app_test_support::create_mock_responses_server_repeating_assistant;
 use app_test_support::to_response;
 use codex_app_server_protocol::JSONRPCResponse;
@@ -31,19 +31,19 @@ async fn thread_unsubscribe_keeps_thread_loaded_until_idle_timeout() -> Result<(
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path(), &server.uri())?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let thread_id = start_thread(&mut mcp).await?;
+    let thread_id = start_thread(&mut app_server).await?;
 
-    let unsubscribe_id = mcp
+    let unsubscribe_id = app_server
         .send_thread_unsubscribe_request(ThreadUnsubscribeParams {
             thread_id: thread_id.clone(),
         })
         .await?;
     let unsubscribe_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(unsubscribe_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(unsubscribe_id)),
     )
     .await??;
     let unsubscribe = to_response::<ThreadUnsubscribeResponse>(unsubscribe_resp)?;
@@ -52,18 +52,18 @@ async fn thread_unsubscribe_keeps_thread_loaded_until_idle_timeout() -> Result<(
     assert!(
         timeout(
             std::time::Duration::from_millis(250),
-            mcp.read_stream_until_notification_message("thread/closed"),
+            app_server.read_stream_until_notification_message("thread/closed"),
         )
         .await
         .is_err()
     );
 
-    let list_id = mcp
+    let list_id = app_server
         .send_thread_loaded_list_request(ThreadLoadedListParams::default())
         .await?;
     let list_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(list_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(list_id)),
     )
     .await??;
     let ThreadLoadedListResponse { data, next_cursor } =
@@ -85,12 +85,12 @@ async fn thread_unsubscribe_preserves_cached_status_before_idle_unload() -> Resu
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path(), &server.uri())?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let thread_id = start_thread(&mut mcp).await?;
+    let thread_id = start_thread(&mut app_server).await?;
 
-    let turn_req = mcp
+    let turn_req = app_server
         .send_turn_start_request(TurnStartParams {
             thread_id: thread_id.clone(),
             input: vec![V2UserInput::Text {
@@ -102,17 +102,17 @@ async fn thread_unsubscribe_preserves_cached_status_before_idle_unload() -> Resu
         .await?;
     let turn_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(turn_req)),
+        app_server.read_stream_until_response_message(RequestId::Integer(turn_req)),
     )
     .await??;
     let _: TurnStartResponse = to_response::<TurnStartResponse>(turn_resp)?;
     timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("error"),
+        app_server.read_stream_until_notification_message("error"),
     )
     .await??;
 
-    let read_id = mcp
+    let read_id = app_server
         .send_thread_read_request(ThreadReadParams {
             thread_id: thread_id.clone(),
             include_turns: false,
@@ -120,20 +120,20 @@ async fn thread_unsubscribe_preserves_cached_status_before_idle_unload() -> Resu
         .await?;
     let read_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(read_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(read_id)),
     )
     .await??;
     let ThreadReadResponse { thread, .. } = to_response::<ThreadReadResponse>(read_resp)?;
     assert_eq!(thread.status, ThreadStatus::SystemError);
 
-    let unsubscribe_id = mcp
+    let unsubscribe_id = app_server
         .send_thread_unsubscribe_request(ThreadUnsubscribeParams {
             thread_id: thread_id.clone(),
         })
         .await?;
     let unsubscribe_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(unsubscribe_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(unsubscribe_id)),
     )
     .await??;
     let unsubscribe = to_response::<ThreadUnsubscribeResponse>(unsubscribe_resp)?;
@@ -141,13 +141,13 @@ async fn thread_unsubscribe_preserves_cached_status_before_idle_unload() -> Resu
     assert!(
         timeout(
             std::time::Duration::from_millis(250),
-            mcp.read_stream_until_notification_message("thread/closed"),
+            app_server.read_stream_until_notification_message("thread/closed"),
         )
         .await
         .is_err()
     );
 
-    let resume_id = mcp
+    let resume_id = app_server
         .send_thread_resume_request(ThreadResumeParams {
             thread_id,
             cwd: Some(codex_home.path().to_string_lossy().to_string()),
@@ -156,7 +156,7 @@ async fn thread_unsubscribe_preserves_cached_status_before_idle_unload() -> Resu
         .await?;
     let resume_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(resume_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(resume_id)),
     )
     .await??;
     let resume: ThreadResumeResponse = to_response::<ThreadResumeResponse>(resume_resp)?;
@@ -171,19 +171,19 @@ async fn thread_unsubscribe_reports_not_subscribed_before_idle_unload() -> Resul
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path(), &server.uri())?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let thread_id = start_thread(&mut mcp).await?;
+    let thread_id = start_thread(&mut app_server).await?;
 
-    let first_unsubscribe_id = mcp
+    let first_unsubscribe_id = app_server
         .send_thread_unsubscribe_request(ThreadUnsubscribeParams {
             thread_id: thread_id.clone(),
         })
         .await?;
     let first_unsubscribe_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(first_unsubscribe_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(first_unsubscribe_id)),
     )
     .await??;
     let first_unsubscribe = to_response::<ThreadUnsubscribeResponse>(first_unsubscribe_resp)?;
@@ -192,12 +192,12 @@ async fn thread_unsubscribe_reports_not_subscribed_before_idle_unload() -> Resul
         ThreadUnsubscribeStatus::Unsubscribed
     );
 
-    let second_unsubscribe_id = mcp
+    let second_unsubscribe_id = app_server
         .send_thread_unsubscribe_request(ThreadUnsubscribeParams { thread_id })
         .await?;
     let second_unsubscribe_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(second_unsubscribe_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(second_unsubscribe_id)),
     )
     .await??;
     let second_unsubscribe = to_response::<ThreadUnsubscribeResponse>(second_unsubscribe_resp)?;
@@ -232,8 +232,8 @@ stream_max_retries = 0
     )
 }
 
-async fn start_thread(mcp: &mut McpProcess) -> Result<String> {
-    let req_id = mcp
+async fn start_thread(app_server: &mut AppServerProcess) -> Result<String> {
+    let req_id = app_server
         .send_thread_start_request(ThreadStartParams {
             model: Some("mock-model".to_string()),
             ..Default::default()
@@ -241,7 +241,7 @@ async fn start_thread(mcp: &mut McpProcess) -> Result<String> {
         .await?;
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(req_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(req_id)),
     )
     .await??;
     let ThreadStartResponse { thread, .. } = to_response::<ThreadStartResponse>(resp)?;

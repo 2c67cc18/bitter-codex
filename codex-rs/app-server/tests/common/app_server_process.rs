@@ -1,14 +1,13 @@
 use std::collections::VecDeque;
+use std::io::ErrorKind;
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 use tokio::io::AsyncBufReadExt;
-use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
 use tokio::process::Child;
-use tokio::process::ChildStdin;
-use tokio::process::ChildStdout;
 
 use anyhow::Context;
 use codex_app_server_protocol::CancelLoginAccountParams;
@@ -55,32 +54,67 @@ use codex_app_server_protocol::TurnInterruptParams;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnSteerParams;
 use codex_login::default_client::CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR;
+use codex_uds::UnixStream;
+use futures::SinkExt;
+use futures::StreamExt;
 use tokio::process::Command;
+use tokio::time::Instant;
+use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::client_async;
+use tokio_tungstenite::tungstenite::Message as WebSocketMessage;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
-pub struct McpProcess {
+pub struct AppServerProcess {
     next_request_id: AtomicI64,
     /// Retain this child process until the client is dropped. The Tokio runtime
     /// will make a "best effort" to reap the process after it exits, but it is
     /// not a guarantee. See the `kill_on_drop` documentation for details.
     #[allow(dead_code)]
     process: Child,
-    stdin: Option<ChildStdin>,
-    stdout: BufReader<ChildStdout>,
+    websocket: Option<WebSocketStream<UnixStream>>,
     pending_messages: VecDeque<JSONRPCMessage>,
+}
+
+async fn connect_websocket(socket_path: &Path) -> anyhow::Result<WebSocketStream<UnixStream>> {
+    let request = UDS_WEBSOCKET_HANDSHAKE_URL
+        .into_client_request()
+        .context("invalid UDS websocket handshake URL")?;
+    let deadline = Instant::now() + CONNECT_TIMEOUT;
+
+    loop {
+        match UnixStream::connect(socket_path).await {
+            Ok(stream) => {
+                let (websocket, _response) = client_async(request.clone(), stream)
+                    .await
+                    .context("failed to upgrade app-server Unix socket to websocket")?;
+                return Ok(websocket);
+            }
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    ErrorKind::NotFound | ErrorKind::ConnectionRefused | ErrorKind::WouldBlock
+                ) && Instant::now() < deadline =>
+            {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            Err(err) => return Err(err).context("failed to connect to app-server Unix socket"),
+        }
+    }
 }
 
 pub const DEFAULT_CLIENT_NAME: &str = "codex-app-server-tests";
 pub const DISABLE_PLUGIN_STARTUP_TASKS_ARG: &str = "--disable-plugin-startup-tasks-for-tests";
-const STDIO_LISTEN_ARGS: &[&str] = &["--listen", "stdio://"];
 const DISABLE_MANAGED_CONFIG_ENV_VAR: &str = "CODEX_APP_SERVER_DISABLE_MANAGED_CONFIG";
+const UDS_WEBSOCKET_HANDSHAKE_URL: &str = "ws://localhost/rpc";
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn default_args() -> Vec<&'static str> {
-    let mut args = STDIO_LISTEN_ARGS.to_vec();
+    let mut args = Vec::new();
     args.push(DISABLE_PLUGIN_STARTUP_TASKS_ARG);
     args
 }
 
-impl McpProcess {
+impl AppServerProcess {
     pub async fn new(codex_home: &Path) -> anyhow::Result<Self> {
         let args = default_args();
         Self::new_with_env_and_args(codex_home, &[], &args).await
@@ -100,14 +134,14 @@ impl McpProcess {
     }
 
     pub async fn new_with_plugin_startup_tasks(codex_home: &Path) -> anyhow::Result<Self> {
-        Self::new_with_env_and_args(codex_home, &[], STDIO_LISTEN_ARGS).await
+        Self::new_with_env_and_args(codex_home, &[], &[]).await
     }
 
     pub async fn new_with_env_and_plugin_startup_tasks(
         codex_home: &Path,
         env_overrides: &[(&str, Option<&str>)],
     ) -> anyhow::Result<Self> {
-        Self::new_with_env_and_args(codex_home, env_overrides, STDIO_LISTEN_ARGS).await
+        Self::new_with_env_and_args(codex_home, env_overrides, &[]).await
     }
 
     pub async fn new_with_args(codex_home: &Path, args: &[&str]) -> anyhow::Result<Self> {
@@ -116,7 +150,7 @@ impl McpProcess {
         Self::new_with_env_and_args(codex_home, &[], &all_args).await
     }
 
-    /// Creates a new MCP process, allowing tests to override or remove
+    /// Creates a new app-server process, allowing tests to override or remove
     /// specific environment variables for the child process only.
     ///
     /// Pass a tuple of (key, Some(value)) to set/override, or (key, None) to
@@ -155,9 +189,11 @@ impl McpProcess {
         args: &[&str],
     ) -> anyhow::Result<Self> {
         let mut cmd = Command::new(program);
+        let socket_path = codex_home.join("app-server-test.sock");
+        let listen_arg = format!("unix://{}", socket_path.display());
 
-        cmd.stdin(Stdio::piped());
-        cmd.stdout(Stdio::piped());
+        cmd.stdin(Stdio::null());
+        cmd.stdout(Stdio::null());
         cmd.stderr(Stdio::piped());
         cmd.current_dir(codex_home);
         cmd.env("CODEX_HOME", codex_home);
@@ -169,6 +205,7 @@ impl McpProcess {
             codex_home.join("managed_config.toml"),
         );
         cmd.env_remove(CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR);
+        cmd.args(["--listen", listen_arg.as_str()]);
         cmd.args(args);
 
         for (k, v) in env_overrides {
@@ -185,37 +222,30 @@ impl McpProcess {
         let mut process = cmd
             .kill_on_drop(true)
             .spawn()
-            .context("codex-mcp-server proc should start")?;
-        let stdin = process
-            .stdin
-            .take()
-            .ok_or_else(|| anyhow::format_err!("mcp should have stdin fd"))?;
-        let stdout = process
-            .stdout
-            .take()
-            .ok_or_else(|| anyhow::format_err!("mcp should have stdout fd"))?;
-        let stdout = BufReader::new(stdout);
+            .context("codex-app-server process should start")?;
 
         // Forward child's stderr to our stderr so failures are visible even
-        // when stdout/stderr are captured by the test harness.
+        // when stderr is captured by the test harness.
         if let Some(stderr) = process.stderr.take() {
             let mut stderr_reader = BufReader::new(stderr).lines();
             tokio::spawn(async move {
                 while let Ok(Some(line)) = stderr_reader.next_line().await {
-                    eprintln!("[mcp stderr] {line}");
+                    eprintln!("[app-server stderr] {line}");
                 }
             });
         }
+        let websocket = connect_websocket(&socket_path)
+            .await
+            .with_context(|| format!("failed to connect to app-server at `{listen_arg}`"))?;
         Ok(Self {
             next_request_id: AtomicI64::new(0),
             process,
-            stdin: Some(stdin),
-            stdout,
+            websocket: Some(websocket),
             pending_messages: VecDeque::new(),
         })
     }
 
-    /// Performs the initialization handshake with the MCP server.
+    /// Performs the initialization handshake with the app-server.
     pub async fn initialize(&mut self) -> anyhow::Result<()> {
         let initialized = self
             .initialize_with_client_info(ClientInfo {
@@ -815,23 +845,41 @@ impl McpProcess {
     }
 
     async fn send_jsonrpc_message(&mut self, message: JSONRPCMessage) -> anyhow::Result<()> {
-        eprintln!("writing message to stdin: {message:?}");
-        let Some(stdin) = self.stdin.as_mut() else {
-            anyhow::bail!("mcp stdin closed");
+        eprintln!("writing message to app-server websocket: {message:?}");
+        let Some(websocket) = self.websocket.as_mut() else {
+            anyhow::bail!("app-server websocket closed");
         };
         let payload = serde_json::to_string(&message)?;
-        stdin.write_all(payload.as_bytes()).await?;
-        stdin.write_all(b"\n").await?;
-        stdin.flush().await?;
+        websocket
+            .send(WebSocketMessage::Text(payload.into()))
+            .await?;
         Ok(())
     }
 
     async fn read_jsonrpc_message(&mut self) -> anyhow::Result<JSONRPCMessage> {
-        let mut line = String::new();
-        self.stdout.read_line(&mut line).await?;
-        let message = serde_json::from_str::<JSONRPCMessage>(&line)?;
-        eprintln!("read message from stdout: {message:?}");
-        Ok(message)
+        let Some(websocket) = self.websocket.as_mut() else {
+            anyhow::bail!("app-server websocket closed");
+        };
+        loop {
+            let Some(frame) = websocket.next().await else {
+                anyhow::bail!("app-server websocket closed");
+            };
+            match frame? {
+                WebSocketMessage::Text(text) => {
+                    let message = serde_json::from_str::<JSONRPCMessage>(&text)?;
+                    eprintln!("read message from app-server websocket: {message:?}");
+                    return Ok(message);
+                }
+                WebSocketMessage::Binary(_) => {
+                    anyhow::bail!("unexpected binary message from app-server websocket");
+                }
+                WebSocketMessage::Ping(_) | WebSocketMessage::Pong(_) => {}
+                WebSocketMessage::Close(_) => {
+                    anyhow::bail!("app-server websocket closed");
+                }
+                WebSocketMessage::Frame(_) => {}
+            }
+        }
     }
 
     pub async fn read_stream_until_request_message(&mut self) -> anyhow::Result<ServerRequest> {
@@ -1009,7 +1057,7 @@ impl McpProcess {
     }
 }
 
-impl Drop for McpProcess {
+impl Drop for AppServerProcess {
     fn drop(&mut self) {
         // These tests spawn a `codex-app-server` child process.
         //
@@ -1023,11 +1071,11 @@ impl Drop for McpProcess {
         //
         // Drop can't be async, so we do a bounded synchronous cleanup:
         //
-        // 1. Close stdin to request a graceful shutdown via EOF.
+        // 1. Close the websocket so the server observes the client disconnect.
         // 2. Poll briefly for graceful exit.
         // 3. If still alive, request termination with `start_kill()`.
         // 4. Poll `try_wait()` until the OS reports the child exited, with a short timeout.
-        drop(self.stdin.take());
+        drop(self.websocket.take());
 
         let graceful_start = std::time::Instant::now();
         let graceful_timeout = std::time::Duration::from_millis(200);

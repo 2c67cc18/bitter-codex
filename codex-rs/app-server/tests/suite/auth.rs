@@ -1,6 +1,6 @@
 use anyhow::Result;
+use app_test_support::AppServerProcess;
 use app_test_support::ChatGptAuthFixture;
-use app_test_support::McpProcess;
 use app_test_support::to_response;
 use app_test_support::write_chatgpt_auth;
 use chrono::Duration;
@@ -92,12 +92,17 @@ shell_snapshot = false
     std::fs::write(config_toml, contents)
 }
 
-async fn login_with_api_key_via_request(mcp: &mut McpProcess, api_key: &str) -> Result<()> {
-    let request_id = mcp.send_login_account_api_key_request(api_key).await?;
+async fn login_with_api_key_via_request(
+    app_server: &mut AppServerProcess,
+    api_key: &str,
+) -> Result<()> {
+    let request_id = app_server
+        .send_login_account_api_key_request(api_key)
+        .await?;
 
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
     let response: LoginAccountResponse = to_response(resp)?;
@@ -110,10 +115,11 @@ async fn get_auth_status_no_auth() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path())?;
 
-    let mut mcp = McpProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server =
+        AppServerProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = mcp
+    let request_id = app_server
         .send_get_auth_status_request(GetAuthStatusParams {
             include_token: Some(true),
             refresh_token: Some(false),
@@ -122,7 +128,7 @@ async fn get_auth_status_no_auth() -> Result<()> {
 
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
     let status: GetAuthStatusResponse = to_response(resp)?;
@@ -136,12 +142,12 @@ async fn get_auth_status_with_api_key() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path())?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    login_with_api_key_via_request(&mut mcp, "sk-test-key").await?;
+    login_with_api_key_via_request(&mut app_server, "sk-test-key").await?;
 
-    let request_id = mcp
+    let request_id = app_server
         .send_get_auth_status_request(GetAuthStatusParams {
             include_token: Some(true),
             refresh_token: Some(false),
@@ -150,7 +156,7 @@ async fn get_auth_status_with_api_key() -> Result<()> {
 
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
     let status: GetAuthStatusResponse = to_response(resp)?;
@@ -164,12 +170,12 @@ async fn get_auth_status_with_api_key_when_auth_not_required() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml_custom_provider(codex_home.path(), /*requires_openai_auth*/ false)?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    login_with_api_key_via_request(&mut mcp, "sk-test-key").await?;
+    login_with_api_key_via_request(&mut app_server, "sk-test-key").await?;
 
-    let request_id = mcp
+    let request_id = app_server
         .send_get_auth_status_request(GetAuthStatusParams {
             include_token: Some(true),
             refresh_token: Some(false),
@@ -178,7 +184,7 @@ async fn get_auth_status_with_api_key_when_auth_not_required() -> Result<()> {
 
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
     let status: GetAuthStatusResponse = to_response(resp)?;
@@ -197,21 +203,21 @@ async fn get_auth_status_with_api_key_no_include_token() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path())?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    login_with_api_key_via_request(&mut mcp, "sk-test-key").await?;
+    login_with_api_key_via_request(&mut app_server, "sk-test-key").await?;
 
     // Build params via struct so None field is omitted in wire JSON.
     let params = GetAuthStatusParams {
         include_token: None,
         refresh_token: Some(false),
     };
-    let request_id = mcp.send_get_auth_status_request(params).await?;
+    let request_id = app_server.send_get_auth_status_request(params).await?;
 
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
     let status: GetAuthStatusResponse = to_response(resp)?;
@@ -225,12 +231,12 @@ async fn get_auth_status_with_api_key_refresh_requested() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path())?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    login_with_api_key_via_request(&mut mcp, "sk-test-key").await?;
+    login_with_api_key_via_request(&mut app_server, "sk-test-key").await?;
 
-    let request_id = mcp
+    let request_id = app_server
         .send_get_auth_status_request(GetAuthStatusParams {
             include_token: Some(true),
             refresh_token: Some(true),
@@ -239,7 +245,7 @@ async fn get_auth_status_with_api_key_refresh_requested() -> Result<()> {
 
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
     let status: GetAuthStatusResponse = to_response(resp)?;
@@ -281,7 +287,7 @@ async fn get_auth_status_omits_token_after_permanent_refresh_failure() -> Result
         .await;
 
     let refresh_url = format!("{}/oauth/token", server.uri());
-    let mut mcp = McpProcess::new_with_env(
+    let mut app_server = AppServerProcess::new_with_env(
         codex_home.path(),
         &[
             ("OPENAI_API_KEY", None),
@@ -292,9 +298,9 @@ async fn get_auth_status_omits_token_after_permanent_refresh_failure() -> Result
         ],
     )
     .await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = mcp
+    let request_id = app_server
         .send_get_auth_status_request(GetAuthStatusParams {
             include_token: Some(true),
             refresh_token: Some(true),
@@ -303,7 +309,7 @@ async fn get_auth_status_omits_token_after_permanent_refresh_failure() -> Result
 
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
     let status: GetAuthStatusResponse = to_response(resp)?;
@@ -316,7 +322,7 @@ async fn get_auth_status_omits_token_after_permanent_refresh_failure() -> Result
         }
     );
 
-    let second_request_id = mcp
+    let second_request_id = app_server
         .send_get_auth_status_request(GetAuthStatusParams {
             include_token: Some(true),
             refresh_token: Some(true),
@@ -325,7 +331,7 @@ async fn get_auth_status_omits_token_after_permanent_refresh_failure() -> Result
 
     let second_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(second_request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(second_request_id)),
     )
     .await??;
     let second_status: GetAuthStatusResponse = to_response(second_resp)?;
@@ -363,7 +369,7 @@ async fn get_auth_status_omits_token_after_proactive_refresh_failure() -> Result
         .await;
 
     let refresh_url = format!("{}/oauth/token", server.uri());
-    let mut mcp = McpProcess::new_with_env(
+    let mut app_server = AppServerProcess::new_with_env(
         codex_home.path(),
         &[
             ("OPENAI_API_KEY", None),
@@ -374,9 +380,9 @@ async fn get_auth_status_omits_token_after_proactive_refresh_failure() -> Result
         ],
     )
     .await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = mcp
+    let request_id = app_server
         .send_get_auth_status_request(GetAuthStatusParams {
             include_token: Some(true),
             refresh_token: Some(false),
@@ -385,7 +391,7 @@ async fn get_auth_status_omits_token_after_proactive_refresh_failure() -> Result
 
     let resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
     let status: GetAuthStatusResponse = to_response(resp)?;
@@ -430,7 +436,7 @@ async fn get_auth_status_returns_token_after_proactive_refresh_recovery() -> Res
         .await;
 
     let refresh_url = format!("{}/oauth/token", server.uri());
-    let mut mcp = McpProcess::new_with_env(
+    let mut app_server = AppServerProcess::new_with_env(
         codex_home.path(),
         &[
             ("OPENAI_API_KEY", None),
@@ -441,9 +447,9 @@ async fn get_auth_status_returns_token_after_proactive_refresh_recovery() -> Res
         ],
     )
     .await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let failed_request_id = mcp
+    let failed_request_id = app_server
         .send_get_auth_status_request(GetAuthStatusParams {
             include_token: Some(true),
             refresh_token: Some(true),
@@ -452,7 +458,7 @@ async fn get_auth_status_returns_token_after_proactive_refresh_recovery() -> Res
 
     let failed_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(failed_request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(failed_request_id)),
     )
     .await??;
     let failed_status: GetAuthStatusResponse = to_response(failed_resp)?;
@@ -476,7 +482,7 @@ async fn get_auth_status_returns_token_after_proactive_refresh_recovery() -> Res
         AuthCredentialsStoreMode::File,
     )?;
 
-    let recovered_request_id = mcp
+    let recovered_request_id = app_server
         .send_get_auth_status_request(GetAuthStatusParams {
             include_token: Some(true),
             refresh_token: Some(false),
@@ -485,7 +491,7 @@ async fn get_auth_status_returns_token_after_proactive_refresh_recovery() -> Res
 
     let recovered_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(recovered_request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(recovered_request_id)),
     )
     .await??;
     let recovered_status: GetAuthStatusResponse = to_response(recovered_resp)?;
@@ -507,16 +513,16 @@ async fn login_api_key_rejected_when_forced_chatgpt() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml_forced_login(codex_home.path(), "chatgpt")?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = mcp
+    let request_id = app_server
         .send_login_account_api_key_request("sk-test-key")
         .await?;
 
     let err: JSONRPCError = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_error_message(RequestId::Integer(request_id)),
     )
     .await??;
 
