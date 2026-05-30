@@ -484,7 +484,9 @@ fn image_data_url_estimate_adjustment(item: &ResponseItem) -> (i64, i64) {
                 Some(ImageDetail::Original) => {
                     estimate_original_image_bytes(image_url).unwrap_or(RESIZED_IMAGE_BYTES_ESTIMATE)
                 }
-                _ => RESIZED_IMAGE_BYTES_ESTIMATE,
+                Some(ImageDetail::Auto | ImageDetail::Low | ImageDetail::High) | None => {
+                    RESIZED_IMAGE_BYTES_ESTIMATE
+                }
             });
         }
     };
@@ -571,4 +573,3 @@ pub(crate) fn is_user_turn_boundary(item: &ResponseItem) -> bool {
 
     role == "user" && !is_contextual_user_message_content(content)
 }
-
