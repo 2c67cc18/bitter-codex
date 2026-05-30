@@ -1,6 +1,7 @@
 mod contextual_user_message;
 mod environment_context;
 mod fragment;
+mod fragments;
 mod image_generation_instructions;
 mod model_switch_instructions;
 mod turn_aborted;
@@ -10,6 +11,8 @@ pub(crate) use environment_context::EnvironmentContext;
 pub use fragment::ContextualUserFragment;
 pub(crate) use fragment::FragmentRegistration;
 pub(crate) use fragment::FragmentRegistrationProxy;
+pub(crate) use fragments::AdditionalContextDeveloperFragment;
+pub(crate) use fragments::AdditionalContextUserFragment;
 pub(crate) use image_generation_instructions::ImageGenerationInstructions;
 pub(crate) use model_switch_instructions::ModelSwitchInstructions;
 pub(crate) use turn_aborted::TurnAborted;

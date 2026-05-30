@@ -27,6 +27,20 @@ pub struct TurnEnvironmentParams {
     pub cwd: AbsolutePathBuf,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AdditionalContextKind {
+    Untrusted,
+    Application,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AdditionalContextEntry {
+    pub value: String,
+    pub kind: AdditionalContextKind,
+}
+
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnStartParams {
@@ -34,6 +48,8 @@ pub struct TurnStartParams {
     pub input: Vec<UserInput>,
 
     pub responsesapi_client_metadata: Option<HashMap<String, String>>,
+
+    pub additional_context: Option<HashMap<String, AdditionalContextEntry>>,
 
     pub environments: Option<Vec<TurnEnvironmentParams>>,
 
@@ -71,6 +87,8 @@ pub struct TurnSteerParams {
     pub input: Vec<UserInput>,
 
     pub responsesapi_client_metadata: Option<HashMap<String, String>>,
+
+    pub additional_context: Option<HashMap<String, AdditionalContextEntry>>,
 
     pub expected_turn_id: String,
 }
