@@ -1,5 +1,5 @@
 use anyhow::Result;
-use app_test_support::McpProcess;
+use app_test_support::AppServerProcess;
 use app_test_support::create_final_assistant_message_sse_response;
 use app_test_support::create_mock_responses_server_sequence;
 use app_test_support::to_response;
@@ -28,11 +28,11 @@ async fn thread_status_changed_emits_runtime_updates() -> Result<()> {
     let server = create_mock_responses_server_sequence(responses).await;
     create_config_toml(codex_home.path(), &server.uri())?;
 
-    let mut mcp =
-        McpProcess::new_with_env(codex_home.path(), &[("RUST_LOG", Some("info"))]).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server =
+        AppServerProcess::new_with_env(codex_home.path(), &[("RUST_LOG", Some("info"))]).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let thread_start_id = mcp
+    let thread_start_id = app_server
         .send_thread_start_request(ThreadStartParams {
             model: Some("mock-model".to_string()),
             ..Default::default()
@@ -40,12 +40,12 @@ async fn thread_status_changed_emits_runtime_updates() -> Result<()> {
         .await?;
     let thread_start_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(thread_start_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(thread_start_id)),
     )
     .await??;
     let ThreadStartResponse { thread, .. } = to_response(thread_start_resp)?;
 
-    let turn_start_id = mcp
+    let turn_start_id = app_server
         .send_turn_start_request(TurnStartParams {
             thread_id: thread.id.clone(),
             input: vec![V2UserInput::Text {
@@ -58,7 +58,7 @@ async fn thread_status_changed_emits_runtime_updates() -> Result<()> {
         .await?;
     let turn_start_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(turn_start_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(turn_start_id)),
     )
     .await??;
     let _: TurnStartResponse = to_response(turn_start_resp)?;
@@ -68,7 +68,7 @@ async fn thread_status_changed_emits_runtime_updates() -> Result<()> {
     let deadline = tokio::time::Instant::now() + DEFAULT_READ_TIMEOUT;
     while tokio::time::Instant::now() < deadline {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        let message = match timeout(remaining, mcp.read_next_message()).await {
+        let message = match timeout(remaining, app_server.read_next_message()).await {
             Ok(Ok(message)) => message,
             _ => break,
         };
@@ -120,7 +120,7 @@ async fn thread_status_changed_emits_runtime_updates() -> Result<()> {
     );
     timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
+        app_server.read_stream_until_notification_message("turn/completed"),
     )
     .await??;
 
@@ -134,10 +134,10 @@ async fn thread_status_changed_can_be_opted_out() -> Result<()> {
     let server = create_mock_responses_server_sequence(responses).await;
     create_config_toml(codex_home.path(), &server.uri())?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
     let message = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.initialize_with_capabilities(
+        app_server.initialize_with_capabilities(
             ClientInfo {
                 name: "codex_vscode".to_string(),
                 title: Some("Codex VS Code Extension".to_string()),
@@ -153,7 +153,7 @@ async fn thread_status_changed_can_be_opted_out() -> Result<()> {
         anyhow::bail!("expected initialize response, got {message:?}");
     };
 
-    let thread_start_id = mcp
+    let thread_start_id = app_server
         .send_thread_start_request(ThreadStartParams {
             model: Some("mock-model".to_string()),
             ..Default::default()
@@ -161,12 +161,12 @@ async fn thread_status_changed_can_be_opted_out() -> Result<()> {
         .await?;
     let thread_start_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(thread_start_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(thread_start_id)),
     )
     .await??;
     let ThreadStartResponse { thread, .. } = to_response(thread_start_resp)?;
 
-    let turn_start_id = mcp
+    let turn_start_id = app_server
         .send_turn_start_request(TurnStartParams {
             thread_id: thread.id,
             input: vec![V2UserInput::Text {
@@ -179,20 +179,20 @@ async fn thread_status_changed_can_be_opted_out() -> Result<()> {
         .await?;
     let turn_start_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(turn_start_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(turn_start_id)),
     )
     .await??;
     let _: TurnStartResponse = to_response(turn_start_resp)?;
 
     timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
+        app_server.read_stream_until_notification_message("turn/completed"),
     )
     .await??;
 
     let status_update = timeout(
         std::time::Duration::from_millis(500),
-        mcp.read_stream_until_notification_message("thread/status/changed"),
+        app_server.read_stream_until_notification_message("thread/status/changed"),
     )
     .await;
     match status_update {

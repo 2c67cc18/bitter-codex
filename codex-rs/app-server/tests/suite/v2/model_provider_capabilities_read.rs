@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use app_test_support::McpProcess;
+use app_test_support::AppServerProcess;
 use app_test_support::to_response;
 use codex_app_server_protocol::JSONRPCResponse;
 use codex_app_server_protocol::ModelProviderCapabilitiesReadParams;
@@ -16,15 +16,15 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 #[tokio::test]
 async fn read_default_provider_capabilities() -> Result<()> {
     let codex_home = TempDir::new()?;
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = mcp
+    let request_id = app_server
         .send_model_provider_capabilities_read_request(ModelProviderCapabilitiesReadParams {})
         .await?;
     let response: JSONRPCResponse = timeout(
         DEFAULT_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
     let received: ModelProviderCapabilitiesReadResponse = to_response(response)?;

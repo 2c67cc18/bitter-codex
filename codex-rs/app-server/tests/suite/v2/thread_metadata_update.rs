@@ -1,5 +1,5 @@
 use anyhow::Result;
-use app_test_support::McpProcess;
+use app_test_support::AppServerProcess;
 use app_test_support::create_fake_rollout;
 use app_test_support::create_mock_responses_server_repeating_assistant;
 use app_test_support::rollout_path;
@@ -41,10 +41,10 @@ async fn thread_metadata_update_patches_git_branch_and_returns_updated_thread() 
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path(), &server.uri())?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let start_id = mcp
+    let start_id = app_server
         .send_thread_start_request(ThreadStartParams {
             model: Some("mock-model".to_string()),
             ..Default::default()
@@ -52,12 +52,12 @@ async fn thread_metadata_update_patches_git_branch_and_returns_updated_thread() 
         .await?;
     let start_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(start_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(start_id)),
     )
     .await??;
     let ThreadStartResponse { thread, .. } = to_response::<ThreadStartResponse>(start_resp)?;
 
-    let update_id = mcp
+    let update_id = app_server
         .send_thread_metadata_update_request(ThreadMetadataUpdateParams {
             thread_id: thread.id.clone(),
             git_info: Some(ThreadMetadataGitInfoUpdateParams {
@@ -69,7 +69,7 @@ async fn thread_metadata_update_patches_git_branch_and_returns_updated_thread() 
         .await?;
     let update_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(update_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(update_id)),
     )
     .await??;
     let update_result = update_resp.result.clone();
@@ -104,7 +104,7 @@ async fn thread_metadata_update_patches_git_branch_and_returns_updated_thread() 
         Some("feature/sidebar-pr")
     );
 
-    let read_id = mcp
+    let read_id = app_server
         .send_thread_read_request(ThreadReadParams {
             thread_id: thread.id,
             include_turns: false,
@@ -112,7 +112,7 @@ async fn thread_metadata_update_patches_git_branch_and_returns_updated_thread() 
         .await?;
     let read_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(read_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(read_id)),
     )
     .await??;
     let ThreadReadResponse { thread: read, .. } = to_response::<ThreadReadResponse>(read_resp)?;
@@ -136,10 +136,10 @@ async fn thread_metadata_update_rejects_empty_git_info_patch() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path(), &server.uri())?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let start_id = mcp
+    let start_id = app_server
         .send_thread_start_request(ThreadStartParams {
             model: Some("mock-model".to_string()),
             ..Default::default()
@@ -147,12 +147,12 @@ async fn thread_metadata_update_rejects_empty_git_info_patch() -> Result<()> {
         .await?;
     let start_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(start_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(start_id)),
     )
     .await??;
     let ThreadStartResponse { thread, .. } = to_response::<ThreadStartResponse>(start_resp)?;
 
-    let update_id = mcp
+    let update_id = app_server
         .send_thread_metadata_update_request(ThreadMetadataUpdateParams {
             thread_id: thread.id,
             git_info: Some(ThreadMetadataGitInfoUpdateParams {
@@ -164,7 +164,7 @@ async fn thread_metadata_update_rejects_empty_git_info_patch() -> Result<()> {
         .await?;
     let update_err: JSONRPCError = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(update_id)),
+        app_server.read_stream_until_error_message(RequestId::Integer(update_id)),
     )
     .await??;
 
@@ -182,10 +182,10 @@ async fn thread_metadata_update_rejects_ephemeral_thread() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path(), &server.uri())?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let start_id = mcp
+    let start_id = app_server
         .send_thread_start_request(ThreadStartParams {
             model: Some("mock-model".to_string()),
             ephemeral: Some(true),
@@ -194,12 +194,12 @@ async fn thread_metadata_update_rejects_ephemeral_thread() -> Result<()> {
         .await?;
     let start_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(start_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(start_id)),
     )
     .await??;
     let ThreadStartResponse { thread, .. } = to_response::<ThreadStartResponse>(start_resp)?;
 
-    let update_id = mcp
+    let update_id = app_server
         .send_thread_metadata_update_request(ThreadMetadataUpdateParams {
             thread_id: thread.id.clone(),
             git_info: Some(ThreadMetadataGitInfoUpdateParams {
@@ -211,7 +211,7 @@ async fn thread_metadata_update_rejects_ephemeral_thread() -> Result<()> {
         .await?;
     let update_err: JSONRPCError = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(update_id)),
+        app_server.read_stream_until_error_message(RequestId::Integer(update_id)),
     )
     .await??;
 
@@ -244,10 +244,10 @@ async fn thread_metadata_update_repairs_missing_sqlite_row_for_stored_thread() -
         /*git_info*/ None,
     )?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let update_id = mcp
+    let update_id = app_server
         .send_thread_metadata_update_request(ThreadMetadataUpdateParams {
             thread_id: thread_id.clone(),
             git_info: Some(ThreadMetadataGitInfoUpdateParams {
@@ -259,7 +259,7 @@ async fn thread_metadata_update_repairs_missing_sqlite_row_for_stored_thread() -
         .await?;
     let update_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(update_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(update_id)),
     )
     .await??;
     let ThreadMetadataUpdateResponse { thread: updated } =
@@ -308,10 +308,10 @@ async fn thread_metadata_update_repairs_loaded_thread_without_resetting_summary(
     )
     .await;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let resume_id = mcp
+    let resume_id = app_server
         .send_thread_resume_request(ThreadResumeParams {
             thread_id: thread_id.clone(),
             ..Default::default()
@@ -319,14 +319,14 @@ async fn thread_metadata_update_repairs_loaded_thread_without_resetting_summary(
         .await?;
     let resume_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(resume_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(resume_id)),
     )
     .await??;
     let _: ThreadResumeResponse = to_response::<ThreadResumeResponse>(resume_resp)?;
 
     assert_eq!(state_db.delete_thread(thread_uuid).await?, 1);
 
-    let update_id = mcp
+    let update_id = app_server
         .send_thread_metadata_update_request(ThreadMetadataUpdateParams {
             thread_id: thread_id.clone(),
             git_info: Some(ThreadMetadataGitInfoUpdateParams {
@@ -338,7 +338,7 @@ async fn thread_metadata_update_repairs_loaded_thread_without_resetting_summary(
         .await?;
     let update_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(update_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(update_id)),
     )
     .await??;
     let ThreadMetadataUpdateResponse { thread: updated } =
@@ -386,10 +386,10 @@ async fn thread_metadata_update_repairs_missing_sqlite_row_for_archived_thread()
     );
     fs::rename(&archived_source, &archived_dest)?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let update_id = mcp
+    let update_id = app_server
         .send_thread_metadata_update_request(ThreadMetadataUpdateParams {
             thread_id: thread_id.clone(),
             git_info: Some(ThreadMetadataGitInfoUpdateParams {
@@ -401,7 +401,7 @@ async fn thread_metadata_update_repairs_missing_sqlite_row_for_archived_thread()
         .await?;
     let update_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(update_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(update_id)),
     )
     .await??;
     let ThreadMetadataUpdateResponse { thread: updated } =
@@ -442,10 +442,10 @@ async fn thread_metadata_update_can_clear_stored_git_fields() -> Result<()> {
     )?;
     let _state_db = init_state_db(codex_home.path()).await?;
 
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let update_id = mcp
+    let update_id = app_server
         .send_thread_metadata_update_request(ThreadMetadataUpdateParams {
             thread_id: thread_id.clone(),
             git_info: Some(ThreadMetadataGitInfoUpdateParams {
@@ -457,7 +457,7 @@ async fn thread_metadata_update_can_clear_stored_git_fields() -> Result<()> {
         .await?;
     let update_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(update_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(update_id)),
     )
     .await??;
     let ThreadMetadataUpdateResponse { thread: updated } =
@@ -466,7 +466,7 @@ async fn thread_metadata_update_can_clear_stored_git_fields() -> Result<()> {
     assert_eq!(updated.id, thread_id.clone());
     assert_eq!(updated.git_info, None);
 
-    let read_id = mcp
+    let read_id = app_server
         .send_thread_read_request(ThreadReadParams {
             thread_id,
             include_turns: false,
@@ -474,7 +474,7 @@ async fn thread_metadata_update_can_clear_stored_git_fields() -> Result<()> {
         .await?;
     let read_resp: JSONRPCResponse = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(read_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(read_id)),
     )
     .await??;
     let ThreadReadResponse { thread: read, .. } = to_response::<ThreadReadResponse>(read_resp)?;

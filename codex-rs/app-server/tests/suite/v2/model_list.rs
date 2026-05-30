@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use anyhow::Result;
+use app_test_support::AppServerProcess;
 use app_test_support::ChatGptAuthFixture;
-use app_test_support::McpProcess;
 use app_test_support::to_response;
 use app_test_support::write_chatgpt_auth;
 use app_test_support::write_models_cache;
@@ -90,11 +90,11 @@ fn expected_visible_models() -> Vec<Model> {
 async fn list_models_returns_all_models_with_large_limit() -> Result<()> {
     let codex_home = TempDir::new()?;
     write_models_cache(codex_home.path())?;
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
 
-    timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
+    timeout(DEFAULT_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = mcp
+    let request_id = app_server
         .send_list_models_request(ModelListParams {
             limit: Some(100),
             cursor: None,
@@ -104,7 +104,7 @@ async fn list_models_returns_all_models_with_large_limit() -> Result<()> {
 
     let response: JSONRPCResponse = timeout(
         DEFAULT_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
 
@@ -177,10 +177,11 @@ openai_base_url = "{server_uri}/v1"
         AuthCredentialsStoreMode::File,
     )?;
 
-    let mut mcp = McpProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
-    timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
+    let mut app_server =
+        AppServerProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+    timeout(DEFAULT_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = mcp
+    let request_id = app_server
         .send_list_models_request(ModelListParams {
             limit: Some(100),
             cursor: None,
@@ -190,7 +191,7 @@ openai_base_url = "{server_uri}/v1"
 
     let response: JSONRPCResponse = timeout(
         DEFAULT_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
 
@@ -219,16 +220,16 @@ openai_base_url = "{server_uri}/v1"
 async fn list_models_pagination_works() -> Result<()> {
     let codex_home = TempDir::new()?;
     write_models_cache(codex_home.path())?;
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
 
-    timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
+    timeout(DEFAULT_TIMEOUT, app_server.initialize()).await??;
 
     let expected_models = expected_visible_models();
     let mut cursor = None;
     let mut items = Vec::new();
 
     for _ in 0..expected_models.len() {
-        let request_id = mcp
+        let request_id = app_server
             .send_list_models_request(ModelListParams {
                 limit: Some(1),
                 cursor: cursor.clone(),
@@ -238,7 +239,7 @@ async fn list_models_pagination_works() -> Result<()> {
 
         let response: JSONRPCResponse = timeout(
             DEFAULT_TIMEOUT,
-            mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+            app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
         )
         .await??;
 
@@ -268,11 +269,11 @@ async fn list_models_pagination_works() -> Result<()> {
 async fn list_models_rejects_invalid_cursor() -> Result<()> {
     let codex_home = TempDir::new()?;
     write_models_cache(codex_home.path())?;
-    let mut mcp = McpProcess::new(codex_home.path()).await?;
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
 
-    timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
+    timeout(DEFAULT_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = mcp
+    let request_id = app_server
         .send_list_models_request(ModelListParams {
             limit: None,
             cursor: Some("invalid".to_string()),
@@ -282,7 +283,7 @@ async fn list_models_rejects_invalid_cursor() -> Result<()> {
 
     let error: JSONRPCError = timeout(
         DEFAULT_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+        app_server.read_stream_until_error_message(RequestId::Integer(request_id)),
     )
     .await??;
 

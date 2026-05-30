@@ -8,9 +8,9 @@ license.workspace = true
 name = "codex-app-server"
 path = "src/main.rs"
 
-[[bin]]
+[[example]]
 name = "codex-app-server-test-notify-capture"
-path = "src/bin/notify_capture.rs"
+path = "tests/fixtures/notify_capture.rs"
 
 [lib]
 name = "codex_app_server"
