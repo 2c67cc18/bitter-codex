@@ -84,6 +84,9 @@ body.
 Manual-port bundle commits should mention every upstream commit they port in the
 commit body.
 
+Manual-port commits should include `Co-authored-by` trailers for the original
+authors of the upstream commits they port, plus the local implementer.
+
 ## Manual Ports
 
 Use manual ports for dependency upgrades and schema/runtime adaptations. Do not
