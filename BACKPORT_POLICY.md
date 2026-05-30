@@ -84,6 +84,12 @@ body.
 Manual-port bundle commits should mention every upstream commit they port in the
 commit body.
 
+Manual-port commits should cite the upstream commits they port. Use
+`Co-authored-by` trailers for local implementers who participated.
+
+Manual-port commit bodies should describe the included behavior and local
+adaptations. Do not restate excluded surfaces.
+
 ## Manual Ports
 
 Use manual ports for dependency upgrades and schema/runtime adaptations. Do not
@@ -91,8 +97,8 @@ cherry-pick these directly just because upstream has a commit.
 
 Manual-port bundles need a short spec under `.backports/<tag>/specs/` before
 implementation.
-The spec should list upstream commits, surviving behavior, excluded surfaces,
-upstream-anchored tests to port or adapt, and validation commands.
+The spec should list upstream commits, included behavior, upstream-anchored
+tests to port or adapt, and validation commands.
 
 Examples:
 
