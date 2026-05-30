@@ -33,6 +33,7 @@ use crate::transport::app_server_startup_lock_path;
 use crate::transport::prepare_control_socket_path;
 use crate::transport::route_outgoing_envelope;
 use crate::transport::start_control_socket_acceptor;
+use crate::transport::start_stdio_connection;
 use codex_app_server_protocol::ConfigLayerSource;
 use codex_app_server_protocol::ConfigWarningNotification;
 use codex_app_server_protocol::JSONRPCMessage;
@@ -483,11 +484,15 @@ pub async fn run_main_with_transport_options(
     let transport_shutdown_token = CancellationToken::new();
     let mut transport_accept_handles = Vec::<JoinHandle<()>>::new();
 
-    let single_client_mode = false;
+    let single_client_mode = matches!(&transport, AppServerTransport::Stdio);
     let shutdown_when_no_connections = single_client_mode;
     let graceful_signal_restart_enabled =
         runtime_options.install_shutdown_signal_handler && !single_client_mode;
     match &transport {
+        AppServerTransport::Stdio => {
+            start_stdio_connection(transport_event_tx.clone(), &mut transport_accept_handles)
+                .await?;
+        }
         AppServerTransport::UnixSocket { socket_path } => {
             let accept_handle = start_control_socket_acceptor(
                 socket_path.clone(),

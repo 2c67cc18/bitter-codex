@@ -22,6 +22,7 @@ pub use codex_app_server_transport::app_server_control_socket_path;
 pub(crate) use codex_app_server_transport::app_server_startup_lock_path;
 pub(crate) use codex_app_server_transport::prepare_control_socket_path;
 pub(crate) use codex_app_server_transport::start_control_socket_acceptor;
+pub(crate) use codex_app_server_transport::start_stdio_connection;
 
 pub(crate) struct ConnectionState {
     pub(crate) outbound_initialized: Arc<AtomicBool>,

@@ -4,6 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "codex-app-server"
+path = "src/main.rs"
+
+[[bin]]
+name = "codex-app-server-test-notify-capture"
+path = "src/bin/notify_capture.rs"
+
 [lib]
 name = "codex_app_server"
 path = "src/lib.rs"
@@ -40,6 +48,7 @@ codex-thread-store = { workspace = true }
 codex-utils-absolute-path = { workspace = true }
 codex-utils-json-to-toml = { workspace = true }
 chrono = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
 futures = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -61,9 +70,19 @@ tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "json"
 uuid = { workspace = true, features = ["serde", "v7"] }
 
 [dev-dependencies]
+app_test_support = { path = "tests/common" }
 axum = { workspace = true, default-features = false, features = [
     "http1",
     "json",
     "tokio",
 ] }
+base64 = { workspace = true }
+codex-model-provider-info = { workspace = true }
+codex-utils-cargo-bin = { workspace = true }
+core_test_support = { workspace = true }
 pretty_assertions = { workspace = true }
+reqwest = { workspace = true, features = ["rustls-tls"] }
+serial_test = { workspace = true }
+shlex = { workspace = true }
+url = { workspace = true }
+wiremock = { workspace = true }
