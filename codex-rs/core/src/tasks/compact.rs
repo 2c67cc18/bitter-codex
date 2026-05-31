@@ -32,14 +32,14 @@ impl SessionTask for CompactTask {
             session.services.session_telemetry.counter(
                 "codex.task.compact",
                 1,
-                &[("type", "remote")],
+                &[("type", "remote_v2"), ("manual", "true")],
             );
-            crate::compact_remote::run_remote_compact_task(session.clone(), ctx).await
+            crate::compact_remote_v2::run_remote_compact_task(session.clone(), ctx).await
         } else {
             session.services.session_telemetry.counter(
                 "codex.task.compact",
                 1,
-                &[("type", "local")],
+                &[("type", "local"), ("manual", "true")],
             );
             let input = vec![UserInput::Text {
                 text: ctx

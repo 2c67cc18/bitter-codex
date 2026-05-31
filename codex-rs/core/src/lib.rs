@@ -6,6 +6,7 @@ pub(crate) mod session;
 pub use session::SteerInputError;
 mod codex_thread;
 mod compact_remote;
+mod compact_remote_v2;
 mod config_lock;
 pub use codex_thread::CodexThread;
 pub use codex_thread::CodexThreadSettingsOverrides;
@@ -24,6 +25,7 @@ pub use mention_syntax::TOOL_MENTION_SIGIL;
 pub use utils::path_utils;
 #[doc(hidden)]
 pub(crate) mod prompt_debug;
+mod responses_retry;
 #[doc(hidden)]
 pub use prompt_debug::build_prompt_input;
 mod session_startup_prewarm;

@@ -9,6 +9,9 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::task::JoinHandle;
 
+use crate::compact::CompactionPhase;
+use crate::compact::CompactionReason;
+use crate::compact::CompactionTrigger;
 use codex_git_utils::get_git_remote_urls_assume_git_repo;
 use codex_git_utils::get_git_repo_root;
 use codex_git_utils::get_has_changes;
@@ -17,6 +20,52 @@ use codex_protocol::ThreadId;
 use codex_utils_absolute_path::AbsolutePathBuf;
 
 const TURN_STARTED_AT_UNIX_MS_KEY: &str = "turn_started_at_unix_ms";
+const REQUEST_KIND_KEY: &str = "request_kind";
+const COMPACTION_KEY: &str = "compaction";
+const WINDOW_ID_KEY: &str = "window_id";
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum CompactionImplementation {
+    ResponsesCompactionV2,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum CompactionStrategy {
+    Memento,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+pub(crate) struct CompactionTurnMetadata {
+    trigger: CompactionTrigger,
+    reason: CompactionReason,
+    implementation: CompactionImplementation,
+    phase: CompactionPhase,
+    strategy: CompactionStrategy,
+}
+
+impl CompactionTurnMetadata {
+    pub(crate) fn new(
+        trigger: CompactionTrigger,
+        reason: CompactionReason,
+        phase: CompactionPhase,
+    ) -> Self {
+        Self {
+            trigger,
+            reason,
+            implementation: CompactionImplementation::ResponsesCompactionV2,
+            phase,
+            strategy: CompactionStrategy::Memento,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum TurnMetadataRequestKind {
+    Compaction,
+}
 
 #[derive(Clone, Debug, Default)]
 struct WorkspaceGitMetadata {
@@ -98,6 +147,9 @@ fn merge_turn_metadata(
                     | "turn_id"
                     | TURN_STARTED_AT_UNIX_MS_KEY
                     | "forked_from_thread_id"
+                    | REQUEST_KIND_KEY
+                    | COMPACTION_KEY
+                    | WINDOW_ID_KEY
             ) {
                 continue;
             }
@@ -230,6 +282,28 @@ impl TurnMetadataState {
             responsesapi_client_metadata.as_ref(),
         )
         .or(Some(header))
+    }
+
+    pub(crate) fn current_header_value_for_compaction(
+        &self,
+        window_id: &str,
+        compaction_metadata: CompactionTurnMetadata,
+    ) -> Option<String> {
+        let header = self.current_header_value()?;
+        let mut metadata = serde_json::from_str::<serde_json::Map<String, Value>>(&header).ok()?;
+        metadata.insert(
+            REQUEST_KIND_KEY.to_string(),
+            serde_json::to_value(TurnMetadataRequestKind::Compaction).ok()?,
+        );
+        metadata.insert(
+            WINDOW_ID_KEY.to_string(),
+            Value::String(window_id.to_string()),
+        );
+        metadata.insert(
+            COMPACTION_KEY.to_string(),
+            serde_json::to_value(compaction_metadata).ok()?,
+        );
+        to_ascii_json_string(&metadata).ok()
     }
 
     pub(crate) fn set_responsesapi_client_metadata(
