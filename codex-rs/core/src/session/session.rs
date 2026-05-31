@@ -51,6 +51,7 @@ pub(crate) struct SessionConfiguration {
     pub(super) app_server_client_version: Option<String>,
 
     pub(super) session_source: SessionSource,
+    pub(super) forked_from_thread_id: Option<ThreadId>,
     pub(super) dynamic_tools: Vec<DynamicToolSpec>,
     pub(super) persist_extended_history: bool,
     pub(super) inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
@@ -177,7 +178,10 @@ impl Session {
             session_configuration.model.as_str(),
             session_configuration.provider
         );
-        let forked_from_id = initial_history.forked_from_id();
+        let forked_from_id = session_configuration
+            .forked_from_thread_id
+            .or_else(|| initial_history.forked_from_id());
+        session_configuration.forked_from_thread_id = forked_from_id;
 
         let event_persistence_mode = if session_configuration.persist_extended_history {
             ThreadEventPersistenceMode::Extended
