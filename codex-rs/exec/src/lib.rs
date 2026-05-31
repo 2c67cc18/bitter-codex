@@ -280,7 +280,6 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         developer_instructions: None,
         compact_prompt: None,
         show_raw_agent_reasoning: None,
-        tools_web_search_request: None,
         ephemeral: ephemeral.then_some(true),
         additional_writable_roots: add_dir,
     };

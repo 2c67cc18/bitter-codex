@@ -40,6 +40,7 @@ use codex_protocol::protocol::TurnAbortReason;
 use codex_protocol::protocol::TurnContextItem;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::protocol::W3cTraceContext;
+use codex_protocol::protocol::WebToolRuntime;
 use codex_rollout::state_db;
 use codex_thread_store::CreateThreadParams;
 use codex_thread_store::LiveThread;
@@ -320,6 +321,7 @@ impl Codex {
             session_source,
             forked_from_thread_id,
             dynamic_tools,
+            web_tool_runtime: WebToolRuntime::Hosted,
             persist_extended_history,
             inherited_shell_snapshot,
             user_shell_override,

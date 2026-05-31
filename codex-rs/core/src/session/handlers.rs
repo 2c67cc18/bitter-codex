@@ -101,6 +101,7 @@ pub(super) async fn user_input_or_turn_inner(sess: &Arc<Session>, sub_id: String
         responsesapi_client_metadata,
         additional_context,
         thread_settings,
+        web_tool_runtime,
     } = op
     else {
         unreachable!();
@@ -113,6 +114,7 @@ pub(super) async fn user_input_or_turn_inner(sess: &Arc<Session>, sub_id: String
     };
     updates.final_output_json_schema = Some(final_output_json_schema);
     updates.environments = environments;
+    updates.web_tool_runtime = web_tool_runtime;
 
     let Ok(current_context) = sess.new_turn_with_sub_id(sub_id.clone(), updates).await else {
         return;

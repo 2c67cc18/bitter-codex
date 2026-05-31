@@ -109,6 +109,9 @@ pub enum Op {
 
         #[serde(default, flatten)]
         thread_settings: ThreadSettingsOverrides,
+
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        web_tool_runtime: Option<WebToolRuntime>,
     },
 
     ThreadSettings {
@@ -137,8 +140,17 @@ impl From<Vec<UserInput>> for Op {
             responsesapi_client_metadata: None,
             additional_context: BTreeMap::new(),
             thread_settings: ThreadSettingsOverrides::default(),
+            web_tool_runtime: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WebToolRuntime {
+    Hosted,
+    Local,
+    None,
 }
 
 impl Op {
@@ -1271,6 +1283,7 @@ mod tests {
             responsesapi_client_metadata: None,
             additional_context: BTreeMap::new(),
             thread_settings: Default::default(),
+            web_tool_runtime: None,
         };
 
         let json_op = serde_json::to_value(op)?;
@@ -1292,6 +1305,7 @@ mod tests {
                 responsesapi_client_metadata: None,
                 additional_context: BTreeMap::new(),
                 thread_settings: Default::default(),
+                web_tool_runtime: None,
             }
         );
 
@@ -1315,6 +1329,7 @@ mod tests {
             responsesapi_client_metadata: None,
             additional_context: BTreeMap::new(),
             thread_settings: Default::default(),
+            web_tool_runtime: None,
         };
 
         let json_op = serde_json::to_value(op)?;
@@ -1342,6 +1357,7 @@ mod tests {
             )])),
             additional_context: BTreeMap::new(),
             thread_settings: Default::default(),
+            web_tool_runtime: None,
         };
 
         let json_op = serde_json::to_value(&op)?;

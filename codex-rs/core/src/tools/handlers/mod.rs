@@ -3,6 +3,7 @@ mod shell_spec;
 pub(crate) mod unified_exec;
 mod view_image;
 pub(crate) mod view_image_spec;
+mod web_search;
 
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::AbsolutePathBufGuard;
@@ -14,6 +15,7 @@ pub use unified_exec::ExecCommandHandler;
 pub(crate) use unified_exec::ExecCommandHandlerOptions;
 pub use unified_exec::WriteStdinHandler;
 pub use view_image::ViewImageHandler;
+pub(crate) use web_search::WebSearchHandler;
 
 pub(crate) fn parse_arguments<T>(arguments: &str) -> Result<T, FunctionCallError>
 where

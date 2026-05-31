@@ -15,7 +15,6 @@ use codex_config::types::AuthCredentialsStoreMode;
 use codex_config::types::History;
 use codex_config::types::Notice;
 use codex_config::types::UriBasedFileOpener;
-use codex_features::Feature;
 use codex_features::FeatureConfigSource;
 use codex_features::FeatureOverrides;
 use codex_features::Features;
@@ -676,7 +675,6 @@ pub struct ConfigOverrides {
     pub developer_instructions: Option<String>,
     pub compact_prompt: Option<String>,
     pub show_raw_agent_reasoning: Option<bool>,
-    pub tools_web_search_request: Option<bool>,
     pub ephemeral: Option<bool>,
 
     pub additional_writable_roots: Vec<PathBuf>,
@@ -689,17 +687,11 @@ fn dedupe_absolute_paths(paths: &mut Vec<AbsolutePathBuf>) {
     paths.retain(|path| seen.insert(path.clone()));
 }
 
-fn resolve_web_search_mode(config_toml: &ConfigToml, features: &Features) -> Option<WebSearchMode> {
-    if let Some(mode) = config_toml.web_search {
-        return Some(mode);
-    }
-    if features.enabled(Feature::WebSearchCached) {
-        return Some(WebSearchMode::Cached);
-    }
-    if features.enabled(Feature::WebSearchRequest) {
-        return Some(WebSearchMode::Live);
-    }
-    None
+fn resolve_web_search_mode(
+    config_toml: &ConfigToml,
+    _features: &Features,
+) -> Option<WebSearchMode> {
+    config_toml.web_search
 }
 
 fn resolve_web_search_config(config_toml: &ConfigToml) -> Option<WebSearchConfig> {
@@ -737,14 +729,11 @@ impl Config {
             developer_instructions,
             compact_prompt,
             show_raw_agent_reasoning,
-            tools_web_search_request: override_tools_web_search_request,
             ephemeral,
             additional_writable_roots,
             workspace_roots: workspace_roots_override,
         } = overrides;
-        let feature_overrides = FeatureOverrides {
-            web_search_request: override_tools_web_search_request,
-        };
+        let feature_overrides = FeatureOverrides {};
 
         let configured_features = Features::from_sources(
             FeatureConfigSource {
