@@ -20,6 +20,7 @@ pub use json_schema::JsonSchema;
 pub use json_schema::JsonSchemaPrimitiveType;
 pub use json_schema::JsonSchemaType;
 pub use json_schema::parse_tool_input_schema;
+pub use json_schema::parse_tool_input_schema_without_compaction;
 pub use responses_api::FreeformTool;
 pub use responses_api::FreeformToolFormat;
 pub use responses_api::LoadableToolSpec;

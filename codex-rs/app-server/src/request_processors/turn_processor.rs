@@ -1,6 +1,7 @@
 use super::*;
 use codex_protocol::protocol::AdditionalContextEntry as CoreAdditionalContextEntry;
 use codex_protocol::protocol::AdditionalContextKind as CoreAdditionalContextKind;
+use codex_protocol::protocol::WebToolRuntime;
 use std::collections::BTreeMap;
 
 #[derive(Clone)]
@@ -239,6 +240,7 @@ impl TurnRequestProcessor {
             responsesapi_client_metadata: params.responsesapi_client_metadata,
             additional_context,
             thread_settings,
+            web_tool_runtime: Some(self.select_web_tool_runtime()),
         };
         let turn_id = self
             .submit_core_op(&request_id, thread.as_ref(), turn_op)
@@ -260,6 +262,18 @@ impl TurnRequestProcessor {
         };
 
         Ok(TurnStartResponse { turn })
+    }
+
+    fn select_web_tool_runtime(&self) -> WebToolRuntime {
+        if self
+            .thread_manager
+            .auth_manager()
+            .current_auth_uses_codex_backend()
+        {
+            WebToolRuntime::Local
+        } else {
+            WebToolRuntime::Hosted
+        }
     }
 
     async fn build_thread_settings_overrides(

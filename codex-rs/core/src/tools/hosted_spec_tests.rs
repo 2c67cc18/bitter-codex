@@ -66,3 +66,13 @@ fn web_search_tool_is_absent_when_disabled() {
         None
     );
 }
+
+#[test]
+fn local_web_search_settings_allow_direct_caller_only() {
+    assert_eq!(
+        create_local_web_search_settings(WebSearchMode::Live, None)
+            .expect("live mode should enable local web")
+            .allowed_callers,
+        Some(vec![codex_api::AllowedCaller::Direct])
+    );
+}

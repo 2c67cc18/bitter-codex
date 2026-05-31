@@ -6,8 +6,6 @@ use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Feature {
-    WebSearchRequest,
-    WebSearchCached,
     ShellSnapshot,
     RuntimeMetrics,
     ImageGeneration,
@@ -37,9 +35,7 @@ pub struct Features {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct FeatureOverrides {
-    pub web_search_request: Option<bool>,
-}
+pub struct FeatureOverrides {}
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct FeatureConfigSource<'a> {
@@ -47,14 +43,8 @@ pub struct FeatureConfigSource<'a> {
 }
 
 impl FeatureOverrides {
-    fn apply(self, features: &mut Features) {
-        if let Some(enabled) = self.web_search_request {
-            if enabled {
-                features.enable(Feature::WebSearchRequest);
-            } else {
-                features.disable(Feature::WebSearchRequest);
-            }
-        }
+    fn apply(self, _features: &mut Features) {
+        let Self {} = self;
     }
 }
 
@@ -239,16 +229,6 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::ShellSnapshot,
         key: "shell_snapshot",
         default_enabled: true,
-    },
-    FeatureSpec {
-        id: Feature::WebSearchRequest,
-        key: "web_search_request",
-        default_enabled: false,
-    },
-    FeatureSpec {
-        id: Feature::WebSearchCached,
-        key: "web_search_cached",
-        default_enabled: false,
     },
     FeatureSpec {
         id: Feature::RuntimeMetrics,

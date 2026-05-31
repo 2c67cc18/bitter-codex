@@ -150,6 +150,21 @@ pub fn parse_tool_input_schema(input_schema: &JsonValue) -> Result<JsonSchema, s
     sanitize_json_schema(&mut input_schema);
     prune_unreachable_definitions(&mut input_schema);
     compact_large_tool_schema(&mut input_schema);
+    parse_sanitized_tool_input_schema(input_schema)
+}
+
+pub fn parse_tool_input_schema_without_compaction(
+    input_schema: &JsonValue,
+) -> Result<JsonSchema, serde_json::Error> {
+    let mut input_schema = input_schema.clone();
+    sanitize_json_schema(&mut input_schema);
+    prune_unreachable_definitions(&mut input_schema);
+    parse_sanitized_tool_input_schema(input_schema)
+}
+
+fn parse_sanitized_tool_input_schema(
+    input_schema: JsonValue,
+) -> Result<JsonSchema, serde_json::Error> {
     let schema: JsonSchema = serde_json::from_value(input_schema)?;
     if matches!(
         schema.schema_type,

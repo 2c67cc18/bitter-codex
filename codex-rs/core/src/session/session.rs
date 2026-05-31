@@ -6,6 +6,7 @@ use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::protocol::TurnEnvironmentSelection;
+use codex_protocol::protocol::WebToolRuntime;
 use tokio::sync::watch;
 
 pub(crate) struct Session {
@@ -53,6 +54,7 @@ pub(crate) struct SessionConfiguration {
     pub(super) session_source: SessionSource,
     pub(super) forked_from_thread_id: Option<ThreadId>,
     pub(super) dynamic_tools: Vec<DynamicToolSpec>,
+    pub(super) web_tool_runtime: WebToolRuntime,
     pub(super) persist_extended_history: bool,
     pub(super) inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
     pub(super) user_shell_override: Option<shell::Shell>,
@@ -129,6 +131,9 @@ impl SessionConfiguration {
         if let Some(app_server_client_version) = updates.app_server_client_version.clone() {
             next_configuration.app_server_client_version = Some(app_server_client_version);
         }
+        if let Some(web_tool_runtime) = updates.web_tool_runtime {
+            next_configuration.web_tool_runtime = web_tool_runtime;
+        }
         Ok(next_configuration)
     }
 }
@@ -144,6 +149,7 @@ pub(crate) struct SessionSettingsUpdate {
     pub(crate) environments: Option<Vec<TurnEnvironmentSelection>>,
     pub(crate) app_server_client_name: Option<String>,
     pub(crate) app_server_client_version: Option<String>,
+    pub(crate) web_tool_runtime: Option<WebToolRuntime>,
 }
 
 impl Session {

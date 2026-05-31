@@ -3,10 +3,12 @@ use crate::tools::handlers::DynamicToolHandler;
 use crate::tools::handlers::ExecCommandHandler;
 use crate::tools::handlers::ExecCommandHandlerOptions;
 use crate::tools::handlers::ViewImageHandler;
+use crate::tools::handlers::WebSearchHandler;
 use crate::tools::handlers::WriteStdinHandler;
 use crate::tools::handlers::view_image_spec::ViewImageToolOptions;
 use crate::tools::hosted_spec::WebSearchToolOptions;
 use crate::tools::hosted_spec::create_image_generation_tool;
+use crate::tools::hosted_spec::create_local_web_search_settings;
 use crate::tools::hosted_spec::create_web_search_tool;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolRegistry;
@@ -16,6 +18,7 @@ use codex_features::Feature;
 use codex_login::AuthManager;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::openai_models::InputModality;
+use codex_protocol::protocol::WebToolRuntime;
 use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::ToolSpec;
 use codex_tools::can_request_original_image_detail;
@@ -111,10 +114,14 @@ fn build_model_visible_specs_and_registry(
 pub(crate) fn hosted_model_tool_specs(turn_context: &TurnContext) -> Vec<ToolSpec> {
     let mut specs = Vec::new();
     let provider_capabilities = turn_context.provider.capabilities();
-    let web_search_mode = provider_capabilities
-        .web_search
-        .then_some(turn_context.config.web_search_mode.value());
-    let web_search_config = if provider_capabilities.web_search {
+    let web_search_mode = if provider_capabilities.web_search
+        && turn_context.web_tool_runtime == WebToolRuntime::Hosted
+    {
+        Some(turn_context.config.web_search_mode.value())
+    } else {
+        None
+    };
+    let web_search_config = if web_search_mode.is_some() {
         turn_context.config.web_search_config.as_ref()
     } else {
         None
@@ -202,8 +209,22 @@ fn add_tool_sources(context: &CoreToolPlanContext<'_>, planned_tools: &mut Plann
     add_shell_tools(context, planned_tools);
     add_core_utility_tools(context, planned_tools);
     add_dynamic_tools(context, planned_tools);
+    add_local_web_search_tool(context, planned_tools);
     for spec in hosted_model_tool_specs(context.turn_context) {
         planned_tools.add_hosted_spec(spec);
+    }
+}
+
+fn add_local_web_search_tool(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {
+    let turn_context = context.turn_context;
+    if turn_context.web_tool_runtime != WebToolRuntime::Local {
+        return;
+    }
+    if let Some(settings) = create_local_web_search_settings(
+        turn_context.config.web_search_mode.value(),
+        turn_context.config.web_search_config.as_ref(),
+    ) {
+        planned_tools.add(WebSearchHandler::new(settings));
     }
 }
 

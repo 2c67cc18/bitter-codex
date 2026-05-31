@@ -5,6 +5,7 @@ use codex_model_provider::create_model_provider;
 use codex_protocol::SessionId;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::protocol::TurnEnvironmentSelection;
+use codex_protocol::protocol::WebToolRuntime;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
@@ -86,6 +87,7 @@ pub struct TurnContext {
     pub(crate) codex_self_exe: Option<PathBuf>,
     pub(crate) truncation_policy: TruncationPolicy,
     pub(crate) dynamic_tools: Vec<DynamicToolSpec>,
+    pub(crate) web_tool_runtime: WebToolRuntime,
     pub(crate) turn_metadata_state: Arc<TurnMetadataState>,
     pub(crate) turn_timing_state: Arc<TurnTimingState>,
     pub(crate) server_model_warning_emitted: AtomicBool,
@@ -180,6 +182,7 @@ impl TurnContext {
             codex_self_exe: self.codex_self_exe.clone(),
             truncation_policy,
             dynamic_tools: self.dynamic_tools.clone(),
+            web_tool_runtime: self.web_tool_runtime,
             turn_metadata_state: self.turn_metadata_state.clone(),
             turn_timing_state: Arc::clone(&self.turn_timing_state),
             server_model_warning_emitted: AtomicBool::new(
@@ -297,6 +300,7 @@ impl Session {
             codex_self_exe: per_turn_config.codex_self_exe.clone(),
             truncation_policy: model_info.truncation_policy.into(),
             dynamic_tools: session_configuration.dynamic_tools.clone(),
+            web_tool_runtime: session_configuration.web_tool_runtime,
             turn_metadata_state,
             turn_timing_state: Arc::new(TurnTimingState::default()),
             server_model_warning_emitted: AtomicBool::new(false),
