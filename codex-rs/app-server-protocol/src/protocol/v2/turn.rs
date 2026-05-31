@@ -27,6 +27,20 @@ pub struct TurnEnvironmentParams {
     pub cwd: AbsolutePathBuf,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AdditionalContextKind {
+    Untrusted,
+    Application,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AdditionalContextEntry {
+    pub value: String,
+    pub kind: AdditionalContextKind,
+}
+
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnStartParams {
@@ -34,6 +48,8 @@ pub struct TurnStartParams {
     pub input: Vec<UserInput>,
 
     pub responsesapi_client_metadata: Option<HashMap<String, String>>,
+
+    pub additional_context: Option<HashMap<String, AdditionalContextEntry>>,
 
     pub environments: Option<Vec<TurnEnvironmentParams>>,
 
@@ -71,6 +87,8 @@ pub struct TurnSteerParams {
     pub input: Vec<UserInput>,
 
     pub responsesapi_client_metadata: Option<HashMap<String, String>>,
+
+    pub additional_context: Option<HashMap<String, AdditionalContextEntry>>,
 
     pub expected_turn_id: String,
 }
@@ -254,4 +272,67 @@ pub struct TurnDiffUpdatedNotification {
     pub thread_id: String,
     pub turn_id: String,
     pub diff: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    #[test]
+    fn turn_start_params_serialize_additional_context_as_camel_case() {
+        let params = TurnStartParams {
+            thread_id: "thread-1".to_string(),
+            input: Vec::new(),
+            additional_context: Some(HashMap::from([(
+                "selection".to_string(),
+                AdditionalContextEntry {
+                    value: "selected text".to_string(),
+                    kind: AdditionalContextKind::Untrusted,
+                },
+            )])),
+            ..Default::default()
+        };
+
+        let value = serde_json::to_value(params).expect("serialize turn start params");
+
+        assert_eq!(
+            value["additionalContext"],
+            json!({
+                "selection": {
+                    "value": "selected text",
+                    "kind": "untrusted"
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn turn_steer_params_deserialize_additional_context() {
+        let params: TurnSteerParams = serde_json::from_value(json!({
+            "threadId": "thread-1",
+            "input": [],
+            "expectedTurnId": "turn-1",
+            "additionalContext": {
+                "app": {
+                    "value": "application state",
+                    "kind": "application"
+                }
+            }
+        }))
+        .expect("deserialize turn steer params");
+
+        assert_eq!(
+            params.additional_context,
+            Some(HashMap::from([(
+                "app".to_string(),
+                AdditionalContextEntry {
+                    value: "application state".to_string(),
+                    kind: AdditionalContextKind::Application,
+                },
+            )]))
+        );
+    }
 }

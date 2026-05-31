@@ -60,11 +60,9 @@ const THREAD_CREATED_CHANNEL_CAPACITY: usize = 1024;
 
 static FORCE_TEST_THREAD_MANAGER_BEHAVIOR: AtomicBool = AtomicBool::new(false);
 
-
 pub(crate) fn set_thread_manager_test_mode_for_tests(enabled: bool) {
     FORCE_TEST_THREAD_MANAGER_BEHAVIOR.store(enabled, Ordering::Relaxed);
 }
-
 
 struct TempCodexHomeGuard {
     path: PathBuf,
@@ -124,7 +122,6 @@ pub struct StartThreadOptions {
     pub environments: Vec<TurnEnvironmentSelection>,
 }
 
-
 pub(crate) struct ThreadManagerState {
     threads: Arc<RwLock<HashMap<ThreadId, Arc<CodexThread>>>>,
     thread_created_tx: broadcast::Sender<ThreadId>,
@@ -133,7 +130,6 @@ pub(crate) struct ThreadManagerState {
     thread_store: Arc<dyn ThreadStore>,
     session_source: SessionSource,
     installation_id: String,
-
 }
 
 pub fn build_models_manager(
@@ -344,6 +340,15 @@ impl ThreadManager {
         &self,
         options: StartThreadOptions,
     ) -> CodexResult<NewThread> {
+        self.start_thread_with_options_and_fork_source(options, /*forked_from_thread_id*/ None)
+            .await
+    }
+
+    async fn start_thread_with_options_and_fork_source(
+        &self,
+        options: StartThreadOptions,
+        forked_from_thread_id: Option<ThreadId>,
+    ) -> CodexResult<NewThread> {
         let session_source = options
             .session_source
             .unwrap_or_else(|| self.state.session_source.clone());
@@ -353,6 +358,7 @@ impl ThreadManager {
             Arc::clone(&self.state.auth_manager),
             None,
             session_source,
+            forked_from_thread_id,
             options.dynamic_tools,
             options.persist_extended_history,
             options.metrics_service_name,
@@ -395,6 +401,7 @@ impl ThreadManager {
             initial_history,
             auth_manager,
             None,
+            None,
             Vec::new(),
             persist_extended_history,
             None,
@@ -415,6 +422,7 @@ impl ThreadManager {
             config,
             InitialHistory::New,
             Arc::clone(&self.state.auth_manager),
+            None,
             None,
             Vec::new(),
             false,
@@ -439,6 +447,7 @@ impl ThreadManager {
             config,
             initial_history,
             auth_manager,
+            None,
             None,
             Vec::new(),
             false,
@@ -572,6 +581,11 @@ impl ThreadManager {
         persist_extended_history: bool,
         parent_trace: Option<W3cTraceContext>,
     ) -> CodexResult<NewThread> {
+        let forked_from_thread_id = match &history {
+            InitialHistory::Resumed(resumed) => Some(resumed.conversation_id),
+            InitialHistory::Forked(_) => history.forked_from_id(),
+            InitialHistory::New | InitialHistory::Cleared => None,
+        };
         let interrupted_marker = InterruptedTurnHistoryMarker::from_config();
         let history = fork_history_from_snapshot(snapshot, history, interrupted_marker);
         let environments = Vec::new();
@@ -580,6 +594,7 @@ impl ThreadManager {
             history,
             Arc::clone(&self.state.auth_manager),
             None,
+            forked_from_thread_id,
             Vec::new(),
             persist_extended_history,
             None,
@@ -589,11 +604,9 @@ impl ThreadManager {
         ))
         .await
     }
-
 }
 
 impl ThreadManagerState {
-
     pub(crate) async fn list_thread_ids(&self) -> Vec<ThreadId> {
         self.threads
             .read()
@@ -611,13 +624,8 @@ impl ThreadManagerState {
             .ok_or(CodexErr::ThreadNotFound(thread_id))
     }
 
-
-
     #[allow(clippy::too_many_arguments)]
-
-
     #[allow(clippy::too_many_arguments)]
-
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn spawn_thread(
         &self,
@@ -625,6 +633,7 @@ impl ThreadManagerState {
         initial_history: InitialHistory,
         auth_manager: Arc<AuthManager>,
         parent_session_id: Option<SessionId>,
+        forked_from_thread_id: Option<ThreadId>,
         dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
         persist_extended_history: bool,
         metrics_service_name: Option<String>,
@@ -638,6 +647,7 @@ impl ThreadManagerState {
             auth_manager,
             parent_session_id,
             self.session_source.clone(),
+            forked_from_thread_id,
             dynamic_tools,
             persist_extended_history,
             metrics_service_name,
@@ -657,6 +667,7 @@ impl ThreadManagerState {
         auth_manager: Arc<AuthManager>,
         parent_session_id: Option<SessionId>,
         session_source: SessionSource,
+        forked_from_thread_id: Option<ThreadId>,
         dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
         persist_extended_history: bool,
         metrics_service_name: Option<String>,
@@ -700,6 +711,7 @@ impl ThreadManagerState {
             conversation_history: initial_history,
             dynamic_tools,
             parent_session_id,
+            forked_from_thread_id,
             persist_extended_history,
             metrics_service_name,
             inherited_shell_snapshot,
@@ -710,9 +722,7 @@ impl ThreadManagerState {
             thread_store: Arc::clone(&self.thread_store),
         })
         .await?;
-        let new_thread = self
-            .finalize_thread_spawn(codex, thread_id)
-            .await?;
+        let new_thread = self.finalize_thread_spawn(codex, thread_id).await?;
         Ok(new_thread)
     }
 
@@ -756,7 +766,6 @@ impl ThreadManagerState {
             "thread {thread_id} is already running"
         )))
     }
-
 }
 
 fn stored_thread_to_initial_history(

@@ -1,5 +1,6 @@
 use codex_protocol::models::ContentItem;
 
+use super::AdditionalContextUserFragment;
 use super::EnvironmentContext;
 use super::FragmentRegistration;
 use super::FragmentRegistrationProxy;
@@ -9,9 +10,12 @@ static ENVIRONMENT_CONTEXT_REGISTRATION: FragmentRegistrationProxy<EnvironmentCo
     FragmentRegistrationProxy::new();
 static TURN_ABORTED_REGISTRATION: FragmentRegistrationProxy<TurnAborted> =
     FragmentRegistrationProxy::new();
+static ADDITIONAL_CONTEXT_REGISTRATION: FragmentRegistrationProxy<AdditionalContextUserFragment> =
+    FragmentRegistrationProxy::new();
 static CONTEXTUAL_USER_FRAGMENTS: &[&dyn FragmentRegistration] = &[
     &ENVIRONMENT_CONTEXT_REGISTRATION,
     &TURN_ABORTED_REGISTRATION,
+    &ADDITIONAL_CONTEXT_REGISTRATION,
 ];
 
 fn is_standard_contextual_user_text(text: &str) -> bool {
