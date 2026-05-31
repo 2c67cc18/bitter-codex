@@ -2,9 +2,6 @@ use std::sync::Arc;
 
 use crate::Prompt;
 use crate::client::CompactConversationRequestSettings;
-use crate::compact::CompactionPhase;
-use crate::compact::CompactionReason;
-use crate::compact::CompactionTrigger;
 use crate::compact::InitialContextInjection;
 use crate::compact::insert_initial_context_before_last_real_user_or_summary;
 use crate::context_manager::ContextManager;
@@ -17,7 +14,6 @@ use crate::session::turn_context::TurnContext;
 use codex_app_server_protocol::AuthMode;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
-use codex_protocol::items::ContextCompactionItem;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::ResponseItem;
@@ -25,65 +21,55 @@ use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::CompactedItem;
 use codex_protocol::protocol::ErrorEvent;
 use codex_protocol::protocol::EventMsg;
-use codex_protocol::protocol::TurnStartedEvent;
 use futures::TryFutureExt;
 use tokio_util::sync::CancellationToken;
 use tracing::error;
 use tracing::info;
 
-pub(crate) async fn run_inline_remote_auto_compact_task(
+pub(crate) async fn run_inline_remote_auto_compact_task_with_started_item(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
     initial_context_injection: InitialContextInjection,
-    reason: CompactionReason,
-    phase: CompactionPhase,
+    compaction_item: TurnItem,
 ) -> CodexResult<()> {
-    run_remote_compact_task_inner(
+    run_remote_compact_task_inner_with_item(
         &sess,
         &turn_context,
         initial_context_injection,
-        CompactionTrigger::Auto,
-        reason,
-        phase,
+        compaction_item,
     )
     .await?;
     Ok(())
 }
 
-pub(crate) async fn run_remote_compact_task(
+pub(crate) async fn run_remote_compact_task_after_turn_started_with_item(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
+    compaction_item: TurnItem,
 ) -> CodexResult<()> {
-    let start_event = EventMsg::TurnStarted(TurnStartedEvent {
-        turn_id: turn_context.sub_id.clone(),
-        trace_id: turn_context.trace_id.clone(),
-        started_at: turn_context.turn_timing_state.started_at_unix_secs().await,
-        model_context_window: turn_context.model_context_window(),
-    });
-    sess.send_event(&turn_context, start_event).await;
-
-    run_remote_compact_task_inner(
+    run_remote_compact_task_inner_with_item(
         &sess,
         &turn_context,
         InitialContextInjection::DoNotInject,
-        CompactionTrigger::Manual,
-        CompactionReason::UserRequested,
-        CompactionPhase::StandaloneTurn,
+        compaction_item,
     )
     .await?;
     Ok(())
 }
 
-async fn run_remote_compact_task_inner(
+async fn run_remote_compact_task_inner_with_item(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
     initial_context_injection: InitialContextInjection,
-    _trigger: CompactionTrigger,
-    _reason: CompactionReason,
-    _phase: CompactionPhase,
+    compaction_item: TurnItem,
 ) -> CodexResult<()> {
-    let result =
-        run_remote_compact_task_inner_impl(sess, turn_context, initial_context_injection).await;
+    let result = run_remote_compact_task_inner_impl(
+        sess,
+        turn_context,
+        initial_context_injection,
+        compaction_item,
+    )
+    .await;
     if let Err(err) = result {
         let event = EventMsg::Error(ErrorEvent {
             message: format!("Error running remote compact task: {err}"),
@@ -99,11 +85,8 @@ async fn run_remote_compact_task_inner_impl(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
     initial_context_injection: InitialContextInjection,
+    compaction_item: TurnItem,
 ) -> CodexResult<()> {
-    let context_compaction_item = ContextCompactionItem::new();
-    let compaction_item = TurnItem::ContextCompaction(context_compaction_item);
-    sess.emit_turn_item_started(turn_context, &compaction_item)
-        .await;
     let mut history = sess.clone_history().await;
     let base_instructions = sess.get_base_instructions().await;
     let deleted_items = trim_function_call_history_to_fit_context_window(

@@ -10,7 +10,9 @@ use crate::compact::CompactionReason;
 use crate::compact::InitialContextInjection;
 use crate::compact::run_inline_auto_compact_task;
 use crate::compact::should_use_remote_compact_task;
-use crate::compact_remote::run_inline_remote_auto_compact_task;
+use crate::compact_remote_v2::run_inline_remote_auto_compact_task;
+use crate::responses_retry::ResponsesStreamRequest;
+use crate::responses_retry::handle_retryable_response_stream_error;
 use crate::session::PreviousTurnSettings;
 use crate::session::TurnInput;
 use crate::session::session::Session;
@@ -27,7 +29,6 @@ use crate::tools::parallel::ToolCallRuntime;
 use crate::tools::registry::ToolArgumentDiffConsumer;
 use crate::tools::router::ToolRouterParams;
 use crate::turn_timing::record_turn_ttft_metric;
-use crate::util::backoff;
 use crate::util::error_or_panic;
 use codex_async_utils::OrCancelExt;
 use codex_features::Feature;
@@ -48,7 +49,6 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::ReasoningContentDeltaEvent;
 use codex_protocol::protocol::ReasoningRawContentDeltaEvent;
 use codex_protocol::protocol::TurnDiffEvent;
-use codex_protocol::protocol::WarningEvent;
 use codex_utils_stream_parser::AssistantTextChunk;
 use codex_utils_stream_parser::AssistantTextStreamParser;
 use futures::future::BoxFuture;
@@ -62,7 +62,6 @@ use tracing::info;
 use tracing::instrument;
 use tracing::trace;
 use tracing::trace_span;
-use tracing::warn;
 
 pub(crate) async fn run_turn(
     sess: Arc<Session>,
@@ -389,21 +388,32 @@ async fn maybe_run_previous_model_inline_compact(
 async fn run_auto_compact(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
-    _client_session: &mut ModelClientSession,
+    client_session: &mut ModelClientSession,
     initial_context_injection: InitialContextInjection,
     reason: CompactionReason,
     phase: CompactionPhase,
 ) -> CodexResult<()> {
     if should_use_remote_compact_task(turn_context.provider.info()) {
+        sess.services.session_telemetry.counter(
+            "codex.task.compact",
+            1,
+            &[("type", "remote_v2"), ("manual", "false")],
+        );
         run_inline_remote_auto_compact_task(
             Arc::clone(sess),
             Arc::clone(turn_context),
+            client_session,
             initial_context_injection,
             reason,
             phase,
         )
         .await?;
     } else {
+        sess.services.session_telemetry.counter(
+            "codex.task.compact",
+            1,
+            &[("type", "local"), ("manual", "false")],
+        );
         run_inline_auto_compact_task(
             Arc::clone(sess),
             Arc::clone(turn_context),
@@ -511,47 +521,17 @@ async fn run_sampling_request(
         }
 
         let max_retries = turn_context.provider.info().stream_max_retries();
-        if retries >= max_retries
-            && client_session.try_switch_fallback_transport(
-                &turn_context.session_telemetry,
-                &turn_context.model_info,
-            )
+        if let Err(err) = handle_retryable_response_stream_error(
+            &mut retries,
+            max_retries,
+            err,
+            client_session,
+            sess.as_ref(),
+            turn_context.as_ref(),
+            ResponsesStreamRequest::Sampling,
+        )
+        .await
         {
-            sess.send_event(
-                &turn_context,
-                EventMsg::Warning(WarningEvent {
-                    message: format!("Falling back from WebSockets to HTTPS transport. {err:#}"),
-                }),
-            )
-            .await;
-            retries = 0;
-            continue;
-        }
-        if retries < max_retries {
-            retries += 1;
-            let delay = match &err {
-                CodexErr::Stream(_, requested_delay) => {
-                    requested_delay.unwrap_or_else(|| backoff(retries))
-                }
-                _ => backoff(retries),
-            };
-            warn!(
-                "stream disconnected - retrying sampling request ({retries}/{max_retries} in {delay:?})...",
-            );
-
-            let report_error = retries > 1
-                || cfg!(debug_assertions)
-                || !sess.services.model_client.responses_websocket_enabled();
-            if report_error {
-                sess.notify_stream_error(
-                    &turn_context,
-                    format!("Reconnecting... {retries}/{max_retries}"),
-                    err,
-                )
-                .await;
-            }
-            tokio::time::sleep(delay).await;
-        } else {
             return Err(err);
         }
     }
@@ -626,7 +606,6 @@ impl AssistantMessageStreamParsers {
             .collect()
     }
 }
-
 
 async fn emit_streamed_assistant_text_delta(
     sess: &Session,
