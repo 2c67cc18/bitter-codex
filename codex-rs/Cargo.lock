@@ -100,6 +100,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f0e0fee31ef5ed1ba1316088939cea399010ed7731dba877ed44aeb407a75ea"
 
 [[package]]
+name = "app_test_support"
+version = "0.134.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "chrono",
+ "codex-app-server-protocol",
+ "codex-config",
+ "codex-core",
+ "codex-features",
+ "codex-login",
+ "codex-models-manager",
+ "codex-protocol",
+ "codex-uds",
+ "codex-utils-cargo-bin",
+ "core_test_support",
+ "futures",
+ "serde",
+ "serde_json",
+ "shlex",
+ "tokio",
+ "tokio-tungstenite",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
 name = "arc-swap"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -681,6 +708,7 @@ dependencies = [
  "pretty_assertions",
  "regex-lite",
  "reqwest",
+ "schemars 0.9.0",
  "serde",
  "serde_json",
  "tempfile",
@@ -700,9 +728,12 @@ name = "codex-app-server"
 version = "0.134.0"
 dependencies = [
  "anyhow",
+ "app_test_support",
  "async-trait",
  "axum",
+ "base64",
  "chrono",
+ "clap",
  "codex-app-server-protocol",
  "codex-app-server-transport",
  "codex-arg0",
@@ -719,12 +750,16 @@ dependencies = [
  "codex-state",
  "codex-thread-store",
  "codex-utils-absolute-path",
+ "codex-utils-cargo-bin",
  "codex-utils-cli",
  "codex-utils-json-to-toml",
+ "core_test_support",
  "futures",
  "pretty_assertions",
  "serde",
  "serde_json",
+ "serial_test",
+ "shlex",
  "tempfile",
  "thiserror 2.0.18",
  "time",
@@ -734,7 +769,9 @@ dependencies = [
  "toml_edit 0.24.0+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
+ "url",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]
@@ -975,7 +1012,6 @@ dependencies = [
  "http",
  "iana-time-zone",
  "image",
- "indexmap 2.13.0",
  "libc",
  "maplit",
  "once_cell",
@@ -987,6 +1023,7 @@ dependencies = [
  "rand 0.9.3",
  "regex-lite",
  "reqwest",
+ "schemars 0.9.0",
  "serde",
  "serde_json",
  "shlex",
@@ -5695,6 +5732,7 @@ checksum = "4cd191f9397d57d581cddd31014772520aa448f65ef991055d7f61582c65165f"
 dependencies = [
  "dyn-clone",
  "ref-cast",
+ "schemars_derive",
  "serde",
  "serde_json",
 ]
@@ -5709,6 +5747,18 @@ dependencies = [
  "ref-cast",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "schemars_derive"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5016d94c77c6d32f0b8e08b781f7dc8a90c2007d4e77472cc2807bc10a8438fe"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde_derive_internals",
+ "syn",
 ]
 
 [[package]]
@@ -5808,6 +5858,17 @@ name = "serde_derive"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "serde_derive_internals"
+version = "0.29.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18d26a20a969b9e3fdf2fc2d9f21eda6c40e2de84c9408bb5d3b05d499aae711"
 dependencies = [
  "proc-macro2",
  "quote",
