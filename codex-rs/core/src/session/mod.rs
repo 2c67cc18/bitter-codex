@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::path::PathBuf;
@@ -29,6 +30,7 @@ use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::openai_models::ModelInfo;
+use codex_protocol::protocol::AdditionalContextEntry;
 use codex_protocol::protocol::ItemCompletedEvent;
 use codex_protocol::protocol::ItemStartedEvent;
 use codex_protocol::protocol::RawResponseItemEvent;
@@ -55,7 +57,6 @@ use futures::prelude::*;
 use serde_json::Value;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 use tracing::debug;
 use tracing::error;
@@ -213,6 +214,7 @@ pub(crate) struct CodexSpawnArgs {
     pub(crate) models_manager: SharedModelsManager,
     pub(crate) conversation_history: InitialHistory,
     pub(crate) session_source: SessionSource,
+    pub(crate) forked_from_thread_id: Option<ThreadId>,
     pub(crate) dynamic_tools: Vec<DynamicToolSpec>,
     pub(crate) parent_session_id: Option<SessionId>,
     pub(crate) persist_extended_history: bool,
@@ -260,6 +262,7 @@ impl Codex {
             models_manager,
             conversation_history,
             session_source,
+            forked_from_thread_id,
             dynamic_tools,
             parent_session_id,
             persist_extended_history,
@@ -315,6 +318,7 @@ impl Codex {
             app_server_client_name: None,
             app_server_client_version: None,
             session_source,
+            forked_from_thread_id,
             dynamic_tools,
             persist_extended_history,
             inherited_shell_snapshot,
@@ -409,11 +413,17 @@ impl Codex {
     pub async fn steer_input(
         &self,
         input: Vec<UserInput>,
+        additional_context: BTreeMap<String, AdditionalContextEntry>,
         expected_turn_id: Option<&str>,
         responsesapi_client_metadata: Option<HashMap<String, String>>,
     ) -> Result<String, SteerInputError> {
         self.session
-            .steer_input(input, expected_turn_id, responsesapi_client_metadata)
+            .steer_input(
+                input,
+                additional_context,
+                expected_turn_id,
+                responsesapi_client_metadata,
+            )
             .await
     }
 
@@ -1208,17 +1218,6 @@ impl Session {
         .await;
     }
 
-    async fn active_turn_context_and_cancellation_token(
-        &self,
-    ) -> Option<(Arc<TurnContext>, CancellationToken)> {
-        let active = self.active_turn.lock().await;
-        let (_, task) = active.as_ref()?.tasks.first()?;
-        Some((
-            Arc::clone(&task.turn_context),
-            task.cancellation_token.child_token(),
-        ))
-    }
-
     #[allow(clippy::too_many_arguments)]
     #[expect(
         clippy::await_holding_invalid_type,
@@ -1228,6 +1227,7 @@ impl Session {
     pub async fn steer_input(
         self: &Arc<Self>,
         input: Vec<UserInput>,
+        additional_context: BTreeMap<String, AdditionalContextEntry>,
         expected_turn_id: Option<&str>,
         responsesapi_client_metadata: Option<HashMap<String, String>>,
     ) -> Result<String, SteerInputError> {
@@ -1239,44 +1239,55 @@ impl Session {
             let Some(active_turn) = active.as_ref() else {
                 return Err(SteerInputError::NoActiveTurn(input));
             };
+            let Some(active_task) = active_turn.task.as_ref() else {
+                return Err(SteerInputError::NoActiveTurn(input));
+            };
             if let Some(expected_turn_id) = expected_turn_id
-                && !active_turn.tasks.contains_key(expected_turn_id)
+                && active_task.turn_context.sub_id != expected_turn_id
             {
-                let actual = active_turn
-                    .tasks
-                    .first()
-                    .map(|(id, _)| id.clone())
-                    .unwrap_or_default();
+                let actual = active_task.turn_context.sub_id.clone();
                 return Err(SteerInputError::ExpectedTurnMismatch {
                     expected: expected_turn_id.to_string(),
                     actual,
                 });
             }
-            if active_turn
-                .tasks
-                .values()
-                .any(|task| task.kind == TaskKind::Compact)
-            {
+            if active_task.kind == TaskKind::Compact {
                 return Err(SteerInputError::ActiveTurnNotSteerable {
                     turn_kind: NonSteerableTurnKind::Compact,
                 });
             }
             Arc::clone(&active_turn.turn_state)
         };
-        if let Some(metadata) = responsesapi_client_metadata
-            && let Some((turn_context, _)) = self.active_turn_context_and_cancellation_token().await
-        {
-            turn_context
-                .turn_metadata_state
-                .set_responsesapi_client_metadata(metadata);
+        if let Some(metadata) = responsesapi_client_metadata {
+            let active = self.active_turn.lock().await;
+            if let Some(active_task) = active.as_ref().and_then(|turn| turn.task.as_ref()) {
+                active_task
+                    .turn_context
+                    .turn_metadata_state
+                    .set_responsesapi_client_metadata(metadata);
+            }
         }
+        let turn_id = {
+            let active = self.active_turn.lock().await;
+            active
+                .as_ref()
+                .and_then(|turn| turn.task.as_ref())
+                .map(|task| task.turn_context.sub_id.clone())
+                .unwrap_or_default()
+        };
+        let additional_context_input = {
+            let mut state = self.state.lock().await;
+            state.additional_context.merge(additional_context)
+        };
+        let mut pending_input = additional_context_input
+            .into_iter()
+            .map(TurnInput::ResponseInputItem)
+            .collect::<Vec<_>>();
+        pending_input.push(TurnInput::UserInput(input));
         self.input_queue
-            .extend_pending_input_for_turn_state(
-                turn_state.as_ref(),
-                vec![TurnInput::UserInput(input)],
-            )
+            .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_input)
             .await;
-        Ok(expected_turn_id.unwrap_or_default().to_string())
+        Ok(expected_turn_id.map_or(turn_id, ToString::to_string))
     }
 
     pub(crate) async fn notify_dynamic_tool_response(

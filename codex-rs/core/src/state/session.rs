@@ -1,5 +1,6 @@
 use codex_protocol::models::ResponseItem;
 
+use super::AdditionalContextStore;
 use super::auto_compact_window::AutoCompactWindow;
 use super::auto_compact_window::AutoCompactWindowSnapshot;
 use crate::context_manager::ContextManager;
@@ -17,6 +18,7 @@ pub(crate) struct SessionState {
     pub(crate) history: ContextManager,
     pub(crate) latest_rate_limits: Option<RateLimitSnapshot>,
     pub(crate) server_reasoning_included: bool,
+    pub(crate) additional_context: AdditionalContextStore,
 
     previous_turn_settings: Option<PreviousTurnSettings>,
 
@@ -34,6 +36,7 @@ impl SessionState {
             history,
             latest_rate_limits: None,
             server_reasoning_included: false,
+            additional_context: AdditionalContextStore::default(),
             previous_turn_settings: None,
             auto_compact_window: AutoCompactWindow::new(),
             startup_prewarm: None,
@@ -62,7 +65,6 @@ impl SessionState {
     pub(crate) fn set_next_turn_is_first(&mut self, value: bool) {
         self.next_turn_is_first = value;
     }
-
 
     pub(crate) fn clone_history(&self) -> ContextManager {
         self.history.clone()
@@ -135,7 +137,6 @@ impl SessionState {
     ) -> (Option<TokenUsageInfo>, Option<RateLimitSnapshot>) {
         (self.token_info(), self.latest_rate_limits.clone())
     }
-
 
     pub(crate) fn get_total_token_usage(&self, server_reasoning_included: bool) -> i64 {
         self.history

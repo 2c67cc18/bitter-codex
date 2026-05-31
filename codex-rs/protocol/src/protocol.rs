@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
 use std::ops::Mul;
@@ -69,6 +70,19 @@ impl GitSha {
     }
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AdditionalContextKind {
+    Untrusted,
+    Application,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct AdditionalContextEntry {
+    pub value: String,
+    pub kind: AdditionalContextKind,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[allow(clippy::large_enum_variant)]
@@ -89,6 +103,9 @@ pub enum Op {
 
         #[serde(default, skip_serializing_if = "Option::is_none")]
         responsesapi_client_metadata: Option<HashMap<String, String>>,
+
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        additional_context: BTreeMap<String, AdditionalContextEntry>,
 
         #[serde(default, flatten)]
         thread_settings: ThreadSettingsOverrides,
@@ -118,6 +135,7 @@ impl From<Vec<UserInput>> for Op {
             items: value,
             final_output_json_schema: None,
             responsesapi_client_metadata: None,
+            additional_context: BTreeMap::new(),
             thread_settings: ThreadSettingsOverrides::default(),
         }
     }
@@ -1251,6 +1269,7 @@ mod tests {
             items: Vec::new(),
             final_output_json_schema: None,
             responsesapi_client_metadata: None,
+            additional_context: BTreeMap::new(),
             thread_settings: Default::default(),
         };
 
@@ -1271,6 +1290,7 @@ mod tests {
                 items: Vec::new(),
                 final_output_json_schema: None,
                 responsesapi_client_metadata: None,
+                additional_context: BTreeMap::new(),
                 thread_settings: Default::default(),
             }
         );
@@ -1293,6 +1313,7 @@ mod tests {
             items: Vec::new(),
             final_output_json_schema: Some(schema.clone()),
             responsesapi_client_metadata: None,
+            additional_context: BTreeMap::new(),
             thread_settings: Default::default(),
         };
 
@@ -1319,6 +1340,7 @@ mod tests {
                 "fiber_run_id".to_string(),
                 "fiber-123".to_string(),
             )])),
+            additional_context: BTreeMap::new(),
             thread_settings: Default::default(),
         };
 

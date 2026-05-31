@@ -35,7 +35,6 @@ use codex_protocol::protocol::TurnAbortReason;
 use codex_protocol::protocol::TurnAbortedEvent;
 use codex_protocol::protocol::TurnCompleteEvent;
 use codex_protocol::protocol::WarningEvent;
-use codex_protocol::user_input::UserInput;
 
 pub(crate) use compact::CompactTask;
 pub(crate) use regular::RegularTask;
@@ -76,18 +75,12 @@ impl SessionTaskContext {
     pub(crate) fn clone_session(&self) -> Arc<Session> {
         Arc::clone(&self.session)
     }
-
-
 }
 
 pub(crate) trait SessionTask: Send + Sync + 'static {
     fn kind(&self) -> TaskKind;
 
     fn span_name(&self) -> &'static str;
-
-    fn records_turn_token_usage_on_span(&self) -> bool {
-        false
-    }
 
     fn run(
         self: Arc<Self>,
@@ -112,8 +105,6 @@ pub(crate) trait AnySessionTask: Send + Sync + 'static {
     fn kind(&self) -> TaskKind;
 
     fn span_name(&self) -> &'static str;
-
-    fn records_turn_token_usage_on_span(&self) -> bool;
 
     fn run(
         self: Arc<Self>,
@@ -140,10 +131,6 @@ where
 
     fn span_name(&self) -> &'static str {
         SessionTask::span_name(self)
-    }
-
-    fn records_turn_token_usage_on_span(&self) -> bool {
-        SessionTask::records_turn_token_usage_on_span(self)
     }
 
     fn run(
@@ -175,7 +162,7 @@ impl Session {
     pub async fn spawn_task<T: SessionTask>(
         self: &Arc<Self>,
         turn_context: Arc<TurnContext>,
-        input: Vec<UserInput>,
+        input: Vec<TurnInput>,
         task: T,
     ) {
         self.abort_all_tasks(TurnAbortReason::Replaced).await;
@@ -185,7 +172,7 @@ impl Session {
     pub(crate) async fn start_task<T: SessionTask>(
         self: &Arc<Self>,
         turn_context: Arc<TurnContext>,
-        input: Vec<UserInput>,
+        input: Vec<TurnInput>,
         task: T,
     ) {
         let task: Arc<dyn AnySessionTask> = Arc::new(task);
@@ -212,7 +199,7 @@ impl Session {
         let turn_state = {
             let mut active = self.active_turn.lock().await;
             let turn = active.get_or_insert_with(ActiveTurn::default);
-            debug_assert!(turn.tasks.is_empty());
+            debug_assert!(turn.task.is_none());
             Arc::clone(&turn.turn_state)
         };
         turn_state.lock().await.token_usage_at_turn_start = token_usage_at_turn_start.clone();
@@ -226,16 +213,12 @@ impl Session {
             .await;
         let mut active = self.active_turn.lock().await;
         let turn = active.get_or_insert_with(ActiveTurn::default);
-        debug_assert!(turn.tasks.is_empty());
+        debug_assert!(turn.task.is_none());
         let done_clone = Arc::clone(&done);
         let session_ctx = Arc::new(SessionTaskContext::new(Arc::clone(self)));
         let ctx = Arc::clone(&turn_context);
         let task_for_run = Arc::clone(&task);
-        let task_input = if input.is_empty() {
-            Vec::new()
-        } else {
-            vec![TurnInput::UserInput(input)]
-        };
+        let task_input = input;
         let task_cancellation_token = cancellation_token.child_token();
 
         let reasoning_effort = turn_context.effective_reasoning_effort_for_tracing();
@@ -299,7 +282,7 @@ impl Session {
             turn_context: Arc::clone(&turn_context),
             _timer: timer,
         };
-        turn.add_task(running_task);
+        turn.task = Some(running_task);
     }
 
     pub(crate) async fn maybe_start_turn_for_pending_work(self: &Arc<Self>) {
@@ -338,9 +321,9 @@ impl Session {
         let mut aborted_turn = false;
         let mut active_turn_to_clear = None;
         if let Some(mut active_turn) = self.take_active_turn().await {
-            let tasks = active_turn.drain_tasks();
-            aborted_turn = !tasks.is_empty();
-            for task in tasks {
+            let task = active_turn.task.take();
+            aborted_turn = task.is_some();
+            if let Some(task) = task {
                 self.handle_task_abort(task, reason.clone()).await;
             }
             if aborted_turn {
@@ -356,7 +339,6 @@ impl Session {
         }
     }
 
-
     pub async fn on_task_finished(
         self: &Arc<Self>,
         turn_context: Arc<TurnContext>,
@@ -366,37 +348,25 @@ impl Session {
             .turn_metadata_state
             .cancel_git_enrichment_task();
 
-        let mut pending_input = Vec::<TurnInput>::new();
-        let mut should_clear_active_turn = false;
-        let mut token_usage_at_turn_start = None;
-        let mut turn_tool_calls = 0_u64;
-        let mut records_turn_token_usage_on_span = false;
         let turn_state = {
             let mut active = self.active_turn.lock().await;
-            if let Some(at) = active.as_mut()
-                && let Some(removed_task) = at.remove_task(&turn_context.sub_id)
-            {
-                records_turn_token_usage_on_span = removed_task.records_turn_token_usage_on_span;
-                if removed_task.active_turn_is_empty {
-                    should_clear_active_turn = true;
-                    let turn_state = Arc::clone(&at.turn_state);
-                    Some(turn_state)
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
+            active.as_mut().and_then(|active_turn| {
+                let task = active_turn.task.take()?;
+                task.handle.detach();
+                Some(Arc::clone(&active_turn.turn_state))
+            })
         };
-        if let Some(turn_state) = turn_state.as_ref() {
-            pending_input = self
-                .input_queue
-                .take_pending_input_for_turn_state(turn_state.as_ref())
-                .await;
+        let Some(turn_state) = turn_state else {
+            return;
+        };
+        let pending_input = self
+            .input_queue
+            .take_pending_input_for_turn_state(turn_state.as_ref())
+            .await;
+        let (turn_tool_calls, token_usage_at_turn_start) = {
             let ts = turn_state.lock().await;
-            turn_tool_calls = ts.tool_calls;
-            token_usage_at_turn_start = Some(ts.token_usage_at_turn_start.clone());
-        }
+            (ts.tool_calls, ts.token_usage_at_turn_start.clone())
+        };
         if !pending_input.is_empty() {
             for pending_input_item in pending_input {
                 match pending_input_item {
@@ -415,7 +385,7 @@ impl Session {
             }
         }
 
-        if let Some(token_usage_at_turn_start) = token_usage_at_turn_start {
+        {
             self.services.session_telemetry.histogram(
                 TURN_TOOL_CALL_METRIC,
                 i64::try_from(turn_tool_calls).unwrap_or(i64::MAX),
@@ -439,33 +409,31 @@ impl Session {
                     - token_usage_at_turn_start.total_tokens)
                     .max(0),
             };
-            if records_turn_token_usage_on_span {
-                let current_span = Span::current();
-                current_span.record(
-                    "codex.turn.token_usage.input_tokens",
-                    turn_token_usage.input_tokens,
-                );
-                current_span.record(
-                    "codex.turn.token_usage.cached_input_tokens",
-                    turn_token_usage.cached_input(),
-                );
-                current_span.record(
-                    "codex.turn.token_usage.non_cached_input_tokens",
-                    turn_token_usage.non_cached_input(),
-                );
-                current_span.record(
-                    "codex.turn.token_usage.output_tokens",
-                    turn_token_usage.output_tokens,
-                );
-                current_span.record(
-                    "codex.turn.token_usage.reasoning_output_tokens",
-                    turn_token_usage.reasoning_output_tokens,
-                );
-                current_span.record(
-                    "codex.turn.token_usage.total_tokens",
-                    turn_token_usage.total_tokens,
-                );
-            }
+            let current_span = Span::current();
+            current_span.record(
+                "codex.turn.token_usage.input_tokens",
+                turn_token_usage.input_tokens,
+            );
+            current_span.record(
+                "codex.turn.token_usage.cached_input_tokens",
+                turn_token_usage.cached_input(),
+            );
+            current_span.record(
+                "codex.turn.token_usage.non_cached_input_tokens",
+                turn_token_usage.non_cached_input(),
+            );
+            current_span.record(
+                "codex.turn.token_usage.output_tokens",
+                turn_token_usage.output_tokens,
+            );
+            current_span.record(
+                "codex.turn.token_usage.reasoning_output_tokens",
+                turn_token_usage.reasoning_output_tokens,
+            );
+            current_span.record(
+                "codex.turn.token_usage.total_tokens",
+                turn_token_usage.total_tokens,
+            );
             self.services.session_telemetry.histogram(
                 TURN_TOKEN_USAGE_METRIC,
                 turn_token_usage.total_tokens,
@@ -509,24 +477,20 @@ impl Session {
         });
         self.send_event(turn_context.as_ref(), event).await;
 
-        if should_clear_active_turn {
-            let cleared_active_turn = {
-                let mut active = self.active_turn.lock().await;
-                if let Some(active_turn) = active.as_ref()
-                    && active_turn.tasks.is_empty()
-                    && turn_state
-                        .as_ref()
-                        .is_some_and(|turn_state| Arc::ptr_eq(&active_turn.turn_state, turn_state))
-                {
-                    *active = None;
-                    true
-                } else {
-                    false
-                }
-            };
-            if !cleared_active_turn {
-                return;
+        let cleared_active_turn = {
+            let mut active = self.active_turn.lock().await;
+            if let Some(active_turn) = active.as_ref()
+                && active_turn.task.is_none()
+                && Arc::ptr_eq(&active_turn.turn_state, &turn_state)
+            {
+                *active = None;
+                true
+            } else {
+                false
             }
+        };
+        if !cleared_active_turn {
+            return;
         }
     }
 

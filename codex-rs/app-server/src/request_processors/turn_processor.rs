@@ -1,4 +1,7 @@
 use super::*;
+use codex_protocol::protocol::AdditionalContextEntry as CoreAdditionalContextEntry;
+use codex_protocol::protocol::AdditionalContextKind as CoreAdditionalContextKind;
+use std::collections::BTreeMap;
 
 #[derive(Clone)]
 pub(crate) struct TurnRequestProcessor {
@@ -19,6 +22,29 @@ fn resolve_runtime_workspace_roots(
         }
     }
     resolved_roots
+}
+
+fn map_additional_context(
+    additional_context: Option<HashMap<String, AdditionalContextEntry>>,
+) -> BTreeMap<String, CoreAdditionalContextEntry> {
+    additional_context
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(key, entry)| {
+            (
+                key,
+                CoreAdditionalContextEntry {
+                    value: entry.value,
+                    kind: match entry.kind {
+                        AdditionalContextKind::Untrusted => CoreAdditionalContextKind::Untrusted,
+                        AdditionalContextKind::Application => {
+                            CoreAdditionalContextKind::Application
+                        }
+                    },
+                },
+            )
+        })
+        .collect()
 }
 
 struct ThreadSettingsBuildParams {
@@ -190,6 +216,7 @@ impl TurnRequestProcessor {
             .into_iter()
             .map(V2UserInput::into_core)
             .collect();
+        let additional_context = map_additional_context(params.additional_context);
         let thread_settings = self
             .build_thread_settings_overrides(
                 thread.as_ref(),
@@ -210,6 +237,7 @@ impl TurnRequestProcessor {
             environments: environment_selections,
             final_output_json_schema: params.output_schema,
             responsesapi_client_metadata: params.responsesapi_client_metadata,
+            additional_context,
             thread_settings,
         };
         let turn_id = self
@@ -374,10 +402,12 @@ impl TurnRequestProcessor {
             .into_iter()
             .map(V2UserInput::into_core)
             .collect();
+        let additional_context = map_additional_context(params.additional_context);
 
         let turn_id = thread
             .steer_input(
                 mapped_items,
+                additional_context,
                 Some(&params.expected_turn_id),
                 params.responsesapi_client_metadata,
             )
