@@ -113,6 +113,89 @@ async fn thread_start_injects_dynamic_tools_into_model_requests() -> Result<()> 
 }
 
 #[tokio::test]
+async fn thread_start_renames_reserved_web_dynamic_tool_namespace_in_model_requests() -> Result<()>
+{
+    let responses = vec![create_final_assistant_message_sse_response("Done")?];
+    let server = create_mock_responses_server_sequence_unchecked(responses).await;
+
+    let codex_home = TempDir::new()?;
+    create_config_toml(codex_home.path(), &server.uri())?;
+
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
+
+    let dynamic_tool = DynamicToolSpec {
+        namespace: Some("web".to_string()),
+        name: "run".to_string(),
+        description: "Run a web query".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "search_query": {
+                    "type": "array",
+                    "items": { "type": "object" }
+                }
+            },
+            "additionalProperties": false,
+        }),
+        defer_loading: false,
+    };
+
+    let thread_req = app_server
+        .send_thread_start_request(ThreadStartParams {
+            dynamic_tools: Some(vec![dynamic_tool.clone()]),
+            ..Default::default()
+        })
+        .await?;
+    let thread_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        app_server.read_stream_until_response_message(RequestId::Integer(thread_req)),
+    )
+    .await??;
+    let ThreadStartResponse { thread, .. } = to_response::<ThreadStartResponse>(thread_resp)?;
+
+    let turn_req = app_server
+        .send_turn_start_request(TurnStartParams {
+            thread_id: thread.id,
+            input: vec![V2UserInput::Text {
+                text: "Hello".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    let turn_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        app_server.read_stream_until_response_message(RequestId::Integer(turn_req)),
+    )
+    .await??;
+    let _turn: TurnStartResponse = to_response::<TurnStartResponse>(turn_resp)?;
+
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        app_server.read_stream_until_notification_message("turn/completed"),
+    )
+    .await??;
+
+    let bodies = responses_bodies(&server).await?;
+    let body = bodies
+        .first()
+        .context("expected at least one responses request")?;
+    assert!(
+        find_namespace(body, "web").is_none(),
+        "dynamic web.run must not collide with the Responses built-in web namespace"
+    );
+    let tool = find_namespace_tool(body, "web_run", &dynamic_tool.name)
+        .context("expected web.run dynamic tool under the translated namespace")?;
+    assert_eq!(
+        tool.get("description"),
+        Some(&Value::String(dynamic_tool.description))
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn thread_start_keeps_hidden_dynamic_tools_out_of_model_requests() -> Result<()> {
     let responses = vec![create_final_assistant_message_sse_response("Done")?];
     let server = create_mock_responses_server_sequence_unchecked(responses).await;
@@ -203,6 +286,28 @@ async fn responses_bodies(server: &MockServer) -> Result<Vec<Value>> {
 
 fn find_tool<'a>(body: &'a Value, name: &str) -> Option<&'a Value> {
     body.get("tools")
+        .and_then(Value::as_array)
+        .and_then(|tools| {
+            tools
+                .iter()
+                .find(|tool| tool.get("name").and_then(Value::as_str) == Some(name))
+        })
+}
+
+fn find_namespace<'a>(body: &'a Value, namespace: &str) -> Option<&'a Value> {
+    body.get("tools")
+        .and_then(Value::as_array)
+        .and_then(|tools| {
+            tools.iter().find(|tool| {
+                tool.get("type").and_then(Value::as_str) == Some("namespace")
+                    && tool.get("name").and_then(Value::as_str) == Some(namespace)
+            })
+        })
+}
+
+fn find_namespace_tool<'a>(body: &'a Value, namespace: &str, name: &str) -> Option<&'a Value> {
+    find_namespace(body, namespace)
+        .and_then(|namespace| namespace.get("tools"))
         .and_then(Value::as_array)
         .and_then(|tools| {
             tools

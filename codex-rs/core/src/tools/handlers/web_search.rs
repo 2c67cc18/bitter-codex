@@ -33,7 +33,7 @@ use codex_utils_output_truncation::approx_token_count;
 use codex_utils_output_truncation::truncate_text;
 use http::HeaderMap;
 
-const WEB_NAMESPACE: &str = "web";
+const WEB_NAMESPACE: &str = "web_run";
 const RUN_TOOL_NAME: &str = "run";
 const ASSISTANT_CONTEXT_TOKEN_LIMIT: usize = 1_000;
 

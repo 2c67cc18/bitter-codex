@@ -36,6 +36,7 @@ async fn api_key_auth_selects_hosted_web_search_only() -> Result<()> {
         WebSurfaceCounts {
             hosted_web_search: 1,
             local_web_namespace: 0,
+            local_web_run_namespace: 0,
         }
     );
 
@@ -50,7 +51,8 @@ async fn chatgpt_auth_selects_local_web_only() -> Result<()> {
         web_surface_counts(&body)?,
         WebSurfaceCounts {
             hosted_web_search: 0,
-            local_web_namespace: 1,
+            local_web_namespace: 0,
+            local_web_run_namespace: 1,
         }
     );
 
@@ -66,6 +68,7 @@ enum AuthFixture {
 struct WebSurfaceCounts {
     hosted_web_search: usize,
     local_web_namespace: usize,
+    local_web_run_namespace: usize,
 }
 
 async fn run_turn_and_capture_responses_body(auth_fixture: AuthFixture) -> Result<Value> {
@@ -159,6 +162,13 @@ fn web_surface_counts(body: &Value) -> Result<WebSurfaceCounts> {
             .filter(|tool| {
                 tool.get("type").and_then(Value::as_str) == Some("namespace")
                     && tool.get("name").and_then(Value::as_str) == Some("web")
+            })
+            .count(),
+        local_web_run_namespace: tools
+            .iter()
+            .filter(|tool| {
+                tool.get("type").and_then(Value::as_str) == Some("namespace")
+                    && tool.get("name").and_then(Value::as_str) == Some("web_run")
             })
             .count(),
     })

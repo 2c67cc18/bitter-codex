@@ -29,27 +29,38 @@ use tracing::warn;
 
 pub struct DynamicToolHandler {
     tool_name: ToolName,
+    dynamic_tool_name: ToolName,
     spec: ToolSpec,
     exposure: ToolExposure,
 }
 
 impl DynamicToolHandler {
     pub fn new(tool: &DynamicToolSpec) -> Option<Self> {
-        let tool_name = ToolName::new(tool.namespace.clone(), tool.name.clone());
+        let dynamic_tool_name = ToolName::new(tool.namespace.clone(), tool.name.clone());
+        let model_namespace = tool.namespace.as_deref().map(model_visible_namespace);
+        let tool_name = ToolName::new(model_namespace.clone(), tool.name.clone());
         let output_tool = dynamic_tool_to_responses_api_tool(tool).ok()?;
-        let spec = match tool.namespace.as_ref() {
+        let spec = match model_namespace {
             Some(namespace) => ToolSpec::Namespace(ResponsesApiNamespace {
                 name: namespace.clone(),
-                description: default_namespace_description(namespace),
+                description: default_namespace_description(&namespace),
                 tools: vec![ResponsesApiNamespaceTool::Function(output_tool)],
             }),
             None => ToolSpec::Function(output_tool),
         };
         Some(Self {
             tool_name,
+            dynamic_tool_name,
             spec,
             exposure: ToolExposure::Direct,
         })
+    }
+}
+
+fn model_visible_namespace(namespace: &str) -> String {
+    match namespace {
+        "web" => "web_run".to_string(),
+        namespace => namespace.to_string(),
     }
 }
 
@@ -93,7 +104,7 @@ impl ToolExecutor<ToolInvocation> for DynamicToolHandler {
             &session,
             turn.as_ref(),
             call_id,
-            self.tool_name.clone(),
+            self.dynamic_tool_name.clone(),
             args,
         )
         .await
