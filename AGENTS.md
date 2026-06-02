@@ -109,6 +109,7 @@ These guidelines apply to app-server protocol work in `codex-rs`, especially:
   `#[serde(tag = "type", ...)]`.
 - Prefer plain `String` IDs at the API boundary (do UUID parsing/conversion internally if needed).
 - Timestamps should be integer Unix seconds (`i64`) and named `*_at` (for example, `created_at`, `updated_at`, `resets_at`).
+
 ### Client->server request payloads (`*Params`)
 
 - Optional collection fields (for example `Vec`, `HashMap`) must use `Option<...>`. Do not use `#[serde(default)]` to model optional collections, and do not use `skip_serializing_if` on v2 payload fields.
@@ -120,3 +121,8 @@ These guidelines apply to app-server protocol work in `codex-rs`, especially:
 ### Development Workflow
 
 - Validate protocol changes with `cargo +stable test -p codex-app-server-protocol`.
+
+## Git Workflow
+
+- Keep commits scoped to one coherent fix; verify (where/how best for the given fix) and commit it before moving on.
+- Add yourself as a co-author on commits you make.
