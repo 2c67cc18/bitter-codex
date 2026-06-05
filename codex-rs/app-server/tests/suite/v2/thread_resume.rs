@@ -20,6 +20,7 @@ use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::TurnItemsView;
 use codex_app_server_protocol::TurnStartParams;
+use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput as V2UserInput;
 use codex_core::ARCHIVED_SESSIONS_SUBDIR;
 use pretty_assertions::assert_eq;
@@ -101,6 +102,76 @@ async fn thread_resume_returns_initial_turns_page() -> Result<()> {
     assert_eq!(page.data[0].items_view, TurnItemsView::Summary);
     assert_eq!(page.next_cursor, None);
     assert!(page.backwards_cursor.is_some());
+
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn thread_resume_accepts_normalized_path_for_running_thread_id() -> Result<()> {
+    let server = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    create_config_toml(codex_home.path(), &server.uri())?;
+
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
+
+    let start_id = app_server
+        .send_thread_start_request(ThreadStartParams {
+            model: Some("gpt-5.2".to_string()),
+            ..Default::default()
+        })
+        .await?;
+    let start_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        app_server.read_stream_until_response_message(RequestId::Integer(start_id)),
+    )
+    .await??;
+    let ThreadStartResponse { thread, .. } = to_response::<ThreadStartResponse>(start_resp)?;
+    let active_path = thread.path.clone().expect("thread should have path");
+
+    let turn_id = app_server
+        .send_turn_start_request(TurnStartParams {
+            thread_id: thread.id.clone(),
+            input: vec![V2UserInput::Text {
+                text: "materialize rollout".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    let turn_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        app_server.read_stream_until_response_message(RequestId::Integer(turn_id)),
+    )
+    .await??;
+    let _: TurnStartResponse = to_response::<TurnStartResponse>(turn_resp)?;
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        app_server.read_stream_until_notification_message("turn/completed"),
+    )
+    .await??;
+
+    let equivalent_path = codex_home.path().join("equivalent-rollout.jsonl");
+    std::os::unix::fs::symlink(&active_path, &equivalent_path)?;
+
+    let resume_id = app_server
+        .send_thread_resume_request(ThreadResumeParams {
+            thread_id: thread.id.clone(),
+            path: Some(equivalent_path),
+            ..Default::default()
+        })
+        .await?;
+    let resume_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        app_server.read_stream_until_response_message(RequestId::Integer(resume_id)),
+    )
+    .await??;
+    let ThreadResumeResponse {
+        thread: resumed, ..
+    } = to_response::<ThreadResumeResponse>(resume_resp)?;
+
+    assert_eq!(resumed.id, thread.id);
 
     Ok(())
 }
