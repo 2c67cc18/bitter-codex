@@ -14,7 +14,7 @@ pub struct ViewImageToolOptions {
 pub fn create_view_image_tool(options: ViewImageToolOptions) -> ToolSpec {
     let mut properties = BTreeMap::from([(
         "path".to_string(),
-        JsonSchema::string(Some("Local filesystem path to an image file".to_string())),
+        JsonSchema::string(Some("Local filesystem path to an image file.".to_string())),
     )]);
     if options.can_request_original_image_detail {
         properties.insert(
@@ -22,7 +22,7 @@ pub fn create_view_image_tool(options: ViewImageToolOptions) -> ToolSpec {
             JsonSchema::string_enum(
                 vec![json!("high"), json!("original")],
                 Some(
-                    "Optional detail override. Supported values are `high` and `original`; omit this field for default high resized behavior. Use `original` to preserve the file's original resolution instead of resizing to fit. This is important when high-fidelity image perception or precise localization is needed, especially for CUA agents.".to_string(),
+                    "Image detail level. Defaults to `high`; use `original` to preserve exact resolution.".to_string(),
                 ),
             ),
         );
@@ -66,7 +66,7 @@ mod tests {
     #[test]
     fn view_image_description_uses_visual_inspection_wording() {
         let tool = create_view_image_tool(ViewImageToolOptions {
-            can_request_original_image_detail: false,
+            can_request_original_image_detail: true,
         });
 
         match tool {
@@ -74,6 +74,21 @@ mod tests {
                 assert_eq!(
                     function.description,
                     "View a local image file from the filesystem when visual inspection is needed. Use this for images already available on disk."
+                );
+                let properties = function.parameters.properties.expect("properties");
+                assert_eq!(
+                    properties
+                        .get("path")
+                        .and_then(|schema| schema.description.as_deref()),
+                    Some("Local filesystem path to an image file.")
+                );
+                assert_eq!(
+                    properties
+                        .get("detail")
+                        .and_then(|schema| schema.description.as_deref()),
+                    Some(
+                        "Image detail level. Defaults to `high`; use `original` to preserve exact resolution."
+                    )
                 );
             }
             other => panic!("expected function tool spec but got {other:?}"),

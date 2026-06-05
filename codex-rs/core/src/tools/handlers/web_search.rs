@@ -10,15 +10,18 @@ use codex_api::ReqwestTransport;
 use codex_api::SearchClient;
 use codex_api::SearchCommands;
 use codex_api::SearchInput;
+use codex_api::SearchQuery;
 use codex_api::SearchRequest;
 use codex_api::SearchSettings;
 use codex_login::default_client::build_reqwest_client;
 use codex_protocol::items::TurnItem;
+use codex_protocol::items::WebSearchItem;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::models::WebSearchAction;
 use codex_tools::JsonSchema;
 use codex_tools::ResponsesApiNamespace;
 use codex_tools::ResponsesApiNamespaceTool;
@@ -32,6 +35,7 @@ use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::approx_token_count;
 use codex_utils_output_truncation::truncate_text;
 use http::HeaderMap;
+use reqwest::Url;
 
 const WEB_NAMESPACE: &str = "web_run";
 const RUN_TOOL_NAME: &str = "run";
@@ -75,6 +79,7 @@ impl ToolExecutor<ToolInvocation> for WebSearchHandler {
         let ToolInvocation {
             session,
             turn,
+            call_id,
             payload,
             ..
         } = invocation;
@@ -84,6 +89,8 @@ impl ToolExecutor<ToolInvocation> for WebSearchHandler {
             ));
         };
         let commands = parse_commands(&arguments)?;
+        let command_action = command_action(&commands);
+        let started_item = web_search_item(&call_id, command_action.clone());
         let provider = turn
             .provider
             .api_provider()
@@ -101,7 +108,7 @@ impl ToolExecutor<ToolInvocation> for WebSearchHandler {
         );
         let request = SearchRequest {
             id: session.session_id().to_string(),
-            model: None,
+            model: turn.model_info.slug.clone(),
             reasoning: None,
             input: recent_input(&session, turn.as_ref()).await,
             commands: Some(commands),
@@ -110,10 +117,16 @@ impl ToolExecutor<ToolInvocation> for WebSearchHandler {
                 u64::try_from(turn.truncation_policy.token_budget()).unwrap_or(u64::MAX),
             ),
         };
+        session
+            .emit_turn_item_started(turn.as_ref(), &started_item)
+            .await;
         let response = client
             .search(&request, HeaderMap::new())
             .await
             .map_err(|err| FunctionCallError::Fatal(err.to_string()))?;
+        session
+            .emit_turn_item_completed(turn.as_ref(), web_search_item(&call_id, command_action))
+            .await;
 
         Ok(boxed_tool_output(EncryptedSearchOutput {
             encrypted_output: response.encrypted_output,
@@ -129,6 +142,61 @@ fn parse_commands(arguments: &str) -> Result<SearchCommands, FunctionCallError> 
     }
     serde_json::from_str(arguments)
         .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))
+}
+
+fn command_action(commands: &SearchCommands) -> WebSearchAction {
+    commands
+        .search_query
+        .as_deref()
+        .and_then(query_action)
+        .or_else(|| commands.image_query.as_deref().and_then(query_action))
+        .or_else(|| {
+            commands
+                .open
+                .as_deref()
+                .and_then(|operations| operations.first())
+                .and_then(|operation| {
+                    literal_url(&operation.ref_id)
+                        .map(|url| WebSearchAction::OpenPage { url: Some(url) })
+                })
+        })
+        .or_else(|| {
+            commands
+                .find
+                .as_deref()
+                .and_then(|operations| operations.first())
+                .map(|operation| WebSearchAction::FindInPage {
+                    url: literal_url(&operation.ref_id),
+                    pattern: Some(operation.pattern.clone()),
+                })
+        })
+        .unwrap_or(WebSearchAction::Other)
+}
+
+fn query_action(queries: &[SearchQuery]) -> Option<WebSearchAction> {
+    match queries {
+        [] => None,
+        [query] => Some(WebSearchAction::Search {
+            query: Some(query.q.clone()),
+            queries: None,
+        }),
+        queries => Some(WebSearchAction::Search {
+            query: None,
+            queries: Some(queries.iter().map(|query| query.q.clone()).collect()),
+        }),
+    }
+}
+
+fn literal_url(ref_id: &str) -> Option<String> {
+    Url::parse(ref_id).is_ok().then(|| ref_id.to_string())
+}
+
+fn web_search_item(call_id: &str, action: WebSearchAction) -> TurnItem {
+    TurnItem::WebSearch(WebSearchItem {
+        id: call_id.to_string(),
+        query: crate::web_search_action_detail(&action),
+        action,
+    })
 }
 
 async fn recent_input(
@@ -383,6 +451,14 @@ mod tests {
     }
 
     #[test]
+    fn web_run_description_preserves_direct_standalone_guidance() {
+        assert_eq!(
+            web_run_description(),
+            "Tool for accessing the internet. Use search_query, image_query, open, click, find, screenshot, finance, weather, sports, time, and response_length to retrieve current information. Search settings use direct standalone web access only."
+        );
+    }
+
+    #[test]
     fn schema_preserves_sports_league_enum() {
         let schema = commands_schema();
         let sports = schema
@@ -412,6 +488,96 @@ mod tests {
                 serde_json::json!("ncaawb"),
                 serde_json::json!("ipl"),
             ])
+        );
+    }
+
+    #[test]
+    fn command_action_reports_queries_and_navigation_detail() {
+        let cases = [
+            (
+                r#"{"image_query":[{"q":"waterfalls"},{"q":"mountains"}]}"#,
+                WebSearchAction::Search {
+                    query: None,
+                    queries: Some(vec!["waterfalls".to_string(), "mountains".to_string()]),
+                },
+            ),
+            (
+                r#"{"open":[{"ref_id":"https://example.com/docs"}]}"#,
+                WebSearchAction::OpenPage {
+                    url: Some("https://example.com/docs".to_string()),
+                },
+            ),
+            (
+                r#"{"find":[{"ref_id":"https://example.com/docs","pattern":"install"}]}"#,
+                WebSearchAction::FindInPage {
+                    url: Some("https://example.com/docs".to_string()),
+                    pattern: Some("install".to_string()),
+                },
+            ),
+            (
+                r#"{"find":[{"ref_id":"turn0search0","pattern":"install"}]}"#,
+                WebSearchAction::FindInPage {
+                    url: None,
+                    pattern: Some("install".to_string()),
+                },
+            ),
+            (
+                r#"{"open":[{"ref_id":"turn0search0"}]}"#,
+                WebSearchAction::Other,
+            ),
+        ];
+
+        for (arguments, expected) in cases {
+            let commands: SearchCommands =
+                serde_json::from_str(arguments).expect("valid search command arguments");
+            assert_eq!(command_action(&commands), expected);
+        }
+    }
+
+    #[test]
+    fn web_search_item_includes_readable_query_detail() {
+        let item = web_search_item(
+            "call-1",
+            WebSearchAction::Search {
+                query: Some("standalone web search".to_string()),
+                queries: None,
+            },
+        );
+
+        let TurnItem::WebSearch(item) = item else {
+            panic!("expected web search item");
+        };
+
+        assert_eq!(
+            item,
+            WebSearchItem {
+                id: "call-1".to_string(),
+                query: "standalone web search".to_string(),
+                action: WebSearchAction::Search {
+                    query: Some("standalone web search".to_string()),
+                    queries: None,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn search_request_requires_model() {
+        assert_eq!(
+            serde_json::to_value(SearchRequest {
+                id: "search-session".to_string(),
+                model: "mock-model".to_string(),
+                reasoning: None,
+                input: None,
+                commands: None,
+                settings: None,
+                max_output_tokens: None,
+            })
+            .expect("serialize request"),
+            serde_json::json!({
+                "id": "search-session",
+                "model": "mock-model",
+            })
         );
     }
 }

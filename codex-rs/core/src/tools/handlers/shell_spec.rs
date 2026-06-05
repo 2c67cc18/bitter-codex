@@ -19,8 +19,7 @@ pub(crate) fn create_exec_command_tool(options: CommandToolOptions) -> ToolSpec 
         (
             "workdir".to_string(),
             JsonSchema::string(Some(
-                "Optional working directory to run the command in; defaults to the turn cwd."
-                    .to_string(),
+                "Working directory for the command. Defaults to the turn cwd.".to_string(),
             )),
         ),
         (
@@ -32,20 +31,22 @@ pub(crate) fn create_exec_command_tool(options: CommandToolOptions) -> ToolSpec 
         (
             "tty".to_string(),
             JsonSchema::boolean(Some(
-                "Whether to allocate a TTY for the command. Defaults to false (plain pipes); set to true to open a PTY and access TTY process."
+                "True allocates a PTY for the command; false or omitted uses plain pipes."
                     .to_string(),
             )),
         ),
         (
             "yield_time_ms".to_string(),
             JsonSchema::number(Some(
-                "How long to wait (in milliseconds) for output before yielding.".to_string(),
+                "Wait before yielding output. Defaults to 10000 ms; effective range is 250-30000 ms."
+                    .to_string(),
             )),
         ),
         (
             "max_output_tokens".to_string(),
             JsonSchema::number(Some(
-                "Maximum number of tokens to return. Excess output will be truncated.".to_string(),
+                "Output token budget. Defaults to 10000 tokens; larger requests may be capped by policy."
+                    .to_string(),
             )),
         ),
     ]);
@@ -53,7 +54,8 @@ pub(crate) fn create_exec_command_tool(options: CommandToolOptions) -> ToolSpec 
         properties.insert(
             "login".to_string(),
             JsonSchema::boolean(Some(
-                "Whether to run the shell with -l/-i semantics. Defaults to true.".to_string(),
+                "True runs the shell with -l/-i semantics; false disables them. Defaults to true."
+                    .to_string(),
             )),
         );
     }
@@ -84,19 +86,20 @@ pub fn create_write_stdin_tool() -> ToolSpec {
         (
             "chars".to_string(),
             JsonSchema::string(Some(
-                "Bytes to write to stdin (may be empty to poll).".to_string(),
+                "Bytes to write to stdin. Defaults to empty, which polls without writing.".to_string(),
             )),
         ),
         (
             "yield_time_ms".to_string(),
             JsonSchema::number(Some(
-                "How long to wait (in milliseconds) for output before yielding.".to_string(),
+                "Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait 5000-300000 ms by default.".to_string(),
             )),
         ),
         (
             "max_output_tokens".to_string(),
             JsonSchema::number(Some(
-                "Maximum number of tokens to return. Excess output will be truncated.".to_string(),
+                "Output token budget. Defaults to 10000 tokens; larger requests may be capped by policy."
+                    .to_string(),
             )),
         ),
     ]);
@@ -131,4 +134,88 @@ fn unified_exec_output_schema() -> Value {
         "required": ["wall_time_seconds", "output"],
         "additionalProperties": false
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn exec_command_descriptions_match_retained_upstream_wording() {
+        let ToolSpec::Function(tool) = create_exec_command_tool(CommandToolOptions {
+            allow_login_shell: true,
+        }) else {
+            panic!("expected function tool spec");
+        };
+        let properties = tool.parameters.properties.expect("properties");
+
+        assert_eq!(
+            properties
+                .get("workdir")
+                .and_then(|schema| schema.description.as_deref()),
+            Some("Working directory for the command. Defaults to the turn cwd.")
+        );
+        assert_eq!(
+            properties
+                .get("tty")
+                .and_then(|schema| schema.description.as_deref()),
+            Some("True allocates a PTY for the command; false or omitted uses plain pipes.")
+        );
+        assert_eq!(
+            properties
+                .get("yield_time_ms")
+                .and_then(|schema| schema.description.as_deref()),
+            Some(
+                "Wait before yielding output. Defaults to 10000 ms; effective range is 250-30000 ms."
+            )
+        );
+        assert_eq!(
+            properties
+                .get("max_output_tokens")
+                .and_then(|schema| schema.description.as_deref()),
+            Some(
+                "Output token budget. Defaults to 10000 tokens; larger requests may be capped by policy."
+            )
+        );
+        assert_eq!(
+            properties
+                .get("login")
+                .and_then(|schema| schema.description.as_deref()),
+            Some(
+                "True runs the shell with -l/-i semantics; false disables them. Defaults to true."
+            )
+        );
+    }
+
+    #[test]
+    fn write_stdin_descriptions_match_retained_upstream_wording() {
+        let ToolSpec::Function(tool) = create_write_stdin_tool() else {
+            panic!("expected function tool spec");
+        };
+        let properties = tool.parameters.properties.expect("properties");
+
+        assert_eq!(
+            properties
+                .get("chars")
+                .and_then(|schema| schema.description.as_deref()),
+            Some("Bytes to write to stdin. Defaults to empty, which polls without writing.")
+        );
+        assert_eq!(
+            properties
+                .get("yield_time_ms")
+                .and_then(|schema| schema.description.as_deref()),
+            Some(
+                "Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait 5000-300000 ms by default."
+            )
+        );
+        assert_eq!(
+            properties
+                .get("max_output_tokens")
+                .and_then(|schema| schema.description.as_deref()),
+            Some(
+                "Output token budget. Defaults to 10000 tokens; larger requests may be capped by policy."
+            )
+        );
+    }
 }
