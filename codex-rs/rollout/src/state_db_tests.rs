@@ -6,7 +6,13 @@ use chrono::DateTime;
 use chrono::NaiveDateTime;
 use chrono::Timelike;
 use chrono::Utc;
+use codex_protocol::models::ContentItem;
+use codex_protocol::models::ResponseItem;
+use codex_protocol::protocol::RolloutLine;
+use codex_protocol::protocol::SessionMeta;
+use codex_protocol::protocol::SessionMetaLine;
 use pretty_assertions::assert_eq;
+use std::path::Path;
 use tempfile::TempDir;
 
 #[test]
@@ -81,4 +87,89 @@ async fn try_init_times_out_waiting_for_stuck_startup_backfill() -> anyhow::Resu
     );
 
     Ok(())
+}
+
+#[tokio::test]
+async fn reconcile_rollout_preserves_existing_explicit_title() -> anyhow::Result<()> {
+    let home = TempDir::new().expect("temp dir");
+    let thread_id = ThreadId::new();
+    let rollout_path = write_rollout_with_user_message(home.path(), thread_id, "Hey")?;
+    let runtime =
+        codex_state::StateRuntime::init(home.path().to_path_buf(), "test-provider".to_string())
+            .await?;
+
+    let mut metadata =
+        metadata::extract_metadata_from_rollout(rollout_path.as_path(), "test-provider")
+            .await?
+            .metadata;
+    assert_eq!(metadata.title, "Hey");
+    assert_eq!(metadata.first_user_message.as_deref(), Some("Hey"));
+    metadata.title = "math".to_string();
+    runtime.upsert_thread(&metadata).await?;
+
+    reconcile_rollout(
+        Some(runtime.as_ref()),
+        rollout_path.as_path(),
+        "test-provider",
+        None,
+        &[],
+        Some(false),
+    )
+    .await;
+
+    let persisted = runtime
+        .get_thread(thread_id)
+        .await?
+        .expect("thread should exist");
+    assert_eq!(persisted.title, "math");
+    assert_eq!(persisted.first_user_message.as_deref(), Some("Hey"));
+    Ok(())
+}
+
+fn write_rollout_with_user_message(
+    home: &Path,
+    thread_id: ThreadId,
+    message: &str,
+) -> anyhow::Result<std::path::PathBuf> {
+    let dir = home.join("sessions/2026/06/01");
+    std::fs::create_dir_all(dir.as_path())?;
+    let path = dir.join(format!("rollout-2026-06-01T14-26-25-{thread_id}.jsonl"));
+    let lines = [
+        RolloutLine {
+            timestamp: "2026-06-01T14:26:25Z".to_string(),
+            item: RolloutItem::SessionMeta(SessionMetaLine {
+                meta: SessionMeta {
+                    id: thread_id,
+                    forked_from_id: None,
+                    timestamp: "2026-06-01T14:26:25Z".to_string(),
+                    cwd: home.to_path_buf(),
+                    originator: "test".to_string(),
+                    cli_version: "test".to_string(),
+                    source: SessionSource::Cli,
+                    model_provider: Some("test-provider".to_string()),
+                    base_instructions: None,
+                    dynamic_tools: None,
+                },
+                git: None,
+            }),
+        },
+        RolloutLine {
+            timestamp: "2026-06-01T14:26:26Z".to_string(),
+            item: RolloutItem::ResponseItem(ResponseItem::Message {
+                id: None,
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: message.to_string(),
+                }],
+                phase: None,
+            }),
+        },
+    ];
+    let jsonl = lines
+        .iter()
+        .map(serde_json::to_string)
+        .collect::<Result<Vec<_>, _>>()?
+        .join("\n");
+    std::fs::write(path.as_path(), format!("{jsonl}\n"))?;
+    Ok(path)
 }
