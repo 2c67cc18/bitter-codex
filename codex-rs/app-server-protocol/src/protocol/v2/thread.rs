@@ -156,8 +156,20 @@ pub struct ThreadResumeParams {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub exclude_turns: bool,
 
+    pub initial_turns_page: Option<ThreadResumeInitialTurnsPageParams>,
+
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub persist_extended_history: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadResumeInitialTurnsPageParams {
+    pub limit: Option<u32>,
+
+    pub sort_direction: Option<SortDirection>,
+
+    pub items_view: Option<TurnItemsView>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -175,6 +187,9 @@ pub struct ThreadResumeResponse {
     #[serde(default)]
     pub instruction_sources: Vec<AbsolutePathBuf>,
     pub reasoning_effort: Option<ReasoningEffort>,
+
+    #[serde(default)]
+    pub initial_turns_page: Option<ThreadTurnsListResponse>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
@@ -539,6 +554,90 @@ pub struct ThreadTurnsItemsListResponse {
     pub next_cursor: Option<String>,
 
     pub backwards_cursor: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::v2::SessionSource;
+    use pretty_assertions::assert_eq;
+    use serde_json::json;
+
+    fn test_thread() -> Thread {
+        Thread {
+            id: "thread-1".to_string(),
+            session_id: "session-1".to_string(),
+            forked_from_id: None,
+            preview: String::new(),
+            ephemeral: false,
+            model_provider: "openai".to_string(),
+            created_at: 1,
+            updated_at: 1,
+            status: ThreadStatus::Idle,
+            path: None,
+            cwd: AbsolutePathBuf::try_from("/tmp").expect("absolute path"),
+            cli_version: "0.0.0".to_string(),
+            source: SessionSource::Exec,
+            git_info: None,
+            name: None,
+            turns: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn thread_resume_params_accept_initial_turns_page() {
+        let params = serde_json::from_value::<ThreadResumeParams>(json!({
+            "threadId": "thread-1",
+            "initialTurnsPage": {
+                "limit": 10,
+                "sortDirection": "asc",
+                "itemsView": "full"
+            }
+        }))
+        .expect("deserialize params");
+
+        assert_eq!(
+            params.initial_turns_page,
+            Some(ThreadResumeInitialTurnsPageParams {
+                limit: Some(10),
+                sort_direction: Some(SortDirection::Asc),
+                items_view: Some(TurnItemsView::Full),
+            })
+        );
+    }
+
+    #[test]
+    fn thread_resume_response_serializes_initial_turns_page() {
+        let response = ThreadResumeResponse {
+            thread: test_thread(),
+            model: "gpt-5".to_string(),
+            model_provider: "openai".to_string(),
+            service_tier: None,
+            cwd: AbsolutePathBuf::try_from("/tmp").expect("absolute path"),
+            runtime_workspace_roots: Vec::new(),
+            instruction_sources: Vec::new(),
+            reasoning_effort: None,
+            initial_turns_page: Some(ThreadTurnsListResponse {
+                data: Vec::new(),
+                next_cursor: Some("next".to_string()),
+                backwards_cursor: Some("back".to_string()),
+            }),
+        };
+
+        let value = serde_json::to_value(&response).expect("serialize response");
+        assert_eq!(
+            value["initialTurnsPage"],
+            json!({
+                "data": [],
+                "nextCursor": "next",
+                "backwardsCursor": "back"
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<ThreadResumeResponse>(value).expect("deserialize response"),
+            response
+        );
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]

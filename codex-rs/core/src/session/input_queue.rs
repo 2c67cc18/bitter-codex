@@ -6,7 +6,10 @@ use tokio::sync::Mutex;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum TurnInput {
-    UserInput(Vec<UserInput>),
+    UserInput {
+        input: Vec<UserInput>,
+        client_id: Option<String>,
+    },
     ResponseInputItem(ResponseInputItem),
 }
 
@@ -25,7 +28,6 @@ impl InputQueue {
             idle_pending_input: Mutex::new(Vec::new()),
         }
     }
-
 
     pub(crate) async fn take_queued_response_items_for_next_turn(&self) -> Vec<ResponseInputItem> {
         std::mem::take(&mut *self.idle_pending_input.lock().await)
@@ -60,7 +62,6 @@ impl InputQueue {
         clippy::await_holding_invalid_type,
         reason = "active turn checks and turn state updates must remain atomic"
     )]
-
     #[expect(
         clippy::await_holding_invalid_type,
         reason = "active turn checks and turn state updates must remain atomic"

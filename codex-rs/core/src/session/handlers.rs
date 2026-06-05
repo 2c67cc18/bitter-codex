@@ -96,6 +96,7 @@ async fn thread_settings_applied_event(sess: &Session) -> EventMsg {
 pub(super) async fn user_input_or_turn_inner(sess: &Arc<Session>, sub_id: String, op: Op) {
     let Op::UserInput {
         items,
+        client_id,
         environments,
         final_output_json_schema,
         responsesapi_client_metadata,
@@ -134,6 +135,7 @@ pub(super) async fn user_input_or_turn_inner(sess: &Arc<Session>, sub_id: String
             additional_context.clone(),
             None,
             responsesapi_client_metadata.clone(),
+            client_id.clone(),
         )
         .await
     {
@@ -156,7 +158,10 @@ pub(super) async fn user_input_or_turn_inner(sess: &Arc<Session>, sub_id: String
                 .map(TurnInput::ResponseInputItem)
                 .collect::<Vec<_>>();
             if !items.is_empty() {
-                task_input.push(TurnInput::UserInput(items));
+                task_input.push(TurnInput::UserInput {
+                    input: items,
+                    client_id,
+                });
             }
             sess.spawn_task(
                 Arc::clone(&current_context),

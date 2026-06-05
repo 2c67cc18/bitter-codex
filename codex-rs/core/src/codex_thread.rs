@@ -114,6 +114,7 @@ impl CodexThread {
         additional_context: BTreeMap<String, AdditionalContextEntry>,
         expected_turn_id: Option<&str>,
         responsesapi_client_metadata: Option<HashMap<String, String>>,
+        client_id: Option<String>,
     ) -> Result<String, SteerInputError> {
         self.codex
             .steer_input(
@@ -121,6 +122,7 @@ impl CodexThread {
                 additional_context,
                 expected_turn_id,
                 responsesapi_client_metadata,
+                client_id,
             )
             .await
     }

@@ -24,6 +24,8 @@ pub enum TurnItem {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct UserMessageItem {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
     pub content: Vec<UserInput>,
 }
 
@@ -98,6 +100,7 @@ impl UserMessageItem {
     pub fn new(content: &[UserInput]) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
+            client_id: None,
             content: content.to_vec(),
         }
     }

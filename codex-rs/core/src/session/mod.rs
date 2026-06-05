@@ -423,6 +423,7 @@ impl Codex {
         additional_context: BTreeMap<String, AdditionalContextEntry>,
         expected_turn_id: Option<&str>,
         responsesapi_client_metadata: Option<HashMap<String, String>>,
+        client_id: Option<String>,
     ) -> Result<String, SteerInputError> {
         self.session
             .steer_input(
@@ -430,6 +431,7 @@ impl Codex {
                 additional_context,
                 expected_turn_id,
                 responsesapi_client_metadata,
+                client_id,
             )
             .await
     }
@@ -989,10 +991,16 @@ impl Session {
         &self,
         turn_context: &TurnContext,
         user_input: &[UserInput],
+        client_id: Option<String>,
     ) {
         let item = ResponseItem::from(ResponseInputItem::from(user_input.to_vec()));
-        self.record_response_item_and_emit_turn_item(turn_context, item)
+        self.record_conversation_items(turn_context, std::slice::from_ref(&item))
             .await;
+        let mut user_message = codex_protocol::items::UserMessageItem::new(user_input);
+        user_message.client_id = client_id;
+        let turn_item = codex_protocol::items::TurnItem::UserMessage(user_message);
+        self.emit_turn_item_started(turn_context, &turn_item).await;
+        self.emit_turn_item_completed(turn_context, turn_item).await;
     }
 
     pub(crate) async fn record_response_item_and_emit_turn_item(
@@ -1237,6 +1245,7 @@ impl Session {
         additional_context: BTreeMap<String, AdditionalContextEntry>,
         expected_turn_id: Option<&str>,
         responsesapi_client_metadata: Option<HashMap<String, String>>,
+        client_id: Option<String>,
     ) -> Result<String, SteerInputError> {
         if input.is_empty() {
             return Err(SteerInputError::EmptyInput);
@@ -1290,7 +1299,7 @@ impl Session {
             .into_iter()
             .map(TurnInput::ResponseInputItem)
             .collect::<Vec<_>>();
-        pending_input.push(TurnInput::UserInput(input));
+        pending_input.push(TurnInput::UserInput { input, client_id });
         self.input_queue
             .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_input)
             .await;

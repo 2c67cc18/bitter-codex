@@ -85,6 +85,7 @@ pub enum ThreadItem {
     #[serde(rename_all = "camelCase")]
     UserMessage {
         id: String,
+        client_id: Option<String>,
         content: Vec<UserInput>,
     },
     #[serde(rename_all = "camelCase")]
@@ -215,6 +216,7 @@ impl From<CoreTurnItem> for ThreadItem {
         match value {
             CoreTurnItem::UserMessage(user) => ThreadItem::UserMessage {
                 id: user.id,
+                client_id: user.client_id,
                 content: user.content.into_iter().map(UserInput::from).collect(),
             },
             CoreTurnItem::AgentMessage(agent) => {

@@ -1,3 +1,5 @@
+use super::thread_processor::apply_turns_items_view;
+use super::thread_processor::paginate_thread_turns;
 use super::*;
 
 pub(super) const THREAD_UNLOADING_DELAY: Duration = Duration::from_secs(30 * 60);
@@ -472,7 +474,7 @@ pub(super) async fn handle_pending_thread_resume_request(
 
     let request_id = pending.request_id;
     let connection_id = request_id.connection_id;
-    let mut thread = pending.thread_summary;
+    let mut thread = pending.thread_summary.clone();
     if pending.include_turns {
         populate_thread_turns_from_history(
             &mut thread,
@@ -491,6 +493,34 @@ pub(super) async fn handle_pending_thread_resume_request(
         has_live_in_progress_turn,
     );
     let token_usage_thread = pending.include_turns.then(|| thread.clone());
+    let initial_turns_page = pending.initial_turns_page.map(|params| {
+        let mut turns = thread.turns.clone();
+        if turns.is_empty() {
+            let mut page_thread = pending.thread_summary.clone();
+            populate_thread_turns_from_history(
+                &mut page_thread,
+                &pending.history_items,
+                active_turn.as_ref(),
+            );
+            turns = page_thread.turns;
+        }
+        apply_turns_items_view(
+            &mut turns,
+            params.items_view.unwrap_or(TurnItemsView::Summary),
+        );
+        let page = paginate_thread_turns(
+            turns,
+            None,
+            params.limit,
+            params.sort_direction.unwrap_or(SortDirection::Desc),
+        )
+        .expect("pagination without cursor should not fail");
+        ThreadTurnsListResponse {
+            data: page.turns,
+            next_cursor: page.next_cursor,
+            backwards_cursor: page.backwards_cursor,
+        }
+    });
 
     {
         let pending_thread_unloads = pending_thread_unloads.lock().await;
@@ -541,6 +571,7 @@ pub(super) async fn handle_pending_thread_resume_request(
         runtime_workspace_roots: workspace_roots,
         instruction_sources,
         reasoning_effort,
+        initial_turns_page,
     };
     outgoing.send_response(request_id, response).await;
 

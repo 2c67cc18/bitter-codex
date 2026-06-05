@@ -96,6 +96,9 @@ pub enum Op {
         items: Vec<UserInput>,
 
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        client_id: Option<String>,
+
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         environments: Option<Vec<TurnEnvironmentSelection>>,
 
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -136,6 +139,7 @@ impl From<Vec<UserInput>> for Op {
         Op::UserInput {
             environments: None,
             items: value,
+            client_id: None,
             final_output_json_schema: None,
             responsesapi_client_metadata: None,
             additional_context: BTreeMap::new(),
@@ -1296,6 +1300,7 @@ mod tests {
         let op = Op::UserInput {
             environments: None,
             items: Vec::new(),
+            client_id: None,
             final_output_json_schema: None,
             responsesapi_client_metadata: None,
             additional_context: BTreeMap::new(),
@@ -1318,6 +1323,7 @@ mod tests {
             Op::UserInput {
                 environments: None,
                 items: Vec::new(),
+                client_id: None,
                 final_output_json_schema: None,
                 responsesapi_client_metadata: None,
                 additional_context: BTreeMap::new(),
@@ -1383,6 +1389,7 @@ mod tests {
         let op = Op::UserInput {
             environments: None,
             items: Vec::new(),
+            client_id: None,
             final_output_json_schema: Some(schema.clone()),
             responsesapi_client_metadata: None,
             additional_context: BTreeMap::new(),
@@ -1408,6 +1415,7 @@ mod tests {
         let op = Op::UserInput {
             environments: None,
             items: Vec::new(),
+            client_id: None,
             final_output_json_schema: None,
             responsesapi_client_metadata: Some(HashMap::from([(
                 "fiber_run_id".to_string(),

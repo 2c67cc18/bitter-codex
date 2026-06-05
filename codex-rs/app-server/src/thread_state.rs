@@ -1,6 +1,7 @@
 use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::ConnectionRequestId;
 use codex_app_server_protocol::ThreadHistoryBuilder;
+use codex_app_server_protocol::ThreadResumeInitialTurnsPageParams;
 use codex_app_server_protocol::ThreadSettings;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnError;
@@ -28,6 +29,7 @@ pub(crate) struct PendingThreadResumeRequest {
     pub(crate) instruction_sources: Vec<AbsolutePathBuf>,
     pub(crate) thread_summary: codex_app_server_protocol::Thread,
     pub(crate) include_turns: bool,
+    pub(crate) initial_turns_page: Option<ThreadResumeInitialTurnsPageParams>,
 }
 
 pub(crate) enum ThreadListenerCommand {

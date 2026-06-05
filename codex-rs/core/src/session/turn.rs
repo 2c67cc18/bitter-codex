@@ -231,8 +231,8 @@ async fn record_turn_inputs(
 ) {
     for input_item in input {
         match input_item {
-            TurnInput::UserInput(user_input) => {
-                sess.record_user_prompt_and_emit_turn_item(turn_context, user_input)
+            TurnInput::UserInput { input, client_id } => {
+                sess.record_user_prompt_and_emit_turn_item(turn_context, input, client_id.clone())
                     .await;
             }
             TurnInput::ResponseInputItem(response_input_item) => {

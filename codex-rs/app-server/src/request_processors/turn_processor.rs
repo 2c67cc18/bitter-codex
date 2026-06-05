@@ -235,6 +235,7 @@ impl TurnRequestProcessor {
 
         let turn_op = Op::UserInput {
             items: mapped_items,
+            client_id: params.client_id,
             environments: environment_selections,
             final_output_json_schema: params.output_schema,
             responsesapi_client_metadata: params.responsesapi_client_metadata,
@@ -424,6 +425,7 @@ impl TurnRequestProcessor {
                 additional_context,
                 Some(&params.expected_turn_id),
                 params.responsesapi_client_metadata,
+                params.client_id,
             )
             .await
             .map_err(|err| {

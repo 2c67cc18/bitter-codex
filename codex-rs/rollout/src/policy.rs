@@ -108,6 +108,14 @@ fn event_msg_persistence_mode(ev: &EventMsg) -> Option<EventPersistenceMode> {
         | EventMsg::TurnComplete(_)
         | EventMsg::DynamicToolCallRequest(_)
         | EventMsg::DynamicToolCallResponse(_) => Some(EventPersistenceMode::Limited),
+        EventMsg::ItemStarted(event)
+            if matches!(
+                &event.item,
+                codex_protocol::items::TurnItem::UserMessage(user) if user.client_id.is_some()
+            ) =>
+        {
+            Some(EventPersistenceMode::Limited)
+        }
         EventMsg::ItemCompleted(_) => None,
         EventMsg::Error(_) | EventMsg::ExecCommandEnd(_) => Some(EventPersistenceMode::Extended),
         EventMsg::Warning(_)

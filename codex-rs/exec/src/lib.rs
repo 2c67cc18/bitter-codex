@@ -556,6 +556,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                     params: TurnStartParams {
                         thread_id: primary_thread_id_for_span.clone(),
                         input: items.into_iter().map(Into::into).collect(),
+                        client_id: None,
                         additional_context: None,
                         responsesapi_client_metadata: None,
                         environments: None,

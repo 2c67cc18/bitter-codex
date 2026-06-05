@@ -199,7 +199,11 @@ impl ThreadHistoryBuilder {
             .take()
             .unwrap_or_else(|| self.new_turn(None));
         let id = self.next_item_id();
-        turn.items.push(ThreadItem::UserMessage { id, content });
+        turn.items.push(ThreadItem::UserMessage {
+            id,
+            client_id: None,
+            content,
+        });
         self.current_turn = Some(turn);
     }
 
@@ -216,8 +220,12 @@ impl ThreadHistoryBuilder {
 
     fn handle_item_started(&mut self, payload: &ItemStartedEvent) {
         match &payload.item {
-            codex_protocol::items::TurnItem::UserMessage(_)
-            | codex_protocol::items::TurnItem::AgentMessage(_)
+            codex_protocol::items::TurnItem::UserMessage(user) => {
+                if user.client_id.is_some() {
+                    self.update_user_message_client_id(&payload.turn_id, user);
+                }
+            }
+            codex_protocol::items::TurnItem::AgentMessage(_)
             | codex_protocol::items::TurnItem::Reasoning(_)
             | codex_protocol::items::TurnItem::WebSearch(_)
             | codex_protocol::items::TurnItem::ImageView(_)
@@ -228,8 +236,12 @@ impl ThreadHistoryBuilder {
 
     fn handle_item_completed(&mut self, payload: &ItemCompletedEvent) {
         match &payload.item {
-            codex_protocol::items::TurnItem::UserMessage(_)
-            | codex_protocol::items::TurnItem::AgentMessage(_)
+            codex_protocol::items::TurnItem::UserMessage(user) => {
+                if user.client_id.is_some() {
+                    self.update_user_message_client_id(&payload.turn_id, user);
+                }
+            }
+            codex_protocol::items::TurnItem::AgentMessage(_)
             | codex_protocol::items::TurnItem::Reasoning(_)
             | codex_protocol::items::TurnItem::WebSearch(_)
             | codex_protocol::items::TurnItem::ImageView(_)
@@ -403,11 +415,68 @@ impl ThreadHistoryBuilder {
         );
     }
 
+    fn update_user_message_client_id(
+        &mut self,
+        turn_id: &str,
+        user: &codex_protocol::items::UserMessageItem,
+    ) {
+        let client_id = user.client_id.clone();
+        let content = user
+            .content
+            .clone()
+            .into_iter()
+            .map(UserInput::from)
+            .collect::<Vec<_>>();
+        if let Some(turn) = self.current_turn.as_mut().filter(|turn| turn.id == turn_id) {
+            update_user_message_client_id_in_items(&mut turn.items, &user.id, client_id, content);
+            return;
+        }
+
+        if let Some(turn) = self.turns.iter_mut().find(|turn| turn.id == turn_id) {
+            update_user_message_client_id_in_items(&mut turn.items, &user.id, client_id, content);
+            return;
+        }
+
+        warn!(
+            item_id = user.id,
+            "dropping user message client id for unknown turn id `{turn_id}`"
+        );
+    }
+
     fn next_item_id(&mut self) -> String {
         let id = format!("item-{}", self.next_item_index);
         self.next_item_index += 1;
         id
     }
+}
+
+fn update_user_message_client_id_in_items(
+    items: &mut Vec<ThreadItem>,
+    item_id: &str,
+    client_id: Option<String>,
+    content: Vec<UserInput>,
+) {
+    if let Some(ThreadItem::UserMessage {
+        client_id: existing_client_id,
+        ..
+    }) = items.iter_mut().find(|item| {
+        matches!(
+            item,
+            ThreadItem::UserMessage {
+                content: existing_content,
+                ..
+            } if existing_content == &content
+        )
+    }) {
+        *existing_client_id = client_id;
+        return;
+    }
+
+    items.push(ThreadItem::UserMessage {
+        id: item_id.to_string(),
+        client_id,
+        content,
+    });
 }
 
 fn upsert_turn_item(items: &mut Vec<ThreadItem>, item: ThreadItem) {
@@ -481,5 +550,67 @@ impl From<&PendingTurn> for Turn {
             completed_at: value.completed_at,
             duration_ms: value.duration_ms,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codex_protocol::ThreadId;
+    use codex_protocol::items::TurnItem as CoreTurnItem;
+    use codex_protocol::items::UserMessageItem as CoreUserMessageItem;
+    use codex_protocol::models::ContentItem;
+    use codex_protocol::models::ResponseItem;
+    use codex_protocol::protocol::ItemStartedEvent;
+    use codex_protocol::protocol::TurnStartedEvent;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn reconstructs_user_message_client_id_without_duplicate_user_item() {
+        let turn_id = "turn-1".to_string();
+        let content = vec![codex_protocol::user_input::UserInput::Text {
+            text: "hello".to_string(),
+            text_elements: Vec::new(),
+        }];
+        let events = vec![
+            RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {
+                turn_id: turn_id.clone(),
+                trace_id: None,
+                started_at: None,
+                model_context_window: None,
+            })),
+            RolloutItem::ResponseItem(ResponseItem::Message {
+                id: None,
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: "hello".to_string(),
+                }],
+                phase: None,
+            }),
+            RolloutItem::EventMsg(EventMsg::ItemStarted(ItemStartedEvent {
+                thread_id: ThreadId::new(),
+                turn_id,
+                item: CoreTurnItem::UserMessage(CoreUserMessageItem {
+                    id: "user-item-id".to_string(),
+                    client_id: Some("client-message-1".to_string()),
+                    content,
+                }),
+                started_at_ms: 0,
+            })),
+        ];
+
+        let turns = build_turns_from_rollout_items(&events);
+
+        assert_eq!(
+            turns[0].items,
+            vec![ThreadItem::UserMessage {
+                id: "item-1".to_string(),
+                client_id: Some("client-message-1".to_string()),
+                content: vec![UserInput::Text {
+                    text: "hello".to_string(),
+                    text_elements: Vec::new(),
+                }],
+            }]
+        );
     }
 }

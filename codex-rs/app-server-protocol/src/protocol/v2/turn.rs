@@ -46,6 +46,7 @@ pub struct AdditionalContextEntry {
 pub struct TurnStartParams {
     pub thread_id: String,
     pub input: Vec<UserInput>,
+    pub client_id: Option<String>,
 
     pub responsesapi_client_metadata: Option<HashMap<String, String>>,
 
@@ -85,6 +86,7 @@ pub struct TurnStartResponse {
 pub struct TurnSteerParams {
     pub thread_id: String,
     pub input: Vec<UserInput>,
+    pub client_id: Option<String>,
 
     pub responsesapi_client_metadata: Option<HashMap<String, String>>,
 
@@ -310,6 +312,22 @@ mod tests {
     }
 
     #[test]
+    fn turn_start_params_round_trip_client_id() {
+        let params: TurnStartParams = serde_json::from_value(json!({
+            "threadId": "thread-1",
+            "input": [],
+            "clientId": "client-message-1"
+        }))
+        .expect("deserialize turn start params");
+
+        assert_eq!(params.client_id, Some("client-message-1".to_string()));
+        assert_eq!(
+            serde_json::to_value(&params).expect("serialize turn start params")["clientId"],
+            json!("client-message-1")
+        );
+    }
+
+    #[test]
     fn turn_steer_params_deserialize_additional_context() {
         let params: TurnSteerParams = serde_json::from_value(json!({
             "threadId": "thread-1",
@@ -333,6 +351,23 @@ mod tests {
                     kind: AdditionalContextKind::Application,
                 },
             )]))
+        );
+    }
+
+    #[test]
+    fn turn_steer_params_round_trip_client_id() {
+        let params: TurnSteerParams = serde_json::from_value(json!({
+            "threadId": "thread-1",
+            "input": [],
+            "clientId": "client-message-2",
+            "expectedTurnId": "turn-1"
+        }))
+        .expect("deserialize turn steer params");
+
+        assert_eq!(params.client_id, Some("client-message-2".to_string()));
+        assert_eq!(
+            serde_json::to_value(&params).expect("serialize turn steer params")["clientId"],
+            json!("client-message-2")
         );
     }
 }

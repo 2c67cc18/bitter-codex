@@ -370,9 +370,13 @@ impl Session {
         if !pending_input.is_empty() {
             for pending_input_item in pending_input {
                 match pending_input_item {
-                    TurnInput::UserInput(user_input) => {
-                        self.record_user_prompt_and_emit_turn_item(&turn_context, &user_input)
-                            .await;
+                    TurnInput::UserInput { input, client_id } => {
+                        self.record_user_prompt_and_emit_turn_item(
+                            &turn_context,
+                            &input,
+                            client_id,
+                        )
+                        .await;
                     }
                     TurnInput::ResponseInputItem(response_input_item) => {
                         self.record_response_item_and_emit_turn_item(

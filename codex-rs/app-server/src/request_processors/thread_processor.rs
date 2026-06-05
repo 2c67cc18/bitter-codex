@@ -1512,6 +1512,32 @@ impl ThreadRequestProcessor {
         &self,
         params: ThreadTurnsListParams,
     ) -> Result<ThreadTurnsListResponse, JSONRPCErrorError> {
+        self.thread_turns_list_response_for_params(params).await
+    }
+
+    async fn thread_resume_initial_turns_page(
+        &self,
+        thread_id: ThreadId,
+        params: Option<ThreadResumeInitialTurnsPageParams>,
+    ) -> Result<Option<ThreadTurnsListResponse>, JSONRPCErrorError> {
+        let Some(params) = params else {
+            return Ok(None);
+        };
+        self.thread_turns_list_response_for_params(ThreadTurnsListParams {
+            thread_id: thread_id.to_string(),
+            cursor: None,
+            limit: params.limit,
+            sort_direction: params.sort_direction,
+            items_view: params.items_view,
+        })
+        .await
+        .map(Some)
+    }
+
+    async fn thread_turns_list_response_for_params(
+        &self,
+        params: ThreadTurnsListParams,
+    ) -> Result<ThreadTurnsListResponse, JSONRPCErrorError> {
         let ThreadTurnsListParams {
             thread_id,
             cursor,
@@ -1548,41 +1574,7 @@ impl ThreadRequestProcessor {
             has_live_running_thread,
             active_turn,
         );
-        for turn in &mut turns {
-            match items_view {
-                TurnItemsView::NotLoaded => {
-                    turn.items.clear();
-                    turn.items_view = TurnItemsView::NotLoaded;
-                }
-                TurnItemsView::Summary => {
-                    let first_user_message = turn
-                        .items
-                        .iter()
-                        .find(|item| matches!(item, ThreadItem::UserMessage { .. }))
-                        .cloned();
-                    let final_agent_message = turn
-                        .items
-                        .iter()
-                        .rev()
-                        .find(|item| matches!(item, ThreadItem::AgentMessage { .. }))
-                        .cloned();
-                    turn.items = match (first_user_message, final_agent_message) {
-                        (Some(user_message), Some(agent_message))
-                            if user_message.id() != agent_message.id() =>
-                        {
-                            vec![user_message, agent_message]
-                        }
-                        (Some(user_message), _) => vec![user_message],
-                        (None, Some(agent_message)) => vec![agent_message],
-                        (None, None) => Vec::new(),
-                    };
-                    turn.items_view = TurnItemsView::Summary;
-                }
-                TurnItemsView::Full => {
-                    turn.items_view = TurnItemsView::Full;
-                }
-            }
-        }
+        apply_turns_items_view(&mut turns, items_view);
         let page = paginate_thread_turns(
             turns,
             cursor.as_deref(),
@@ -1778,6 +1770,7 @@ impl ThreadRequestProcessor {
             base_instructions,
             developer_instructions,
             exclude_turns,
+            initial_turns_page,
             persist_extended_history: _persist_extended_history,
         } = params;
         let include_turns = !exclude_turns;
@@ -1906,6 +1899,16 @@ impl ThreadRequestProcessor {
                 set_thread_status_and_interrupt_stale_turns(&mut thread, thread_status, false);
                 let config_snapshot = codex_thread.config_snapshot().await;
                 let token_usage_thread = include_turns.then(|| thread.clone());
+                let initial_turns_page = match self
+                    .thread_resume_initial_turns_page(thread_id, initial_turns_page)
+                    .await
+                {
+                    Ok(page) => page,
+                    Err(error) => {
+                        self.outgoing.send_error(request_id, error).await;
+                        return Ok(());
+                    }
+                };
 
                 let response = ThreadResumeResponse {
                     thread,
@@ -1916,6 +1919,7 @@ impl ThreadRequestProcessor {
                     runtime_workspace_roots: config_snapshot.workspace_roots,
                     instruction_sources,
                     reasoning_effort: session_configured.reasoning_effort,
+                    initial_turns_page,
                 };
 
                 let connection_id = request_id.connection_id;
@@ -2106,6 +2110,7 @@ impl ThreadRequestProcessor {
                     instruction_sources,
                     thread_summary,
                     include_turns: !params.exclude_turns,
+                    initial_turns_page: params.initial_turns_page.clone(),
                 }),
             );
             if listener_command_tx.send(command).is_err() {
@@ -2596,7 +2601,7 @@ fn thread_backwards_cursor_for_sort_key(
     Some(timestamp.to_rfc3339_opts(SecondsFormat::Millis, true))
 }
 
-struct ThreadTurnsPage {
+pub(super) struct ThreadTurnsPage {
     pub(super) turns: Vec<Turn>,
     pub(super) next_cursor: Option<String>,
     pub(super) backwards_cursor: Option<String>,
@@ -2609,7 +2614,7 @@ struct ThreadTurnsCursor {
     include_anchor: bool,
 }
 
-fn paginate_thread_turns(
+pub(super) fn paginate_thread_turns(
     turns: Vec<Turn>,
     cursor: Option<&str>,
     limit: Option<u32>,
@@ -2719,6 +2724,44 @@ fn reconstruct_thread_turns_for_turns_list(
         merge_turn_history_with_active_turn(&mut turns, active_turn);
     }
     turns
+}
+
+pub(super) fn apply_turns_items_view(turns: &mut [Turn], items_view: TurnItemsView) {
+    for turn in turns {
+        match items_view {
+            TurnItemsView::NotLoaded => {
+                turn.items.clear();
+                turn.items_view = TurnItemsView::NotLoaded;
+            }
+            TurnItemsView::Summary => {
+                let first_user_message = turn
+                    .items
+                    .iter()
+                    .find(|item| matches!(item, ThreadItem::UserMessage { .. }))
+                    .cloned();
+                let final_agent_message = turn
+                    .items
+                    .iter()
+                    .rev()
+                    .find(|item| matches!(item, ThreadItem::AgentMessage { .. }))
+                    .cloned();
+                turn.items = match (first_user_message, final_agent_message) {
+                    (Some(user_message), Some(agent_message))
+                        if user_message.id() != agent_message.id() =>
+                    {
+                        vec![user_message, agent_message]
+                    }
+                    (Some(user_message), _) => vec![user_message],
+                    (None, Some(agent_message)) => vec![agent_message],
+                    (None, None) => Vec::new(),
+                };
+                turn.items_view = TurnItemsView::Summary;
+            }
+            TurnItemsView::Full => {
+                turn.items_view = TurnItemsView::Full;
+            }
+        }
+    }
 }
 
 fn normalize_thread_turns_status(
