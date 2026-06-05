@@ -72,6 +72,10 @@ impl ToolExecutor<ToolInvocation> for WebSearchHandler {
         })
     }
 
+    fn supports_parallel_tool_calls(&self) -> bool {
+        true
+    }
+
     async fn handle(
         &self,
         invocation: ToolInvocation,
@@ -432,6 +436,13 @@ mod tests {
                 ]),
             }
         );
+    }
+
+    #[test]
+    fn supports_parallel_tool_calls() {
+        let handler = WebSearchHandler::new(SearchSettings::default());
+
+        assert!(handler.supports_parallel_tool_calls());
     }
 
     #[test]
