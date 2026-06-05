@@ -127,7 +127,6 @@ impl ThreadScopedOutgoingMessageSender {
             .await;
     }
 
-
     pub(crate) async fn abort_pending_server_requests(&self) {
         self.outgoing
             .cancel_requests_for_thread(
@@ -659,6 +658,12 @@ mod tests {
                     }),
                     secondary: None,
                     credits: None,
+                    individual_limit: Some(codex_app_server_protocol::SpendControlLimitSnapshot {
+                        limit: "25000".to_string(),
+                        used: "8000".to_string(),
+                        remaining_percent: 68,
+                        resets_at: 456,
+                    }),
                     plan_type: Some(PlanType::Plus),
                     rate_limit_reached_type: None,
                 },
@@ -679,6 +684,12 @@ mod tests {
                         },
                         "secondary": null,
                         "credits": null,
+                        "individualLimit": {
+                            "limit": "25000",
+                            "used": "8000",
+                            "remainingPercent": 68,
+                            "resetsAt": 456
+                        },
                         "planType": "plus",
                         "rateLimitReachedType": null
                     }

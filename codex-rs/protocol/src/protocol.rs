@@ -520,6 +520,7 @@ pub struct RateLimitSnapshot {
     pub primary: Option<RateLimitWindow>,
     pub secondary: Option<RateLimitWindow>,
     pub credits: Option<CreditsSnapshot>,
+    pub individual_limit: Option<SpendControlLimitSnapshot>,
     pub plan_type: Option<crate::account::PlanType>,
     pub rate_limit_reached_type: Option<RateLimitReachedType>,
 }
@@ -563,6 +564,14 @@ pub struct CreditsSnapshot {
     pub has_credits: bool,
     pub unlimited: bool,
     pub balance: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct SpendControlLimitSnapshot {
+    pub limit: String,
+    pub used: String,
+    pub remaining_percent: i32,
+    pub resets_at: i64,
 }
 
 const BASELINE_TOKENS: i64 = 12000;
