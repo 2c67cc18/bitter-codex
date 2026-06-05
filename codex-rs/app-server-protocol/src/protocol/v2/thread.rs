@@ -57,9 +57,6 @@ pub struct ThreadStartParams {
 
     pub environments: Option<Vec<TurnEnvironmentParams>>,
     pub dynamic_tools: Option<Vec<DynamicToolSpec>>,
-
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub persist_extended_history: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -157,9 +154,6 @@ pub struct ThreadResumeParams {
     pub exclude_turns: bool,
 
     pub initial_turns_page: Option<ThreadResumeInitialTurnsPageParams>,
-
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub persist_extended_history: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
@@ -224,9 +218,6 @@ pub struct ThreadForkParams {
 
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub exclude_turns: bool,
-
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub persist_extended_history: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]

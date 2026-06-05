@@ -279,7 +279,6 @@ mod tests {
 
     use super::*;
     use crate::LiveThread;
-    use crate::ThreadEventPersistenceMode;
     use crate::ThreadPersistenceMetadata;
     use crate::local::test_support::test_config;
     use crate::local::test_support::write_archived_session_file;
@@ -510,7 +509,6 @@ mod tests {
                     cwd: Some(home.path().to_path_buf()),
                     model_provider: "different-provider".to_string(),
                 },
-                event_persistence_mode: ThreadEventPersistenceMode::Limited,
             },
         )
         .await
@@ -564,7 +562,6 @@ mod tests {
                     cwd: Some(home.path().to_path_buf()),
                     model_provider: "different-provider".to_string(),
                 },
-                event_persistence_mode: ThreadEventPersistenceMode::Limited,
             },
         )
         .await
@@ -690,7 +687,6 @@ mod tests {
                 history: None,
                 include_archived: true,
                 metadata: thread_metadata(),
-                event_persistence_mode: ThreadEventPersistenceMode::Limited,
             })
             .await
             .expect("resume live thread");
@@ -751,7 +747,6 @@ mod tests {
                 history: None,
                 include_archived: true,
                 metadata: thread_metadata(),
-                event_persistence_mode: ThreadEventPersistenceMode::Limited,
             })
             .await
             .expect_err("duplicate live resume should fail");
@@ -777,7 +772,6 @@ mod tests {
                     cwd: None,
                     model_provider: "test-provider".to_string(),
                 },
-                event_persistence_mode: ThreadEventPersistenceMode::Limited,
             })
             .await
             .expect_err("missing cwd should fail");
@@ -803,7 +797,6 @@ mod tests {
                 history: None,
                 include_archived: true,
                 metadata: thread_metadata(),
-                event_persistence_mode: ThreadEventPersistenceMode::Limited,
             })
             .await
             .expect("resume live thread");
@@ -853,7 +846,6 @@ mod tests {
                 history: None,
                 include_archived: true,
                 metadata: thread_metadata(),
-                event_persistence_mode: ThreadEventPersistenceMode::Limited,
             })
             .await
             .expect("resume live thread");
@@ -893,7 +885,6 @@ mod tests {
                 history: None,
                 include_archived: true,
                 metadata: thread_metadata(),
-                event_persistence_mode: ThreadEventPersistenceMode::Limited,
             })
             .await
             .expect("resume live archived thread");
@@ -995,7 +986,6 @@ mod tests {
             base_instructions: BaseInstructions::default(),
             dynamic_tools: Vec::new(),
             metadata: thread_metadata(),
-            event_persistence_mode: ThreadEventPersistenceMode::Limited,
         }
     }
 

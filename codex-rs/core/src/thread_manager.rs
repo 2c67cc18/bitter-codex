@@ -116,7 +116,6 @@ pub struct StartThreadOptions {
     pub initial_history: InitialHistory,
     pub session_source: Option<SessionSource>,
     pub dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
-    pub persist_extended_history: bool,
     pub metrics_service_name: Option<String>,
     pub parent_trace: Option<W3cTraceContext>,
     pub environments: Vec<TurnEnvironmentSelection>,
@@ -313,14 +312,13 @@ impl ThreadManager {
             })
     }
     pub async fn start_thread(&self, config: Config) -> CodexResult<NewThread> {
-        Box::pin(self.start_thread_with_tools(config, Vec::new(), false)).await
+        Box::pin(self.start_thread_with_tools(config, Vec::new())).await
     }
 
     pub async fn start_thread_with_tools(
         &self,
         config: Config,
         dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
-        persist_extended_history: bool,
     ) -> CodexResult<NewThread> {
         let environments = Vec::new();
         Box::pin(self.start_thread_with_options(StartThreadOptions {
@@ -328,7 +326,6 @@ impl ThreadManager {
             initial_history: InitialHistory::New,
             session_source: None,
             dynamic_tools,
-            persist_extended_history,
             metrics_service_name: None,
             parent_trace: None,
             environments,
@@ -360,7 +357,6 @@ impl ThreadManager {
             session_source,
             forked_from_thread_id,
             options.dynamic_tools,
-            options.persist_extended_history,
             options.metrics_service_name,
             None,
             options.parent_trace,
@@ -381,7 +377,6 @@ impl ThreadManager {
             config,
             initial_history,
             auth_manager,
-            false,
             parent_trace,
         ))
         .await
@@ -392,7 +387,6 @@ impl ThreadManager {
         config: Config,
         initial_history: InitialHistory,
         auth_manager: Arc<AuthManager>,
-        persist_extended_history: bool,
         parent_trace: Option<W3cTraceContext>,
     ) -> CodexResult<NewThread> {
         let environments = Vec::new();
@@ -403,7 +397,6 @@ impl ThreadManager {
             None,
             None,
             Vec::new(),
-            persist_extended_history,
             None,
             parent_trace,
             environments,
@@ -425,7 +418,6 @@ impl ThreadManager {
             None,
             None,
             Vec::new(),
-            false,
             None,
             None,
             environments,
@@ -450,7 +442,6 @@ impl ThreadManager {
             None,
             None,
             Vec::new(),
-            false,
             None,
             None,
             environments,
@@ -516,7 +507,6 @@ impl ThreadManager {
         snapshot: S,
         config: Config,
         path: PathBuf,
-        persist_extended_history: bool,
         parent_trace: Option<W3cTraceContext>,
     ) -> CodexResult<NewThread>
     where
@@ -524,14 +514,8 @@ impl ThreadManager {
     {
         let snapshot = snapshot.into();
         let history = self.initial_history_from_rollout_path(path).await?;
-        self.fork_thread_from_history(
-            snapshot,
-            config,
-            history,
-            persist_extended_history,
-            parent_trace,
-        )
-        .await
+        self.fork_thread_from_history(snapshot, config, history, parent_trace)
+            .await
     }
 
     async fn initial_history_from_rollout_path(
@@ -557,20 +541,13 @@ impl ThreadManager {
         snapshot: S,
         config: Config,
         history: InitialHistory,
-        persist_extended_history: bool,
         parent_trace: Option<W3cTraceContext>,
     ) -> CodexResult<NewThread>
     where
         S: Into<ForkSnapshot>,
     {
-        self.fork_thread_with_initial_history(
-            snapshot.into(),
-            config,
-            history,
-            persist_extended_history,
-            parent_trace,
-        )
-        .await
+        self.fork_thread_with_initial_history(snapshot.into(), config, history, parent_trace)
+            .await
     }
 
     async fn fork_thread_with_initial_history(
@@ -578,7 +555,6 @@ impl ThreadManager {
         snapshot: ForkSnapshot,
         config: Config,
         history: InitialHistory,
-        persist_extended_history: bool,
         parent_trace: Option<W3cTraceContext>,
     ) -> CodexResult<NewThread> {
         let forked_from_thread_id = match &history {
@@ -596,7 +572,6 @@ impl ThreadManager {
             None,
             forked_from_thread_id,
             Vec::new(),
-            persist_extended_history,
             None,
             parent_trace,
             environments,
@@ -635,7 +610,6 @@ impl ThreadManagerState {
         parent_session_id: Option<SessionId>,
         forked_from_thread_id: Option<ThreadId>,
         dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
-        persist_extended_history: bool,
         metrics_service_name: Option<String>,
         parent_trace: Option<W3cTraceContext>,
         environments: Vec<TurnEnvironmentSelection>,
@@ -649,7 +623,6 @@ impl ThreadManagerState {
             self.session_source.clone(),
             forked_from_thread_id,
             dynamic_tools,
-            persist_extended_history,
             metrics_service_name,
             None,
             parent_trace,
@@ -669,7 +642,6 @@ impl ThreadManagerState {
         session_source: SessionSource,
         forked_from_thread_id: Option<ThreadId>,
         dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
-        persist_extended_history: bool,
         metrics_service_name: Option<String>,
         inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
         parent_trace: Option<W3cTraceContext>,
@@ -712,7 +684,6 @@ impl ThreadManagerState {
             dynamic_tools,
             parent_session_id,
             forked_from_thread_id,
-            persist_extended_history,
             metrics_service_name,
             inherited_shell_snapshot,
             user_shell_override,

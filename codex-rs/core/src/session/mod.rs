@@ -48,7 +48,6 @@ use codex_thread_store::LiveThreadInitGuard;
 use codex_thread_store::LocalThreadStore;
 use codex_thread_store::ReadThreadParams;
 use codex_thread_store::ResumeThreadParams;
-use codex_thread_store::ThreadEventPersistenceMode;
 use codex_thread_store::ThreadPersistenceMetadata;
 use codex_thread_store::ThreadStore;
 use codex_utils_output_truncation::TruncationPolicy;
@@ -218,7 +217,6 @@ pub(crate) struct CodexSpawnArgs {
     pub(crate) forked_from_thread_id: Option<ThreadId>,
     pub(crate) dynamic_tools: Vec<DynamicToolSpec>,
     pub(crate) parent_session_id: Option<SessionId>,
-    pub(crate) persist_extended_history: bool,
     pub(crate) metrics_service_name: Option<String>,
     pub(crate) inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
     pub(crate) user_shell_override: Option<shell::Shell>,
@@ -266,7 +264,6 @@ impl Codex {
             forked_from_thread_id,
             dynamic_tools,
             parent_session_id,
-            persist_extended_history,
             metrics_service_name,
             inherited_shell_snapshot,
             user_shell_override,
@@ -327,7 +324,6 @@ impl Codex {
             forked_from_thread_id,
             dynamic_tools,
             web_tool_runtime: WebToolRuntime::Hosted,
-            persist_extended_history,
             inherited_shell_snapshot,
             user_shell_override,
         };

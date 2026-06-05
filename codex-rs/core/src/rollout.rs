@@ -1,7 +1,6 @@
 use crate::config::Config;
 pub use codex_rollout::ARCHIVED_SESSIONS_SUBDIR;
 pub use codex_rollout::Cursor;
-pub use codex_rollout::EventPersistenceMode;
 pub use codex_rollout::INTERACTIVE_SESSION_SOURCES;
 pub use codex_rollout::RolloutRecorder;
 pub use codex_rollout::RolloutRecorderParams;
@@ -41,8 +40,7 @@ pub(crate) mod list {
 }
 
 #[cfg(test)]
-pub(crate) mod recorder {
-}
+pub(crate) mod recorder {}
 
 pub(crate) use crate::session_rollout_init_error::map_session_init_error;
 

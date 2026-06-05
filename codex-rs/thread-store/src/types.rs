@@ -38,14 +38,6 @@ mod optional_option {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ThreadEventPersistenceMode {
-    #[default]
-    Limited,
-
-    Extended,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThreadPersistenceMetadata {
     pub cwd: Option<PathBuf>,
@@ -65,8 +57,6 @@ pub struct CreateThreadParams {
     pub dynamic_tools: Vec<DynamicToolSpec>,
 
     pub metadata: ThreadPersistenceMetadata,
-
-    pub event_persistence_mode: ThreadEventPersistenceMode,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -80,8 +70,6 @@ pub struct ResumeThreadParams {
     pub include_archived: bool,
 
     pub metadata: ThreadPersistenceMetadata,
-
-    pub event_persistence_mode: ThreadEventPersistenceMode,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
