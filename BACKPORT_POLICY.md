@@ -46,6 +46,12 @@ port.
   a larger feature we are not carrying.
 - `defer`: maybe useful, but needs a design decision or adjacent commits.
 
+If the feature or surface that gives a commit its value has been removed in
+full, classify the commit as `skip`. Do not use `defer` for removed surfaces
+just because a future fork could reintroduce them. `defer` is for retained
+surfaces whose local behavior needs a design decision, prerequisite bundle, or
+upstream-risk assessment before porting.
+
 Path overlap alone must not determine the classification. Check the commit
 message, patch body, new crates/modules, tests, and feature gates.
 
@@ -59,6 +65,17 @@ has a direct prerequisite, keep the prerequisite first.
 For multi-bundle backport passes, include a small DAG in the pass document. The
 DAG should show cross-bundle dependencies, parallel lanes, and a reasonable
 serial order.
+
+Versioned pass documents under `.backports/<tag>/` must state the upstream
+range they classify and, except for the first local pass, must state the
+previous local pass as an implementation prerequisite. For example, a
+`rust-v0.N.0` pass should say that `.backports/v0.(N-1).0` must be completed
+before starting it.
+
+Before considering a pass complete, mechanically check that every upstream
+commit in its stated range is represented exactly once by a commit reference in
+the pass document, including commits classified as `skip` or `defer`. Also
+check for stray commit references that do not belong to the stated range.
 
 Port or adapt the upstream test coverage when it applies to surviving behavior.
 Do not copy tests for excluded surfaces.
@@ -118,6 +135,8 @@ Before taking a commit:
 5. Port or adapt applicable tests.
 6. If the commit is a dependency bump, explain the runtime/security reason and
    perform it manually.
+7. For a completed pass document, verify upstream-range commit coverage and
+   absence of out-of-range commit references.
 
 After taking a Rust change, run `cargo +stable fmt` in `codex-rs`, then focused
 package tests. If `common`, `core`, or `protocol` changed, run workspace tests
