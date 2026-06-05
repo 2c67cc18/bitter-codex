@@ -299,6 +299,11 @@ impl Codex {
             .clone()
             .or_else(|| conversation_history.get_base_instructions().map(|s| s.text))
             .unwrap_or_else(|| model_info.get_model_instructions());
+        let dynamic_tools = if dynamic_tools.is_empty() {
+            conversation_history.get_dynamic_tools().unwrap_or_default()
+        } else {
+            dynamic_tools
+        };
         let service_tier = get_service_tier(config.service_tier.clone(), &model_info);
         let session_configuration = SessionConfiguration {
             provider: config.model_provider.clone(),

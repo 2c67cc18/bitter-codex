@@ -19,10 +19,8 @@ use crate::telemetry::DbTelemetry;
 use chrono::DateTime;
 use chrono::Utc;
 use codex_protocol::ThreadId;
-use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::protocol::RolloutItem;
 use log::LevelFilter;
-use serde_json::Value;
 use sqlx::ConnectOptions;
 use sqlx::QueryBuilder;
 use sqlx::Row;
@@ -425,7 +423,16 @@ mod tests {
     use super::test_support::unique_temp_dir;
     use crate::DB_INIT_METRIC;
     use crate::DbTelemetry;
+    use crate::ThreadMetadataBuilder;
+    use chrono::Utc;
+    use codex_protocol::ThreadId;
+    use codex_protocol::dynamic_tools::DynamicToolSpec;
+    use codex_protocol::protocol::RolloutItem;
+    use codex_protocol::protocol::SessionMeta;
+    use codex_protocol::protocol::SessionMetaLine;
+    use codex_protocol::protocol::SessionSource;
     use pretty_assertions::assert_eq;
+    use serde_json::json;
     use sqlx::SqlitePool;
     use sqlx::sqlite::SqliteConnectOptions;
     use std::collections::BTreeMap;
@@ -510,6 +517,58 @@ mod tests {
         assert_eq!(result, vec!["ok".to_string()]);
         let _ = tokio::fs::remove_dir_all(codex_home).await;
     }
+
+    #[tokio::test]
+    async fn apply_rollout_items_does_not_write_thread_dynamic_tools() {
+        let codex_home = unique_temp_dir();
+        let runtime = StateRuntime::init(codex_home.clone(), "test-provider".to_string())
+            .await
+            .expect("initialize runtime");
+        let thread_id = ThreadId::new();
+        let rollout_path = codex_home.join("rollout.jsonl");
+        let builder =
+            ThreadMetadataBuilder::new(thread_id, rollout_path, Utc::now(), SessionSource::Exec);
+        let dynamic_tools = vec![DynamicToolSpec {
+            namespace: Some("codex_app".to_string()),
+            name: "geo_lookup".to_string(),
+            description: "lookup a city".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "city": { "type": "string" }
+                },
+                "required": ["city"],
+                "additionalProperties": false
+            }),
+            defer_loading: true,
+        }];
+
+        runtime
+            .apply_rollout_items(
+                &builder,
+                &[RolloutItem::SessionMeta(SessionMetaLine {
+                    meta: SessionMeta {
+                        id: thread_id,
+                        dynamic_tools: Some(dynamic_tools),
+                        ..Default::default()
+                    },
+                    git: None,
+                })],
+                None,
+            )
+            .await
+            .expect("apply rollout items");
+
+        let stored_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM thread_dynamic_tools WHERE thread_id = ?")
+                .bind(thread_id.to_string())
+                .fetch_one(runtime.pool.as_ref())
+                .await
+                .expect("count dynamic tools");
+        assert_eq!(stored_count, 0);
+        let _ = tokio::fs::remove_dir_all(codex_home).await;
+    }
+
     #[tokio::test]
     async fn init_records_successful_sqlite_init_phases_to_explicit_telemetry() {
         let codex_home = unique_temp_dir();

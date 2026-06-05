@@ -773,11 +773,28 @@ impl InitialHistory {
             }),
         }
     }
+
+    pub fn get_dynamic_tools(&self) -> Option<Vec<DynamicToolSpec>> {
+        match self {
+            InitialHistory::New | InitialHistory::Cleared => None,
+            InitialHistory::Resumed(resumed) => {
+                dynamic_tools_from_session_meta(resumed.history.as_slice())
+            }
+            InitialHistory::Forked(items) => dynamic_tools_from_session_meta(items.as_slice()),
+        }
+    }
 }
 
 fn session_cwd_from_items(items: &[RolloutItem]) -> Option<PathBuf> {
     items.iter().find_map(|item| match item {
         RolloutItem::SessionMeta(meta_line) => Some(meta_line.meta.cwd.clone()),
+        _ => None,
+    })
+}
+
+fn dynamic_tools_from_session_meta(items: &[RolloutItem]) -> Option<Vec<DynamicToolSpec>> {
+    items.iter().find_map(|item| match item {
+        RolloutItem::SessionMeta(meta_line) => meta_line.meta.dynamic_tools.clone(),
         _ => None,
     })
 }
@@ -1310,6 +1327,47 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn initial_history_restores_dynamic_tools_from_session_meta() {
+        let dynamic_tools = vec![DynamicToolSpec {
+            namespace: Some("codex_app".to_string()),
+            name: "geo_lookup".to_string(),
+            description: "lookup a city".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "city": { "type": "string" }
+                },
+                "required": ["city"],
+                "additionalProperties": false
+            }),
+            defer_loading: true,
+        }];
+        let history = vec![RolloutItem::SessionMeta(SessionMetaLine {
+            meta: SessionMeta {
+                id: ThreadId::new(),
+                dynamic_tools: Some(dynamic_tools.clone()),
+                ..Default::default()
+            },
+            git: None,
+        })];
+
+        assert_eq!(
+            InitialHistory::Resumed(ResumedHistory {
+                conversation_id: ThreadId::new(),
+                history: history.clone(),
+                rollout_path: None,
+            })
+            .get_dynamic_tools(),
+            Some(dynamic_tools.clone())
+        );
+        assert_eq!(
+            InitialHistory::Forked(history).get_dynamic_tools(),
+            Some(dynamic_tools)
+        );
+        assert_eq!(InitialHistory::New.get_dynamic_tools(), None);
     }
 
     #[test]

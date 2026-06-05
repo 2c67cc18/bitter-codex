@@ -7,6 +7,8 @@ use app_test_support::to_response;
 use codex_app_server_protocol::DynamicToolSpec;
 use codex_app_server_protocol::JSONRPCResponse;
 use codex_app_server_protocol::RequestId;
+use codex_app_server_protocol::ThreadResumeParams;
+use codex_app_server_protocol::ThreadResumeResponse;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::TurnStartParams;
@@ -106,6 +108,131 @@ async fn thread_start_injects_dynamic_tools_into_model_requests() -> Result<()> 
     assert_eq!(
         tool.get("description"),
         Some(&Value::String(dynamic_tool.description.clone()))
+    );
+    assert_eq!(tool.get("parameters"), Some(&input_schema));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn thread_resume_restores_dynamic_tools_from_rollout_metadata() -> Result<()> {
+    let responses = vec![
+        create_final_assistant_message_sse_response("Started")?,
+        create_final_assistant_message_sse_response("Resumed")?,
+    ];
+    let server = create_mock_responses_server_sequence_unchecked(responses).await;
+
+    let codex_home = TempDir::new()?;
+    create_config_toml(codex_home.path(), &server.uri())?;
+
+    let input_schema = json!({
+        "type": "object",
+        "properties": {
+            "city": { "type": "string" }
+        },
+        "required": ["city"],
+        "additionalProperties": false,
+    });
+    let dynamic_tool = DynamicToolSpec {
+        namespace: None,
+        name: "resume_lookup".to_string(),
+        description: "Lookup restored after resume".to_string(),
+        input_schema: input_schema.clone(),
+        defer_loading: false,
+    };
+
+    let thread_id = {
+        let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+        timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
+
+        let thread_req = app_server
+            .send_thread_start_request(ThreadStartParams {
+                dynamic_tools: Some(vec![dynamic_tool.clone()]),
+                ..Default::default()
+            })
+            .await?;
+        let thread_resp: JSONRPCResponse = timeout(
+            DEFAULT_READ_TIMEOUT,
+            app_server.read_stream_until_response_message(RequestId::Integer(thread_req)),
+        )
+        .await??;
+        let ThreadStartResponse { thread, .. } = to_response::<ThreadStartResponse>(thread_resp)?;
+
+        let turn_req = app_server
+            .send_turn_start_request(TurnStartParams {
+                thread_id: thread.id.clone(),
+                input: vec![V2UserInput::Text {
+                    text: "Start".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            })
+            .await?;
+        let turn_resp: JSONRPCResponse = timeout(
+            DEFAULT_READ_TIMEOUT,
+            app_server.read_stream_until_response_message(RequestId::Integer(turn_req)),
+        )
+        .await??;
+        let _turn: TurnStartResponse = to_response::<TurnStartResponse>(turn_resp)?;
+
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            app_server.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
+
+        thread.id
+    };
+
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
+
+    let resume_req = app_server
+        .send_thread_resume_request(ThreadResumeParams {
+            thread_id: thread_id.clone(),
+            ..Default::default()
+        })
+        .await?;
+    let resume_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        app_server.read_stream_until_response_message(RequestId::Integer(resume_req)),
+    )
+    .await??;
+    let ThreadResumeResponse { thread, .. } = to_response::<ThreadResumeResponse>(resume_resp)?;
+
+    let turn_req = app_server
+        .send_turn_start_request(TurnStartParams {
+            thread_id: thread.id,
+            input: vec![V2UserInput::Text {
+                text: "Resume".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    let turn_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        app_server.read_stream_until_response_message(RequestId::Integer(turn_req)),
+    )
+    .await??;
+    let _turn: TurnStartResponse = to_response::<TurnStartResponse>(turn_resp)?;
+
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        app_server.read_stream_until_notification_message("turn/completed"),
+    )
+    .await??;
+
+    let bodies = responses_bodies(&server).await?;
+    let resumed_body = bodies
+        .get(1)
+        .context("expected a responses request after resume")?;
+    let tool = find_tool(resumed_body, &dynamic_tool.name)
+        .context("expected dynamic tool restored from rollout metadata after resume")?;
+
+    assert_eq!(
+        tool.get("description"),
+        Some(&Value::String(dynamic_tool.description))
     );
     assert_eq!(tool.get("parameters"), Some(&input_schema));
 

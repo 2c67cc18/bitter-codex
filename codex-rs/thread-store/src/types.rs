@@ -408,8 +408,6 @@ pub struct ThreadMetadataPatch {
     pub first_user_message: Option<String>,
 
     pub git_info: Option<GitInfoPatch>,
-
-    pub dynamic_tools: Option<Vec<DynamicToolSpec>>,
 }
 
 impl ThreadMetadataPatch {
@@ -461,9 +459,6 @@ impl ThreadMetadataPatch {
                 .get_or_insert_with(GitInfoPatch::default)
                 .merge(git_info);
         }
-        if next.dynamic_tools.is_some() {
-            self.dynamic_tools = next.dynamic_tools;
-        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -482,7 +477,6 @@ impl ThreadMetadataPatch {
             && self.token_usage.is_none()
             && self.first_user_message.is_none()
             && self.git_info.is_none()
-            && self.dynamic_tools.is_none()
     }
 }
 
