@@ -95,7 +95,7 @@ pub(super) async fn read_thread_by_rollout_path(
     include_archived: bool,
     include_history: bool,
 ) -> ThreadStoreResult<StoredThread> {
-    let path = resolve_requested_rollout_path(store, rollout_path)?;
+    let path = resolve_requested_rollout_path(store, rollout_path).await?;
     let mut thread = read_thread_from_rollout_path(store, path).await?;
     if !include_archived && thread.archived_at.is_some() {
         return Err(ThreadStoreError::InvalidRequest {
@@ -122,7 +122,7 @@ pub(super) async fn read_thread_by_rollout_path(
     Ok(thread)
 }
 
-fn resolve_requested_rollout_path(
+async fn resolve_requested_rollout_path(
     store: &LocalThreadStore,
     rollout_path: std::path::PathBuf,
 ) -> ThreadStoreResult<std::path::PathBuf> {
@@ -131,9 +131,27 @@ fn resolve_requested_rollout_path(
     } else {
         rollout_path
     };
-    std::fs::canonicalize(&path).map_err(|err| ThreadStoreError::InvalidRequest {
+    let path = std::fs::canonicalize(&path).map_err(|err| ThreadStoreError::InvalidRequest {
         message: format!("failed to resolve rollout path `{}`: {err}", path.display()),
-    })
+    })?;
+    match tokio::fs::metadata(path.as_path()).await {
+        Ok(metadata) if metadata.is_dir() => Err(ThreadStoreError::InvalidRequest {
+            message: format!(
+                "failed to resolve rollout path `{}`: path is a directory",
+                path.display()
+            ),
+        }),
+        Ok(metadata) if !metadata.is_file() => Err(ThreadStoreError::InvalidRequest {
+            message: format!(
+                "failed to resolve rollout path `{}`: path is not a file",
+                path.display()
+            ),
+        }),
+        Ok(_) => Ok(path),
+        Err(err) => Err(ThreadStoreError::InvalidRequest {
+            message: format!("failed to resolve rollout path `{}`: {err}", path.display()),
+        }),
+    }
 }
 
 async fn attach_history_if_requested(
@@ -436,6 +454,49 @@ mod tests {
             Some(std::fs::canonicalize(active_path).expect("canonical path"))
         );
         assert_eq!(thread.preview, "Hello from user");
+    }
+
+    #[tokio::test]
+    async fn read_thread_by_rollout_path_rejects_directory() {
+        let home = TempDir::new().expect("temp dir");
+        let store = LocalThreadStore::new(test_config(home.path()), None);
+
+        let err = store
+            .read_thread_by_rollout_path(home.path().to_path_buf(), false, false)
+            .await
+            .expect_err("directory rollout path should be rejected");
+        let ThreadStoreError::InvalidRequest { message } = err else {
+            panic!("expected invalid request error");
+        };
+        assert!(
+            message.contains("path is a directory"),
+            "unexpected error message: {message}"
+        );
+        assert!(
+            !message.contains("Is a directory"),
+            "directory should be rejected before rollout reading: {message}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn read_thread_by_rollout_path_rejects_non_file() {
+        let home = TempDir::new().expect("temp dir");
+        let store = LocalThreadStore::new(test_config(home.path()), None);
+        let socket_path = home.path().join("rollout.sock");
+        let _listener = std::os::unix::net::UnixListener::bind(&socket_path).expect("unix socket");
+
+        let err = store
+            .read_thread_by_rollout_path(socket_path, false, false)
+            .await
+            .expect_err("non-file rollout path should be rejected");
+        let ThreadStoreError::InvalidRequest { message } = err else {
+            panic!("expected invalid request error");
+        };
+        assert!(
+            message.contains("path is not a file"),
+            "unexpected error message: {message}"
+        );
     }
 
     #[tokio::test]

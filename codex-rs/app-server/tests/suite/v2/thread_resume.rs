@@ -133,6 +133,54 @@ async fn thread_fork_rejects_archived_session_by_id() -> Result<()> {
 }
 
 #[tokio::test]
+async fn thread_resume_and_fork_reject_explicit_directory_path() -> Result<()> {
+    let server = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    create_config_toml(codex_home.path(), &server.uri())?;
+    let thread_id = create_fake_rollout(
+        codex_home.path(),
+        "2025-01-05T12-00-00",
+        "2025-01-05T12:00:00Z",
+        "Saved user message",
+        Some("mock_provider"),
+        None,
+    )?;
+
+    let mut app_server = AppServerProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
+
+    let resume_id = app_server
+        .send_thread_resume_request(ThreadResumeParams {
+            thread_id: thread_id.clone(),
+            path: Some(codex_home.path().to_path_buf()),
+            ..Default::default()
+        })
+        .await?;
+    let resume_err: JSONRPCError = timeout(
+        DEFAULT_READ_TIMEOUT,
+        app_server.read_stream_until_error_message(RequestId::Integer(resume_id)),
+    )
+    .await??;
+    assert_directory_path_error(resume_err);
+
+    let fork_id = app_server
+        .send_thread_fork_request(ThreadForkParams {
+            thread_id,
+            path: Some(codex_home.path().to_path_buf()),
+            ..Default::default()
+        })
+        .await?;
+    let fork_err: JSONRPCError = timeout(
+        DEFAULT_READ_TIMEOUT,
+        app_server.read_stream_until_error_message(RequestId::Integer(fork_id)),
+    )
+    .await??;
+    assert_directory_path_error(fork_err);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn turn_start_client_id_reaches_notifications_and_thread_history() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
@@ -244,6 +292,18 @@ fn assert_archived_thread_error(error: JSONRPCError, thread_id: &str) {
                 "`codex unarchive {thread_id}` to unarchive it first"
             )),
         "unexpected archived thread error: {message}"
+    );
+}
+
+fn assert_directory_path_error(error: JSONRPCError) {
+    let message = error.error.message;
+    assert!(
+        message.contains("path is a directory"),
+        "unexpected directory path error: {message}"
+    );
+    assert!(
+        !message.contains("Is a directory"),
+        "directory should be rejected before rollout reading: {message}"
     );
 }
 
