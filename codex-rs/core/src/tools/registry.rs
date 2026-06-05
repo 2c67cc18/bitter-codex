@@ -26,13 +26,16 @@ pub(crate) trait CoreToolRuntime: ToolExecutor<ToolInvocation> {
         matches!(payload, ToolPayload::Function { .. })
     }
 
+    fn waits_for_runtime_cancellation(&self) -> bool {
+        false
+    }
+
     fn telemetry_tags<'a>(
         &'a self,
         _invocation: &'a ToolInvocation,
     ) -> BoxFuture<'a, ToolTelemetryTags> {
         Box::pin(async { Vec::new() })
     }
-
 }
 
 pub(crate) trait ToolArgumentDiffConsumer: Send {
@@ -62,8 +65,6 @@ impl AnyToolResult {
     }
 }
 
-
-
 pub struct ToolRegistry {
     tools: HashMap<ToolName, Arc<dyn CoreToolRuntime>>,
 }
@@ -90,10 +91,14 @@ impl ToolRegistry {
         self.tools.get(name).map(Arc::clone)
     }
 
-
     pub(crate) fn supports_parallel_tool_calls(&self, name: &ToolName) -> Option<bool> {
         let tool = self.tool(name)?;
         Some(tool.supports_parallel_tool_calls())
+    }
+
+    pub(crate) fn waits_for_runtime_cancellation(&self, name: &ToolName) -> Option<bool> {
+        let tool = self.tool(name)?;
+        Some(tool.waits_for_runtime_cancellation())
     }
 
     #[allow(dead_code)]

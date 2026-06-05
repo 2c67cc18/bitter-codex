@@ -48,7 +48,6 @@ impl ToolCallRuntime {
         }
     }
 
-
     #[instrument(level = "trace", skip_all)]
     pub(crate) fn handle_tool_call(
         self,
@@ -76,10 +75,12 @@ impl ToolCallRuntime {
         cancellation_token: CancellationToken,
     ) -> impl std::future::Future<Output = Result<AnyToolResult, FunctionCallError>> {
         let supports_parallel = self.router.tool_supports_parallel(&call);
+        let wait_for_runtime_cancellation = self.router.tool_waits_for_runtime_cancellation(&call);
         let router = Arc::clone(&self.router);
         let session = Arc::clone(&self.session);
         let turn = Arc::clone(&self.turn_context);
         let lock = Arc::clone(&self.parallel_execution);
+        let invocation_cancellation_token = cancellation_token.clone();
         let started = Instant::now();
         let terminal_outcome_reached = Arc::new(AtomicBool::new(false));
         let dispatch_terminal_outcome_reached = Arc::clone(&terminal_outcome_reached);
@@ -107,6 +108,7 @@ impl ToolCallRuntime {
                         session,
                         turn,
                         dispatch_call,
+                        invocation_cancellation_token,
                         dispatch_terminal_outcome_reached,
                     )
                     .instrument(dispatch_span.clone())
@@ -122,15 +124,25 @@ impl ToolCallRuntime {
                     } else {
                         let secs = started.elapsed().as_secs_f32().max(0.1);
                         abort_dispatch_span.record("aborted", true);
-                        handle.abort();
-                        match handle.await {
-                            Ok(result) => result,
-                            Err(err) if err.is_cancelled() => {
-                                let response = Self::aborted_response(&call, secs);
-                                Ok(response)
+                        if wait_for_runtime_cancellation {
+                            if terminal_outcome_reached.swap(true, Ordering::AcqRel) {
+                                return handle.await.map_err(Self::tool_task_join_error)?;
                             }
-                            Err(err) => Err(Self::tool_task_join_error(err)),
+                            match handle.await {
+                                Ok(_) => {}
+                                Err(err) if err.is_cancelled() => {}
+                                Err(err) => return Err(Self::tool_task_join_error(err)),
+                            }
+                        } else {
+                            handle.abort();
+                            match handle.await {
+                                Ok(result) => return result,
+                                Err(err) if err.is_cancelled() => {}
+                                Err(err) => return Err(Self::tool_task_join_error(err)),
+                            }
                         }
+                        let response = Self::aborted_response(&call, secs);
+                        Ok(response)
                     }
                 },
             }

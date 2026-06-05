@@ -7,6 +7,7 @@ use codex_utils_output_truncation::TruncationPolicy;
 use rand::Rng;
 use rand::rng;
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
@@ -59,6 +60,7 @@ pub(crate) struct ExecCommandRequest {
     pub max_output_tokens: Option<usize>,
     pub cwd: AbsolutePathBuf,
     pub tty: bool,
+    pub cancellation_token: CancellationToken,
 }
 
 #[derive(Debug)]

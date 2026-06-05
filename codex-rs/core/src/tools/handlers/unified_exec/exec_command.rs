@@ -69,6 +69,7 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
             turn,
             call_id,
             payload,
+            cancellation_token,
             ..
         } = invocation;
 
@@ -122,6 +123,7 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
                     max_output_tokens,
                     cwd,
                     tty,
+                    cancellation_token,
                 },
                 &context,
             )
@@ -138,6 +140,10 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
 impl CoreToolRuntime for ExecCommandHandler {
     fn matches_kind(&self, payload: &ToolPayload) -> bool {
         matches!(payload, ToolPayload::Function { .. })
+    }
+
+    fn waits_for_runtime_cancellation(&self) -> bool {
+        true
     }
 }
 

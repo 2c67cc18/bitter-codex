@@ -217,6 +217,7 @@ impl UnifiedExecProcessManager {
             &output_closed,
             &output_closed_notify,
             &cancellation_token,
+            Some(&request.cancellation_token),
             None,
             deadline,
         )
@@ -352,6 +353,7 @@ impl UnifiedExecProcessManager {
             &output_closed,
             &output_closed_notify,
             &cancellation_token,
+            None,
             pause_state,
             deadline,
         )
@@ -555,6 +557,7 @@ impl UnifiedExecProcessManager {
         output_closed: &Arc<AtomicBool>,
         output_closed_notify: &Arc<Notify>,
         cancellation_token: &CancellationToken,
+        turn_cancellation_token: Option<&CancellationToken>,
         mut pause_state: Option<watch::Receiver<bool>>,
         mut deadline: Instant,
     ) -> Vec<u8> {
@@ -616,9 +619,17 @@ impl UnifiedExecProcessManager {
                 tokio::pin!(notified);
                 let exit_notified = cancellation_token.cancelled();
                 tokio::pin!(exit_notified);
+                let turn_cancelled = async {
+                    match turn_cancellation_token {
+                        Some(token) => token.cancelled().await,
+                        None => std::future::pending::<()>().await,
+                    }
+                };
+                tokio::pin!(turn_cancelled);
                 tokio::select! {
                     _ = &mut notified => {}
                     _ = &mut exit_notified => exit_signal_received = true,
+                    _ = &mut turn_cancelled => break,
                     _ = tokio::time::sleep(remaining) => break,
                     _ = Self::wait_for_pause_change(pause_state.as_ref()) => {}
                 }

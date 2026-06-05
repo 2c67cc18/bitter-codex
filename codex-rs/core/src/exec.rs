@@ -35,6 +35,7 @@ pub const DEFAULT_EXEC_COMMAND_TIMEOUT_MS: u64 = 10_000;
 const TIMEOUT_CODE: i32 = 64;
 const EXIT_CODE_SIGNAL_BASE: i32 = 128;
 const EXEC_TIMEOUT_EXIT_CODE: i32 = 124;
+const CANCELLATION_TERMINATION_GRACE_PERIOD: Duration = Duration::from_millis(50);
 
 const READ_CHUNK_SIZE: usize = 8192;
 const AGGREGATE_BUFFER_INITIAL_CAPACITY: usize = 8 * 1024;
@@ -130,10 +131,7 @@ impl ExecExpiration {
             }
         }
     }
-
-
 }
-
 
 impl ExecCapturePolicy {
     fn retained_bytes_cap(self) -> Option<usize> {
@@ -200,7 +198,6 @@ pub fn build_exec_request(params: ExecParams) -> Result<ExecRequest> {
         arg0,
     })
 }
-
 
 async fn exec(
     params: ExecParams,
@@ -394,15 +391,42 @@ async fn consume_output(
             (exit_status, false)
         }
         outcome = &mut expiration_wait => {
-            kill_child_process_group(&mut child)?;
-            child.start_kill()?;
-            let timed_out = matches!(outcome, Some(ExecExpirationOutcome::TimedOut));
-            let exit_status = if timed_out {
-                synthetic_exit_status(EXIT_CODE_SIGNAL_BASE + TIMEOUT_CODE)
-            } else {
-                synthetic_exit_status(1)
-            };
-            (exit_status, timed_out)
+            match outcome {
+                Some(ExecExpirationOutcome::TimedOut) => {
+                    kill_child_process_group(&mut child)?;
+                    child.start_kill()?;
+                    (synthetic_exit_status(EXIT_CODE_SIGNAL_BASE + TIMEOUT_CODE), true)
+                }
+                Some(ExecExpirationOutcome::Cancelled) => {
+                    let process_group_id = child.id();
+                    let should_escalate = if let Some(process_group_id) = process_group_id {
+                        codex_utils_pty::process_group::terminate_process_group(process_group_id)?
+                    } else {
+                        false
+                    };
+                    match tokio::time::timeout(
+                        CANCELLATION_TERMINATION_GRACE_PERIOD,
+                        child.wait(),
+                    )
+                    .await
+                    {
+                        Ok(status) => {
+                            status?;
+                            if should_escalate && let Some(process_group_id) = process_group_id {
+                                codex_utils_pty::process_group::kill_process_group(
+                                    process_group_id,
+                                )?;
+                            }
+                        }
+                        Err(_) => {
+                            kill_child_process_group(&mut child)?;
+                            child.start_kill()?;
+                        }
+                    }
+                    (synthetic_exit_status(1), false)
+                }
+                None => unreachable!("expiration wait only resolves while expiration is active"),
+            }
         }
         _ = tokio::signal::ctrl_c() => {
             kill_child_process_group(&mut child)?;
@@ -506,4 +530,102 @@ async fn read_output<R: AsyncRead + Unpin + Send + 'static>(
 fn synthetic_exit_status(code: i32) -> ExitStatus {
     use std::os::unix::process::ExitStatusExt;
     std::process::ExitStatus::from_raw(code << 8)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+    use std::io;
+    use tokio::time::timeout;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn process_exec_tool_call_cancellation_allows_sigterm_cleanup() -> Result<()> {
+        let temp_dir = tempfile::TempDir::new()?;
+        let ready_marker = temp_dir.path().join("ready");
+        let cleanup_marker = temp_dir.path().join("cleanup");
+        let descendant_pid_marker = temp_dir.path().join("descendant-pid");
+        let command = vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            r#"(trap '' TERM; sleep 60) &
+printf '%s' "$!" > "$DESCENDANT_PID_MARKER"
+trap 'printf cleaned > "$CLEANUP_MARKER"; exit 0' TERM
+printf ready > "$READY_MARKER"
+while :; do sleep 1; done"#
+                .to_string(),
+        ];
+        let cwd = AbsolutePathBuf::current_dir()?;
+        let mut env: HashMap<String, String> = std::env::vars().collect();
+        env.insert(
+            "READY_MARKER".to_string(),
+            ready_marker.to_string_lossy().into_owned(),
+        );
+        env.insert(
+            "CLEANUP_MARKER".to_string(),
+            cleanup_marker.to_string_lossy().into_owned(),
+        );
+        env.insert(
+            "DESCENDANT_PID_MARKER".to_string(),
+            descendant_pid_marker.to_string_lossy().into_owned(),
+        );
+        let cancel_token = CancellationToken::new();
+        let cancel_tx = cancel_token.clone();
+        tokio::spawn(async move {
+            for _ in 0..50 {
+                if ready_marker.exists() {
+                    cancel_tx.cancel();
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            cancel_tx.cancel();
+        });
+        let params = ExecParams {
+            command,
+            cwd,
+            expiration: ExecExpiration::Cancellation(cancel_token),
+            capture_policy: ExecCapturePolicy::ShellTool,
+            env,
+            justification: None,
+            arg0: None,
+        };
+
+        let result = timeout(Duration::from_secs(5), process_exec_tool_call(params, None))
+            .await
+            .expect("cancellation should stop the process promptly");
+        let output = result.expect("cancellation should return an exec result");
+        assert!(!output.timed_out);
+        assert_eq!(std::fs::read_to_string(cleanup_marker)?, "cleaned");
+
+        let descendant_pid = std::fs::read_to_string(descendant_pid_marker)?
+            .parse::<i32>()
+            .map_err(|error| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("failed to parse descendant pid: {error}"),
+                )
+            })?;
+        let mut killed = false;
+        for _ in 0..20 {
+            if unsafe { libc::kill(descendant_pid, 0) } == -1
+                && let Some(libc::ESRCH) = io::Error::last_os_error().raw_os_error()
+            {
+                killed = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        if !killed {
+            unsafe {
+                libc::kill(descendant_pid, libc::SIGKILL);
+            }
+        }
+        assert!(
+            killed,
+            "TERM-ignoring descendant process with pid {descendant_pid} is still alive"
+        );
+        Ok(())
+    }
 }

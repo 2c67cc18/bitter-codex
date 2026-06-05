@@ -54,6 +54,12 @@ impl ToolRouter {
             .unwrap_or(false)
     }
 
+    pub fn tool_waits_for_runtime_cancellation(&self, call: &ToolCall) -> bool {
+        self.registry
+            .waits_for_runtime_cancellation(&call.tool_name)
+            .unwrap_or(false)
+    }
+
     #[instrument(level = "trace", skip_all, err)]
     pub fn build_tool_call(item: ResponseItem) -> Result<Option<ToolCall>, FunctionCallError> {
         match item {
@@ -95,12 +101,14 @@ impl ToolRouter {
         session: Arc<Session>,
         turn: Arc<TurnContext>,
         call: ToolCall,
+        cancellation_token: tokio_util::sync::CancellationToken,
         terminal_outcome_reached: Arc<AtomicBool>,
     ) -> Result<AnyToolResult, FunctionCallError> {
         self.dispatch_tool_call_inner(
             session,
             turn,
             call,
+            cancellation_token,
             Some(terminal_outcome_reached),
         )
         .await
@@ -112,6 +120,7 @@ impl ToolRouter {
         session: Arc<Session>,
         turn: Arc<TurnContext>,
         call: ToolCall,
+        cancellation_token: tokio_util::sync::CancellationToken,
         terminal_outcome_reached: Option<Arc<AtomicBool>>,
     ) -> Result<AnyToolResult, FunctionCallError> {
         let ToolCall {
@@ -126,6 +135,7 @@ impl ToolRouter {
             call_id,
             tool_name,
             payload,
+            cancellation_token,
         };
 
         self.registry

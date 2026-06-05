@@ -70,7 +70,7 @@ pub fn kill_process_group_by_pid(pid: u32) -> io::Result<()> {
     let pgid = unsafe { libc::getpgid(pid) };
     if pgid == -1 {
         let err = io::Error::last_os_error();
-        if err.kind() != ErrorKind::NotFound {
+        if err.kind() != ErrorKind::NotFound && err.raw_os_error() != Some(libc::ESRCH) {
             return Err(err);
         }
         return Ok(());
@@ -79,7 +79,7 @@ pub fn kill_process_group_by_pid(pid: u32) -> io::Result<()> {
     let result = unsafe { libc::killpg(pgid, libc::SIGKILL) };
     if result == -1 {
         let err = io::Error::last_os_error();
-        if err.kind() != ErrorKind::NotFound {
+        if err.kind() != ErrorKind::NotFound && err.raw_os_error() != Some(libc::ESRCH) {
             return Err(err);
         }
     }
@@ -102,7 +102,7 @@ pub fn terminate_process_group(process_group_id: u32) -> io::Result<bool> {
     let result = unsafe { libc::killpg(pgid, libc::SIGTERM) };
     if result == -1 {
         let err = io::Error::last_os_error();
-        if err.kind() == ErrorKind::NotFound {
+        if err.kind() == ErrorKind::NotFound || err.raw_os_error() == Some(libc::ESRCH) {
             return Ok(false);
         }
         return Err(err);
@@ -126,7 +126,7 @@ pub fn kill_process_group(process_group_id: u32) -> io::Result<()> {
     let result = unsafe { libc::killpg(pgid, libc::SIGKILL) };
     if result == -1 {
         let err = io::Error::last_os_error();
-        if err.kind() != ErrorKind::NotFound {
+        if err.kind() != ErrorKind::NotFound && err.raw_os_error() != Some(libc::ESRCH) {
             return Err(err);
         }
     }
